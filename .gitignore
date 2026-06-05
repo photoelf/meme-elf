@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.playwright-mcp/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+AGENTS.md
+docs/superpowers/
+editor-*.png
+tmp-*.png
