@@ -1,18 +1,33 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
-import type { LayerId, TextEffect, TextLayer, TextAlign, VerticalAlign } from '../../app/types';
+import { isImageLayer, isTextLayer } from '../../app/types';
+import type {
+  EditorLayer,
+  LayerId,
+  TextEffect,
+  TextLayer,
+  TextAlign,
+  VerticalAlign,
+} from '../../app/types';
 
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
+  activeTool: 'pointer' | 'image';
   activeLayerId: LayerId | null;
-  layers: TextLayer[];
+  isImportModalOpen: boolean;
+  layers: EditorLayer[];
+  onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
+  onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
   onBackgroundPointerDown: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
-  onLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onTextLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onRotateImageLayer: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
+  onFlipImageLayerHorizontal: (layerId: LayerId) => void;
+  onFlipImageLayerVertical: (layerId: LayerId) => void;
   onReorderLayers: (
     sourceLayerId: LayerId,
     targetLayerId: LayerId,
@@ -22,14 +37,21 @@ type ControlPanelProps = {
 };
 
 export function ControlPanel({
+  activeTool,
   activeLayerId,
+  isImportModalOpen,
   layers,
+  onOpenAdvancedImportClipboard,
+  onOpenAdvancedImportFile,
   onBackgroundPointerDown,
   onActiveLayerChange,
   onClearActiveLayer,
   onAddLayer,
   onApplySettingsToAllLayers,
-  onLayerChange,
+  onTextLayerChange,
+  onRotateImageLayer,
+  onFlipImageLayerHorizontal,
+  onFlipImageLayerVertical,
   onReorderLayers,
   onRemoveLayer,
 }: ControlPanelProps) {
@@ -55,6 +77,33 @@ export function ControlPanel({
         }
       }}
     >
+      {activeTool === 'image' ? (
+        <div className="inspector-section">
+          <div className="section-heading">
+            <h2 className="section-title">IMAGE</h2>
+            <p className="section-copy">Advanced import</p>
+          </div>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="mini-action-button image-import-button"
+              disabled={isImportModalOpen}
+              onClick={(event) => onOpenAdvancedImportFile(event.currentTarget)}
+            >
+              Advanced import from file
+            </button>
+            <button
+              type="button"
+              className="mini-action-button image-import-button"
+              disabled={isImportModalOpen}
+              onClick={(event) => onOpenAdvancedImportClipboard(event.currentTarget)}
+            >
+              Advanced import from clipboard
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="inspector-section">
         <div className="section-heading">
           <h2 className="section-title">LAYERS</h2>
@@ -89,13 +138,18 @@ export function ControlPanel({
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const placement =
+                    event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+                  const draggedLayerId =
+                    draggingLayerId ?? event.dataTransfer.getData('application/x-meme-elf-layer-id');
 
-                  if (!draggingLayerId || draggingLayerId === layer.id || !dropIndicator) {
+                  if (!draggedLayerId || draggedLayerId === layer.id) {
                     setDropIndicator(null);
                     return;
                   }
 
-                  onReorderLayers(draggingLayerId, layer.id, dropIndicator.placement);
+                  onReorderLayers(draggedLayerId, layer.id, placement);
                   setDraggingLayerId(null);
                   setDropIndicator(null);
                 }}
@@ -111,42 +165,32 @@ export function ControlPanel({
                   );
                 }}
               >
-                <div className="layer-row">
-                  <textarea
-                    id={`${layer.id}-text-input`}
-                    className="layer-row-input"
-                    aria-label={layer.name}
-                    rows={2}
-                    value={layer.text}
-                    onFocus={() => onActiveLayerChange(layer.id)}
-                    onBlur={() => onClearActiveLayer()}
-                    onChange={(event) => onLayerChange(layer.id, { text: event.target.value })}
-                    placeholder={`TEXT ${index + 1}`}
-                  />
-                  <div className="layer-row-swatches">
-                    <input
-                      className="layer-swatch"
-                      type="color"
-                      tabIndex={-1}
-                      value={layer.fillStyle}
-                      onChange={(event) =>
-                        onLayerChange(layer.id, { fillStyle: event.target.value })
-                      }
+                {isTextLayer(layer) ? (
+                  <div className="layer-row">
+                    <textarea
+                      id={`${layer.id}-text-input`}
+                      className="layer-row-input"
+                      aria-label={layer.name}
+                      rows={2}
+                      value={layer.text}
+                      onFocus={() => onActiveLayerChange(layer.id)}
+                      onChange={(event) => onTextLayerChange(layer.id, { text: event.target.value })}
+                      placeholder={`TEXT ${index + 1}`}
                     />
-                    <input
-                      className="layer-swatch"
-                      type="color"
-                      tabIndex={-1}
-                      value={layer.strokeStyle}
-                      onChange={(event) =>
-                        onLayerChange(layer.id, { strokeStyle: event.target.value })
-                      }
-                    />
-                    <button
-                      type="button"
-                      className={`settings-button${isSettingsOpen ? ' settings-button-active' : ''}`}
-                      aria-label={`Settings for ${layer.name}`}
-                      onClick={() => {
+                    <LayerRowActions
+                      isSettingsOpen={isSettingsOpen}
+                      layer={layer}
+                      onDragStateChange={(isDragging) => {
+                        if (!isDragging) {
+                          setDraggingLayerId(null);
+                          setDropIndicator(null);
+                          return;
+                        }
+
+                        setDraggingLayerId(layer.id);
+                        setDropIndicator(null);
+                      }}
+                      onSettingsClick={() => {
                         onActiveLayerChange(layer.id);
                         setOpenSettingsLayerIds((currentLayerIds) =>
                           currentLayerIds.includes(layer.id)
@@ -155,45 +199,90 @@ export function ControlPanel({
                         );
                       }}
                     >
-                      ⚙
-                    </button>
+                      <input
+                        className="layer-swatch"
+                        type="color"
+                        tabIndex={-1}
+                        value={layer.fillStyle}
+                        onChange={(event) =>
+                          onTextLayerChange(layer.id, { fillStyle: event.target.value })
+                        }
+                      />
+                      <input
+                        className="layer-swatch"
+                        type="color"
+                        tabIndex={-1}
+                        value={layer.strokeStyle}
+                        onChange={(event) =>
+                          onTextLayerChange(layer.id, { strokeStyle: event.target.value })
+                        }
+                      />
+                    </LayerRowActions>
+                  </div>
+                ) : (
+                  <div className="layer-row layer-row-image">
                     <button
                       type="button"
-                      className="layer-order-handle"
-                      draggable
-                      aria-label={`Reorder ${layer.name}`}
-                      onDragStart={(event) => {
+                      className="image-layer-button"
+                      aria-label={`${layer.name} layer`}
+                      aria-pressed={layer.id === activeLayerId}
+                      onClick={() => onActiveLayerChange(layer.id)}
+                    >
+                      <span className="image-layer-thumb" aria-hidden="true">
+                        PNG
+                      </span>
+                      <span className="image-layer-copy">
+                        <span className="image-layer-name">{layer.name}</span>
+                        <span className="image-layer-meta">
+                          {layer.sourceSize.width} x {layer.sourceSize.height}
+                        </span>
+                      </span>
+                    </button>
+                    <LayerRowActions
+                      isSettingsOpen={isSettingsOpen}
+                      layer={layer}
+                      onDragStateChange={(isDragging) => {
+                        if (!isDragging) {
+                          setDraggingLayerId(null);
+                          setDropIndicator(null);
+                          return;
+                        }
+
                         setDraggingLayerId(layer.id);
                         setDropIndicator(null);
-                        const row = event.currentTarget.closest('.layer-row');
-
-                        if (row instanceof HTMLElement) {
-                          const rowRect = row.getBoundingClientRect();
-                          const handleRect = event.currentTarget.getBoundingClientRect();
-                          const offsetX = handleRect.left - rowRect.left + handleRect.width / 2;
-                          const offsetY = handleRect.top - rowRect.top + handleRect.height / 2;
-                          event.dataTransfer.setDragImage(row, offsetX, offsetY);
-                        }
                       }}
-                      onDragEnd={() => {
-                        setDraggingLayerId(null);
-                        setDropIndicator(null);
+                      onSettingsClick={() => {
+                        onActiveLayerChange(layer.id);
+                        setOpenSettingsLayerIds((currentLayerIds) =>
+                          currentLayerIds.includes(layer.id)
+                            ? currentLayerIds.filter((currentLayerId) => currentLayerId !== layer.id)
+                            : [...currentLayerIds, layer.id],
+                        );
                       }}
-                    >
-                      ⋮⋮
-                    </button>
+                    />
                   </div>
-                </div>
+                )}
 
                 {isSettingsOpen ? (
                   <div className="settings-popover">
-                    <LayerSettings
-                      layer={layer}
-                      layerCount={layers.length}
-                      onApplySettingsToAllLayers={onApplySettingsToAllLayers}
-                      onLayerChange={onLayerChange}
-                      onRemoveLayer={onRemoveLayer}
-                    />
+                    {isTextLayer(layer) ? (
+                      <LayerSettings
+                        layer={layer}
+                        layerCount={layers.filter(isTextLayer).length}
+                        onApplySettingsToAllLayers={onApplySettingsToAllLayers}
+                        onTextLayerChange={onTextLayerChange}
+                        onRemoveLayer={onRemoveLayer}
+                      />
+                    ) : (
+                      <ImageLayerSettings
+                        layer={layer}
+                        layerCount={layers.length}
+                        onFlipHorizontal={onFlipImageLayerHorizontal}
+                        onFlipVertical={onFlipImageLayerVertical}
+                        onRemoveLayer={onRemoveLayer}
+                        onRotate={onRotateImageLayer}
+                      />
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -205,11 +294,63 @@ export function ControlPanel({
   );
 }
 
+type LayerRowActionsProps = {
+  children?: ReactNode;
+  isSettingsOpen: boolean;
+  layer: EditorLayer;
+  onDragStateChange: (isDragging: boolean) => void;
+  onSettingsClick: () => void;
+};
+
+function LayerRowActions({
+  children,
+  isSettingsOpen,
+  layer,
+  onDragStateChange,
+  onSettingsClick,
+}: LayerRowActionsProps) {
+  return (
+    <div className="layer-row-swatches">
+      {children}
+      <button
+        type="button"
+        className={`settings-button${isSettingsOpen ? ' settings-button-active' : ''}`}
+        aria-label={`Settings for ${layer.name}`}
+        onClick={onSettingsClick}
+      >
+        ⚙
+      </button>
+      <button
+        type="button"
+        className="layer-order-handle"
+        draggable
+        aria-label={`Reorder ${layer.name}`}
+        onDragStart={(event) => {
+          onDragStateChange(true);
+          event.dataTransfer.setData('application/x-meme-elf-layer-id', layer.id);
+          const row = event.currentTarget.closest('.layer-row');
+
+          if (row instanceof HTMLElement) {
+            const rowRect = row.getBoundingClientRect();
+            const handleRect = event.currentTarget.getBoundingClientRect();
+            const offsetX = handleRect.left - rowRect.left + handleRect.width / 2;
+            const offsetY = handleRect.top - rowRect.top + handleRect.height / 2;
+            event.dataTransfer.setDragImage(row, offsetX, offsetY);
+          }
+        }}
+        onDragEnd={() => onDragStateChange(false)}
+      >
+        ⋮⋮
+      </button>
+    </div>
+  );
+}
+
 type LayerSettingsProps = {
   layer: TextLayer;
   layerCount: number;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
-  onLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onTextLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
   onRemoveLayer: (layerId: LayerId) => void;
 };
 
@@ -217,7 +358,7 @@ function LayerSettings({
   layer,
   layerCount,
   onApplySettingsToAllLayers,
-  onLayerChange,
+  onTextLayerChange,
   onRemoveLayer,
 }: LayerSettingsProps) {
   return (
@@ -231,7 +372,7 @@ function LayerSettings({
             id={`font-family-${layer.id}`}
             className="select-input"
             value={layer.fontFamily}
-            onChange={(event) => onLayerChange(layer.id, { fontFamily: event.target.value })}
+            onChange={(event) => onTextLayerChange(layer.id, { fontFamily: event.target.value })}
           >
             {FONT_OPTIONS.map((fontOption) => (
               <option key={fontOption} value={fontOption}>
@@ -252,7 +393,7 @@ function LayerSettings({
             step={1}
             value={layer.fontSize}
             onChange={(event) =>
-              onLayerChange(layer.id, {
+              onTextLayerChange(layer.id, {
                 fontSize: Number(event.target.value),
               })
             }
@@ -264,17 +405,17 @@ function LayerSettings({
         <CheckToggle
           checked={layer.allCaps}
           label="ALL CAPS"
-          onChange={(checked) => onLayerChange(layer.id, { allCaps: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { allCaps: checked })}
         />
         <CheckToggle
           checked={layer.bold}
           label="Bold"
-          onChange={(checked) => onLayerChange(layer.id, { bold: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { bold: checked })}
         />
         <CheckToggle
           checked={layer.italic}
           label="Italic"
-          onChange={(checked) => onLayerChange(layer.id, { italic: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { italic: checked })}
         />
       </div>
 
@@ -286,21 +427,21 @@ function LayerSettings({
             label="Shadow"
             name={`effect-${layer.id}`}
             value="shadow"
-            onChange={(value) => onLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
           />
           <EffectOption
             checked={layer.effect === 'outline'}
             label="Outline"
             name={`effect-${layer.id}`}
             value="outline"
-            onChange={(value) => onLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
           />
           <EffectOption
             checked={layer.effect === 'none'}
             label="None"
             name={`effect-${layer.id}`}
             value="none"
-            onChange={(value) => onLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
           />
         </div>
       </div>
@@ -317,7 +458,7 @@ function LayerSettings({
             step={1}
             value={layer.outlineWidth}
             onChange={(event) =>
-              onLayerChange(layer.id, {
+              onTextLayerChange(layer.id, {
                 outlineWidth: Number(event.target.value),
               })
             }
@@ -337,7 +478,7 @@ function LayerSettings({
             step={0.05}
             value={layer.opacity}
             onChange={(event) =>
-              onLayerChange(layer.id, {
+              onTextLayerChange(layer.id, {
                 opacity: Number(event.target.value),
               })
             }
@@ -355,7 +496,7 @@ function LayerSettings({
             className="select-input"
             value={layer.textAlign}
             onChange={(event) =>
-              onLayerChange(layer.id, { textAlign: event.target.value as TextAlign })
+              onTextLayerChange(layer.id, { textAlign: event.target.value as TextAlign })
             }
           >
             <option value="left">Left</option>
@@ -373,7 +514,7 @@ function LayerSettings({
             className="select-input"
             value={layer.verticalAlign}
             onChange={(event) =>
-              onLayerChange(layer.id, {
+              onTextLayerChange(layer.id, {
                 verticalAlign: event.target.value as VerticalAlign,
               })
             }
@@ -392,6 +533,51 @@ function LayerSettings({
           onClick={() => onApplySettingsToAllLayers(layer.id)}
         >
           Apply to all layers
+        </button>
+        <button
+          type="button"
+          className="apply-all-button remove-layer-button"
+          disabled={layerCount <= 1}
+          onClick={() => onRemoveLayer(layer.id)}
+        >
+          Remove layer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ImageLayerSettings({
+  layer,
+  layerCount,
+  onFlipHorizontal,
+  onFlipVertical,
+  onRemoveLayer,
+  onRotate,
+}: {
+  layer: EditorLayer;
+  layerCount: number;
+  onFlipHorizontal: (layerId: LayerId) => void;
+  onFlipVertical: (layerId: LayerId) => void;
+  onRemoveLayer: (layerId: LayerId) => void;
+  onRotate: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
+}) {
+  if (!isImageLayer(layer)) {
+    return null;
+  }
+
+  return (
+    <div className="image-layer-settings">
+      <p className="section-copy">Transparency is preserved. Move and scale on the canvas, or drag in LAYERS to change stacking.</p>
+      <div className="settings-actions">
+        <button type="button" className="apply-all-button" onClick={() => onRotate(layer.id, 'clockwise')}>
+          Rotate 90 clockwise
+        </button>
+        <button type="button" className="apply-all-button" onClick={() => onFlipHorizontal(layer.id)}>
+          Flip horizontal
+        </button>
+        <button type="button" className="apply-all-button" onClick={() => onFlipVertical(layer.id)}>
+          Flip vertical
         </button>
         <button
           type="button"

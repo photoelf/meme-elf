@@ -1,28 +1,37 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 
-import type { LayerId, TextLayer } from '../../app/types';
+import {
+  getAxisLockedMoveDelta,
+  getTextLayers,
+  resizeImageLayerBox,
+} from '../image/image-layer-utils';
+import { isImageLayer, isTextLayer } from '../../app/types';
+import type { EditorLayer, LayerId, TextLayer, TextBox } from '../../app/types';
 import { getTextLayoutMetrics, renderPreview } from '../canvas/canvas-renderer';
 
 type PreviewCanvasProps = {
   activeLayerId: LayerId | null;
   canvasRef?: RefObject<HTMLCanvasElement | null>;
   image: HTMLImageElement | null;
+  isStageHovered: boolean;
   width: number;
   height: number;
-  layers: TextLayer[];
+  layers: EditorLayer[];
+  previewPan?: Point;
+  previewZoomFactor?: number;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onLayerChange: (layerId: LayerId, updates: Partial<EditorLayer>) => void;
 };
 
 type InteractionMode =
-  | { type: 'move'; layerId: LayerId; startPointer: Point; startBox: TextLayer['box'] }
+  | { type: 'move'; layerId: LayerId; startPointer: Point; startBox: EditorLayer['box'] }
   | {
       type: 'resize';
       axisX: 'left' | 'right' | null;
       axisY: 'top' | 'bottom' | null;
       layerId: LayerId;
       startPointer: Point;
-      startBox: TextLayer['box'];
+      startBox: EditorLayer['box'];
     }
   | { type: 'rotate'; layerId: LayerId; startAngle: number; startRotation: number }
   | null;
@@ -51,9 +60,12 @@ export function PreviewCanvas({
   activeLayerId,
   canvasRef,
   image,
+  isStageHovered,
   width,
   height,
   layers,
+  previewPan = { x: 0, y: 0 },
+  previewZoomFactor = 1,
   onActiveLayerChange,
   onLayerChange,
 }: PreviewCanvasProps) {
@@ -62,9 +74,10 @@ export function PreviewCanvas({
   const interactionRef = useRef<InteractionMode>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resolvedCanvasRef = canvasRef ?? internalCanvasRef;
-  const [isPointerInside, setIsPointerInside] = useState(false);
   const [isInteracting, setIsInteracting] = useState(false);
   const [editingLayerId, setEditingLayerId] = useState<LayerId | null>(null);
+  const [isPreviewSurfaceHovered, setIsPreviewSurfaceHovered] = useState(false);
+  const textLayers = getTextLayers(layers);
 
   useEffect(() => {
     const canvas = resolvedCanvasRef.current;
@@ -81,16 +94,23 @@ export function PreviewCanvas({
 
     context.clearRect(0, 0, width, height);
 
-    renderPreview(context, image, { width, height }, layers);
-  }, [height, image, layers, resolvedCanvasRef, width]);
+    renderPreview(
+      context,
+      image,
+      { width, height },
+      editingLayerId
+        ? layers.filter((layer) => !isTextLayer(layer) || layer.id !== editingLayerId)
+        : layers,
+    );
+  }, [editingLayerId, height, image, layers, resolvedCanvasRef, width]);
 
   useEffect(() => {
-    if (!editingLayerId || layers.some((layer) => layer.id === editingLayerId)) {
+    if (!editingLayerId || textLayers.some((layer) => layer.id === editingLayerId)) {
       return;
     }
 
     setEditingLayerId(null);
-  }, [editingLayerId, layers]);
+  }, [editingLayerId, textLayers]);
 
   useEffect(() => {
     if (!editorRef.current || !editingLayerId) {
@@ -98,16 +118,24 @@ export function PreviewCanvas({
     }
 
     editorRef.current.focus();
-    syncEditableText(editorRef.current, layers.find((layer) => layer.id === editingLayerId)?.text ?? '');
+    syncEditableText(
+      editorRef.current,
+      textLayers.find((layer) => layer.id === editingLayerId)?.text ?? '',
+    );
+    fitEditorTextToBounds(
+      editorRef.current,
+      textLayers.find((layer) => layer.id === editingLayerId) ?? null,
+      previewZoomFactor,
+    );
     moveCaretToEnd(editorRef.current);
-  }, [editingLayerId]);
+  }, [editingLayerId, previewZoomFactor, textLayers]);
 
   useEffect(() => {
     if (!editingLayerId || !editorRef.current) {
       return;
     }
 
-    const editingLayer = layers.find((layer) => layer.id === editingLayerId);
+    const editingLayer = textLayers.find((layer) => layer.id === editingLayerId);
 
     if (!editingLayer) {
       return;
@@ -116,7 +144,9 @@ export function PreviewCanvas({
     if (editorRef.current.innerText !== editingLayer.text) {
       syncEditableText(editorRef.current, editingLayer.text);
     }
-  }, [editingLayerId, layers]);
+
+    fitEditorTextToBounds(editorRef.current, editingLayer, previewZoomFactor);
+  }, [editingLayerId, previewZoomFactor, textLayers]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -131,29 +161,50 @@ export function PreviewCanvas({
       }
 
       const interaction = interactionRef.current;
+      const layer = layers.find((candidateLayer) => candidateLayer.id === interaction.layerId);
+
+      if (!layer) {
+        return;
+      }
 
       if (interaction.type === 'move') {
-        const deltaX = point.x - interaction.startPointer.x;
-        const deltaY = point.y - interaction.startPointer.y;
+        const moveDelta = isImageLayer(layer) && event.shiftKey
+          ? getAxisLockedMoveDelta({
+              x: point.x - interaction.startPointer.x,
+              y: point.y - interaction.startPointer.y,
+            })
+          : {
+              x: point.x - interaction.startPointer.x,
+              y: point.y - interaction.startPointer.y,
+            };
 
         onLayerChange(interaction.layerId, {
           box: {
             ...interaction.startBox,
-            x: interaction.startBox.x + deltaX,
-            y: interaction.startBox.y + deltaY,
+            x: interaction.startBox.x + moveDelta.x,
+            y: interaction.startBox.y + moveDelta.y,
           },
         });
         return;
       }
 
       if (interaction.type === 'resize') {
-        const nextBox = resizeBoxFromLocalAxes(
-          interaction.startBox,
-          interaction.axisX,
-          interaction.axisY,
-          point.x - interaction.startPointer.x,
-          point.y - interaction.startPointer.y,
-        );
+        const nextBox = isImageLayer(layer)
+          ? resizeImageLayerBox({
+              startBox: interaction.startBox,
+              axisX: interaction.axisX,
+              axisY: interaction.axisY,
+              deltaX: point.x - interaction.startPointer.x,
+              deltaY: point.y - interaction.startPointer.y,
+              preserveAspectRatio: event.shiftKey,
+            })
+          : resizeBoxFromLocalAxes(
+              interaction.startBox,
+              interaction.axisX,
+              interaction.axisY,
+              point.x - interaction.startPointer.x,
+              point.y - interaction.startPointer.y,
+            );
 
         onLayerChange(interaction.layerId, {
           box: nextBox,
@@ -162,12 +213,6 @@ export function PreviewCanvas({
       }
 
       if (interaction.type === 'rotate') {
-        const layer = layers.find((candidateLayer) => candidateLayer.id === interaction.layerId);
-
-        if (!layer) {
-          return;
-        }
-
         const center = getBoxCenter(layer.box);
         const currentAngle = Math.atan2(point.y - center.y, point.x - center.x);
 
@@ -192,166 +237,210 @@ export function PreviewCanvas({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [height, layers, onLayerChange, width]);
+  }, [height, layers, onLayerChange, textLayers, width]);
 
-  const isOverlayVisible = isPointerInside || isInteracting || editingLayerId !== null;
+  const isOverlayVisible =
+    isStageHovered || isPreviewSurfaceHovered || isInteracting || editingLayerId !== null;
 
   return (
-    <div
-      ref={shellRef}
-      className={`preview-surface${isOverlayVisible ? ' preview-surface-overlay-visible' : ''}`}
-      onPointerEnter={() => setIsPointerInside(true)}
-      onPointerLeave={() => setIsPointerInside(false)}
-    >
-      <canvas
-        ref={resolvedCanvasRef}
-        width={width}
-        height={height}
-        aria-label="Meme preview canvas"
-        className="preview-canvas"
-      />
-      <div className="preview-overlay" aria-hidden="true">
-        {[...layers].reverse().map((layer) => {
-          const isActive = layer.id === activeLayerId;
-          const boxStyle = getOverlayBoxStyle(layer.box, width, height);
-          const isEditing = editingLayerId === layer.id;
+    <div className="preview-viewport">
+      <div className="preview-viewport-content">
+        <div
+          ref={shellRef}
+          className={`preview-surface${isOverlayVisible ? ' preview-surface-overlay-visible' : ''}`}
+          style={{
+            transform: `translate(${previewPan.x}px, ${previewPan.y}px)`,
+            width: `${width * previewZoomFactor}px`,
+            height: `${height * previewZoomFactor}px`,
+          }}
+          onPointerEnter={() => setIsPreviewSurfaceHovered(true)}
+          onPointerLeave={() => setIsPreviewSurfaceHovered(false)}
+          onPointerDown={(event) => {
+            if ((event.button === 1 || event.button === 2) || event.target !== event.currentTarget) {
+              return;
+            }
 
-          return (
-            <div
-              key={layer.id}
-              className={`transform-box${isActive ? ' transform-box-active' : ''}`}
-              style={boxStyle}
-              onPointerDown={(event) => {
-                if (editingLayerId === layer.id) {
-                  return;
-                }
+            const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
 
-                event.preventDefault();
-                event.stopPropagation();
-                onActiveLayerChange(layer.id);
-                setEditingLayerId(null);
-                const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+            if (!point) {
+              return;
+            }
 
-                if (!point) {
-                  return;
-                }
+            const targetLayer = getTopLayerAtPoint(layers, point);
 
-                interactionRef.current = {
-                  type: 'move',
-                  layerId: layer.id,
-                  startPointer: point,
-                  startBox: { ...layer.box },
-                };
-                setIsInteracting(true);
-              }}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onActiveLayerChange(layer.id);
-                setEditingLayerId(layer.id);
-              }}
-            >
-              {isEditing ? (
+            if (!targetLayer) {
+              return;
+            }
+
+            onActiveLayerChange(targetLayer.id);
+            setEditingLayerId(null);
+          }}
+        >
+          <canvas
+            ref={resolvedCanvasRef}
+            width={width}
+            height={height}
+            aria-label="Meme preview canvas"
+            className="preview-canvas"
+          />
+          <div className="preview-overlay" aria-hidden="true">
+            {[...layers].reverse().map((layer) => {
+              const isActive = layer.id === activeLayerId;
+              const boxStyle = getOverlayBoxStyle(layer.box, width, height);
+              const isEditing = isTextLayer(layer) && editingLayerId === layer.id;
+
+              return (
                 <div
-                  ref={editorRef}
-                  className="canvas-text-editor"
-                  aria-label={`Edit ${layer.name}`}
-                  contentEditable="plaintext-only"
-                  suppressContentEditableWarning
-                  style={getEditorTextStyle(layer)}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onBlur={() => setEditingLayerId(null)}
-                  onInput={(event) =>
-                    onLayerChange(layer.id, { text: (event.currentTarget as HTMLDivElement).innerText })
-                  }
-                  onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setEditingLayerId(null);
+                  key={layer.id}
+                  className={`transform-box transform-box-${layer.kind}${isActive ? ' transform-box-active' : ''}`}
+                  style={boxStyle}
+                  onPointerDown={(event) => {
+                    if ((event.button === 1 || event.button === 2) || editingLayerId === layer.id) {
+                      return;
                     }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onActiveLayerChange(layer.id);
+                    setEditingLayerId(null);
+                    const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+                    if (!point) {
+                      return;
+                    }
+
+                    interactionRef.current = {
+                      type: 'move',
+                      layerId: layer.id,
+                      startPointer: point,
+                      startBox: { ...layer.box },
+                    };
+                    setIsInteracting(true);
                   }}
-                />
-              ) : null}
-              {isOverlayVisible ? (
-                <>
-                  {RESIZE_HANDLES.map(({ axisX, axisY, className }) => (
-                    <button
-                      key={`${axisX ?? 'center'}-${axisY ?? 'center'}`}
-                      type="button"
-                      className={`transform-handle ${className}`}
-                      onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const point = getCanvasPoint(
-                          shellRef.current,
-                          width,
-                          height,
-                          event.clientX,
-                          event.clientY,
-                        );
+                  onDoubleClick={(event) => {
+                    if (!isTextLayer(layer)) {
+                      return;
+                    }
 
-                        if (!point) {
-                          return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onActiveLayerChange(layer.id);
+                    setEditingLayerId(layer.id);
+                  }}
+                >
+                  {isEditing ? (
+                    <div
+                      ref={editorRef}
+                      className="canvas-text-editor"
+                      aria-label={`Edit ${layer.name}`}
+                      contentEditable="plaintext-only"
+                      suppressContentEditableWarning
+                      style={getEditorTextStyle(layer, previewZoomFactor)}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onBlur={() => setEditingLayerId(null)}
+                      onInput={(event) =>
+                        onLayerChange(layer.id, {
+                          text: (event.currentTarget as HTMLDivElement).innerText,
+                        })
+                      }
+                      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setEditingLayerId(null);
                         }
-
-                        onActiveLayerChange(layer.id);
-                        setEditingLayerId(null);
-                        interactionRef.current = {
-                          type: 'resize',
-                          axisX,
-                          axisY,
-                          layerId: layer.id,
-                          startPointer: point,
-                          startBox: { ...layer.box },
-                        };
-                        setIsInteracting(true);
                       }}
                     />
-                  ))}
-                  <button
-                    type="button"
-                    className="transform-rotate"
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const point = getCanvasPoint(
-                        shellRef.current,
-                        width,
-                        height,
-                        event.clientX,
-                        event.clientY,
-                      );
+                  ) : null}
+                  {isOverlayVisible ? (
+                    <>
+                      {RESIZE_HANDLES.map(({ axisX, axisY, className }) => (
+                        <button
+                          key={`${axisX ?? 'center'}-${axisY ?? 'center'}`}
+                          type="button"
+                          className={`transform-handle ${className}`}
+                          onPointerDown={(event) => {
+                            if (event.button === 1 || event.button === 2) {
+                              return;
+                            }
 
-                      if (!point) {
-                        return;
-                      }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const point = getCanvasPoint(
+                              shellRef.current,
+                              width,
+                              height,
+                              event.clientX,
+                              event.clientY,
+                            );
 
-                      const center = getBoxCenter(layer.box);
-                      onActiveLayerChange(layer.id);
-                      setEditingLayerId(null);
+                            if (!point) {
+                              return;
+                            }
 
-                      interactionRef.current = {
-                        type: 'rotate',
-                        layerId: layer.id,
-                        startAngle: Math.atan2(point.y - center.y, point.x - center.x),
-                        startRotation: layer.box.rotation,
-                      };
-                      setIsInteracting(true);
-                    }}
-                  >
-                    ↻
-                  </button>
-                </>
-              ) : null}
-            </div>
-          );
-        })}
+                            onActiveLayerChange(layer.id);
+                            setEditingLayerId(null);
+                            interactionRef.current = {
+                              type: 'resize',
+                              axisX,
+                              axisY,
+                              layerId: layer.id,
+                              startPointer: point,
+                              startBox: { ...layer.box },
+                            };
+                            setIsInteracting(true);
+                          }}
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="transform-rotate"
+                        onPointerDown={(event) => {
+                          if (event.button === 1 || event.button === 2) {
+                            return;
+                          }
+
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const point = getCanvasPoint(
+                            shellRef.current,
+                            width,
+                            height,
+                            event.clientX,
+                            event.clientY,
+                          );
+
+                          if (!point) {
+                            return;
+                          }
+
+                          const center = getBoxCenter(layer.box);
+                          onActiveLayerChange(layer.id);
+                          setEditingLayerId(null);
+
+                          interactionRef.current = {
+                            type: 'rotate',
+                            layerId: layer.id,
+                            startAngle: Math.atan2(point.y - center.y, point.x - center.x),
+                            startRotation: layer.box.rotation,
+                          };
+                          setIsInteracting(true);
+                        }}
+                      >
+                        ↻
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function getCanvasPoint(
+export function getCanvasPoint(
   shell: HTMLDivElement | null,
   width: number,
   height: number,
@@ -379,8 +468,30 @@ function getBoxCenter(box: TextLayer['box']) {
   };
 }
 
+function getTopLayerAtPoint(layers: EditorLayer[], point: Point) {
+  return [...layers].reverse().find((layer) => isPointInsideBox(point, layer.box)) ?? null;
+}
+
+function isPointInsideBox(point: Point, box: EditorLayer['box']) {
+  const center = getBoxCenter(box);
+  const localPoint = rotatePoint(
+    {
+      x: point.x - center.x,
+      y: point.y - center.y,
+    },
+    -box.rotation,
+  );
+
+  return (
+    localPoint.x >= -box.width / 2 &&
+    localPoint.x <= box.width / 2 &&
+    localPoint.y >= -box.height / 2 &&
+    localPoint.y <= box.height / 2
+  );
+}
+
 function resizeBoxFromLocalAxes(
-  startBox: TextLayer['box'],
+  startBox: TextBox,
   axisX: 'left' | 'right' | null,
   axisY: 'top' | 'bottom' | null,
   deltaX: number,
@@ -462,43 +573,86 @@ function getOverlayBoxStyle(box: TextLayer['box'], canvasWidth: number, canvasHe
   };
 }
 
-function getEditorTextStyle(layer: TextLayer) {
+function getEditorTextStyle(layer: TextLayer, previewZoomFactor: number) {
   const metrics = getTextLayoutMetrics(layer);
   const computedTextAlign =
     layer.textAlign === 'left' ? 'left' : layer.textAlign === 'right' ? 'right' : 'center';
+  const zoom = Math.max(0.1, previewZoomFactor);
 
   if (!metrics) {
     return {
       color: layer.fillStyle,
       fontFamily: layer.fontFamily,
-      fontSize: `${Math.max(16, Math.min(layer.fontSize, layer.box.height - 12))}px`,
+      fontSize: `${Math.max(8, layer.fontSize) * zoom}px`,
       fontStyle: layer.italic ? 'italic' : 'normal',
       fontWeight: layer.bold ? '900' : '400',
+      inset: '0',
+      lineHeight: `${1.04 * zoom}`,
+      position: 'absolute',
       textAlign: computedTextAlign,
       textTransform: layer.allCaps ? 'uppercase' : 'none',
     } as const;
   }
 
-  const topOffset = Math.max(0, metrics.drawY + layer.box.height / 2);
+  const topOffset = Math.max(0, Math.round(metrics.drawY + layer.box.height / 2));
+  const availableHeight = Math.max(
+    metrics.lineHeight,
+    Math.round(layer.box.height - topOffset - metrics.paddingY),
+  );
 
   return {
     color: layer.fillStyle,
     fontFamily: layer.fontFamily,
-    fontSize: `${metrics.fontSize}px`,
+    fontSize: `${metrics.fontSize * zoom}px`,
     fontStyle: layer.italic ? 'italic' : 'normal',
     fontWeight: layer.bold ? '900' : '400',
+    height: `${availableHeight * zoom}px`,
+    left: `${metrics.paddingX * zoom}px`,
+    lineHeight: `${metrics.lineHeight * zoom}px`,
+    maxHeight: `${availableHeight * zoom}px`,
+    position: 'absolute',
     textAlign: computedTextAlign,
     textTransform: layer.allCaps ? 'uppercase' : 'none',
-    paddingTop: `${topOffset}px`,
-    paddingRight: `${metrics.paddingX}px`,
-    paddingBottom: `${metrics.paddingY}px`,
-    paddingLeft: `${metrics.paddingX}px`,
-    lineHeight: `${metrics.lineHeight}px`,
+    top: `${topOffset * zoom}px`,
+    width: `${metrics.innerWidth * zoom}px`,
   } as const;
 }
 
 function syncEditableText(element: HTMLDivElement, text: string) {
   element.innerText = text;
+}
+
+function fitEditorTextToBounds(
+  element: HTMLDivElement,
+  layer: TextLayer | null,
+  previewZoomFactor: number,
+) {
+  if (!layer) {
+    return;
+  }
+
+  const baseMetrics = getTextLayoutMetrics(layer);
+
+  if (!baseMetrics) {
+    return;
+  }
+
+  const zoom = Math.max(0.1, previewZoomFactor);
+  let fontSize = Math.max(8 * zoom, baseMetrics.fontSize * zoom);
+  let lineHeight = Math.max(1, baseMetrics.lineHeight * zoom);
+
+  element.style.fontSize = `${fontSize}px`;
+  element.style.lineHeight = `${lineHeight}px`;
+
+  while (
+    fontSize > 8 &&
+    (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth)
+  ) {
+    fontSize -= 1;
+    lineHeight = Math.max(1, Math.round(fontSize * 1.02));
+    element.style.fontSize = `${fontSize}px`;
+    element.style.lineHeight = `${lineHeight}px`;
+  }
 }
 
 function moveCaretToEnd(element: HTMLDivElement) {

@@ -1,4 +1,12 @@
-import type { AppState, TextBox, TextLayer, VerticalAlign } from './types';
+import type {
+  AdvancedImportPlacementMode,
+  AppState,
+  BaseLayer,
+  LayerKind,
+  TextBox,
+  TextLayer,
+  VerticalAlign,
+} from './types';
 
 export const DEFAULT_CANVAS_SIZE = {
   width: 800,
@@ -11,6 +19,8 @@ export const DEFAULT_FONT_SIZE = 90;
 export const DEFAULT_FILL = '#ffffff';
 export const DEFAULT_STROKE = '#000000';
 export const DEFAULT_OUTLINE_WIDTH = 5;
+export const DEFAULT_PREVIEW_ZOOM_FACTOR = 1;
+export const DEFAULT_ADVANCED_IMPORT_PLACEMENT: AdvancedImportPlacementMode = 'inside-canvas';
 
 function createDefaultTextBox(y: number, height: number): TextBox {
   return {
@@ -22,6 +32,21 @@ function createDefaultTextBox(y: number, height: number): TextBox {
   };
 }
 
+function createBaseLayer<K extends LayerKind>(
+  kind: K,
+  id: TextLayer['id'],
+  name: string,
+  box: TextBox,
+): BaseLayer & { kind: K } {
+  return {
+    kind,
+    id,
+    name,
+    box,
+    opacity: 1,
+  };
+}
+
 export function createTextLayer(
   id: TextLayer['id'],
   name: string,
@@ -30,18 +55,16 @@ export function createTextLayer(
 ): TextLayer {
   const isMiddle = verticalAlign === 'middle';
   const defaultHeight = isMiddle ? 140 : 110;
+  const box = createDefaultTextBox(y, defaultHeight);
 
   return {
-    id,
-    name,
+    ...createBaseLayer('text', id, name, box),
     text: '',
-    box: createDefaultTextBox(y, defaultHeight),
     fontFamily: DEFAULT_FONT_FAMILY,
     fontSize: DEFAULT_FONT_SIZE,
     fillStyle: DEFAULT_FILL,
     strokeStyle: DEFAULT_STROKE,
     outlineWidth: DEFAULT_OUTLINE_WIDTH,
-    opacity: 1,
     textAlign: 'center',
     verticalAlign,
     effect: 'outline',
@@ -62,5 +85,8 @@ export function createDefaultAppState(): AppState {
     ],
     activeLayerId: null,
     errorMessage: null,
+    previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
+    preInsertModalDraft: null,
+    preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
   };
 }

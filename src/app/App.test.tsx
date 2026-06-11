@@ -1,20 +1,25 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import { App } from './App';
+import { getCanvasPoint } from '../features/preview/preview-canvas';
 
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
   loadImageElementFromFile: vi.fn(),
   readImageFromClipboard: vi.fn(),
+  readImageFromClipboardResult: vi.fn(),
+  revokeLoadedImageObjectUrl: vi.fn(),
 }));
 
 vi.mock('../features/clipboard/clipboard-service', () => ({
   extractImageFromPasteEvent: mocks.extractImageFromPasteEvent,
   readImageFromClipboard: mocks.readImageFromClipboard,
+  readImageFromClipboardResult: mocks.readImageFromClipboardResult,
 }));
 
 vi.mock('../features/image/image-loader', () => ({
   loadImageElementFromFile: mocks.loadImageElementFromFile,
+  revokeLoadedImageObjectUrl: mocks.revokeLoadedImageObjectUrl,
 }));
 
 function createImageStub(width = 1200, height = 800) {
@@ -25,10 +30,23 @@ function createImageStub(width = 1200, height = 800) {
   } as HTMLImageElement;
 }
 
+function createImageElement(width = 1200, height = 800) {
+  const image = document.createElement('img');
+  image.src = 'blob:test-image';
+  Object.defineProperty(image, 'naturalWidth', { configurable: true, value: width });
+  Object.defineProperty(image, 'naturalHeight', { configurable: true, value: height });
+  return image as HTMLImageElement;
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     document.documentElement.dataset.theme = '';
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
+    mocks.readImageFromClipboardResult.mockImplementation(async () => {
+      const image = await mocks.readImageFromClipboard();
+      return image ? { image, reason: null } : { image: null, reason: 'no-image' };
+    });
   });
 
   it('renders the meme-elf heading, editor toolbar, and inspector fields', () => {
@@ -76,15 +94,815 @@ describe('App', () => {
     mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
 
     render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [file] },
     });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/meme\.png loaded/i)).toBeInTheDocument();
     });
 
     expect(mocks.loadImageElementFromFile).toHaveBeenCalledWith(file);
+  });
+
+  it('shows upload image preview controls before replacing the base image', async () => {
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [file] },
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByLabelText(/pre-insert preview/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /crop mode/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate 90 counter-clockwise/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /flip horizontal/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /flip vertical/i })).toBeInTheDocument();
+    expect(screen.getByText('1200 x 800')).toBeInTheDocument();
+    expect(container.querySelector('.pre-insert-preview-canvas')).toBeInTheDocument();
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+  });
+
+  it('keeps the current base image when upload modal is cancelled', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const replacementFile = new File(['replacement-image'], 'replacement.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(1200, 800));
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [baseFile] },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/base\.png loaded/i)).toBeInTheDocument();
+    });
+
+    expect(container.querySelector('.preview-canvas')).toHaveAttribute('width', '900');
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [replacementFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/base\.png loaded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/replacement\.png loaded/i)).not.toBeInTheDocument();
+    expect(container.querySelector('.preview-canvas')).toHaveAttribute('width', '900');
+  });
+
+  it('adds a new image layer from the advanced file import flow and selects it', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /image 1 layer/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /settings for image 1/i })).toBeInTheDocument();
+  });
+
+  it('creates newly inserted image layers as the topmost stack entry', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const firstLayerFile = new File(['layer-image'], 'sticker-1.png', { type: 'image/png' });
+    const secondLayerFile = new File(['layer-image'], 'sticker-2.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [firstLayerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker-1\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [secondLayerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker-2\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    const layerButtons = screen.getAllByRole('button', { name: /image \d layer/i });
+    expect(layerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Image 2 layer',
+      'Image 1 layer',
+    ]);
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 900,
+      height: 900,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(previewSurface);
+    const topmostImageBox = container.querySelector('.transform-box-image.transform-box-active') as HTMLDivElement;
+    fireEvent.pointerDown(topmostImageBox, { button: 0, clientX: 450, clientY: 450 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 2 layer/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+  });
+
+  it('opens the pre-insert modal for advanced file import instead of inserting immediately', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/advanced import file/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sticker\.png added as image layer/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /image 1 layer/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the pre-insert modal for advanced clipboard import', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValueOnce(createImageStub(900, 900));
+    mocks.readImageFromClipboard.mockResolvedValue(createImageStub(512, 256));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    });
+
+    expect(mocks.readImageFromClipboard).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/advanced import clipboard/i)).toBeInTheDocument();
+    expect(screen.queryByText(/image pasted from the clipboard/i)).not.toBeInTheDocument();
+  });
+
+  it('persists advanced import placement selection across modal sessions', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const firstLayerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    const secondLayerFile = new File(['layer-image'], 'sticker-2.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200))
+      .mockResolvedValueOnce(createImageStub(320, 160));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [firstLayerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+
+    fireEvent.change(screen.getByRole('combobox', { name: /placement mode/i }), {
+      target: { value: 'outside-right' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [secondLayerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+
+    expect(screen.getByRole('combobox', { name: /placement mode/i })).toHaveValue('outside-right');
+  });
+
+  it('confirms advanced import into an image layer without replacing the base image', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.change(screen.getByRole('combobox', { name: /placement mode/i }), {
+      target: { value: 'outside-left' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added outside left/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/sticker\.png loaded/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /image 1 layer/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(container.querySelector('.preview-canvas')).toHaveAttribute('width', '1300');
+  });
+
+  it('shows a clipboard fallback message and leaves the scene unchanged when advanced clipboard import fails', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValueOnce(createImageStub(900, 900));
+    mocks.readImageFromClipboard.mockResolvedValue(null);
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/clipboard import could not read an image\. try paste or choose a file/i),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /image 1 layer/i })).not.toBeInTheDocument();
+    expect(container.querySelector('.preview-canvas')).toHaveAttribute('width', '900');
+  });
+
+  it('shows compact inside-vs-outside placement controls in the image rail', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    expect(screen.getByRole('button', { name: /advanced import from file/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /advanced import from clipboard/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('removes image layers without reusing ids or disturbing remaining layer order', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const firstLayerFile = new File(['layer-image'], 'sticker-1.png', { type: 'image/png' });
+    const secondLayerFile = new File(['layer-image'], 'sticker-2.png', { type: 'image/png' });
+    const thirdLayerFile = new File(['layer-image'], 'sticker-3.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200))
+      .mockResolvedValueOnce(createImageStub(320, 160))
+      .mockResolvedValueOnce(createImageStub(280, 140));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    for (const file of [firstLayerFile, secondLayerFile]) {
+      fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+      fireEvent.change(screen.getByLabelText(/upload image file/i), {
+        target: { files: [file] },
+      });
+      await screen.findByRole('dialog', { name: /prepare image/i });
+      fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+      await waitFor(() => {
+        expect(
+          screen.getByText(new RegExp(`${escapeForRegex(file.name)} added as image layer`, 'i')),
+        ).toBeInTheDocument();
+      });
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: /settings for image 1/i }));
+    fireEvent.click(screen.getByRole('button', { name: /remove layer/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /image 1 layer/i })).not.toBeInTheDocument();
+    });
+
+    expect(screen.getAllByRole('button', { name: /image \d layer/i }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Image 2 layer',
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [thirdLayerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker-3\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByRole('button', { name: /image \d layer/i }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Image 3 layer',
+      'Image 2 layer',
+    ]);
+  });
+
+  it('removes the redundant counter-clockwise rotate control from image-layer inspector settings', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /settings for image 1/i }));
+
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /rotate 90 counter-clockwise/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove layer/i })).toBeInTheDocument();
+  });
+
+  it('adjusts canvas zoom from the meme header without changing canvas composition size', () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    const editorToolbar = screen.getByRole('toolbar', { name: /editor actions/i });
+    const zoomToolbar = screen.getByRole('toolbar', { name: /canvas zoom/i });
+    expect(within(editorToolbar).queryByRole('button', { name: /zoom in/i })).not.toBeInTheDocument();
+    expect(within(zoomToolbar).getByRole('button', { name: /zoom in/i })).toBeInTheDocument();
+    expect(screen.queryByText(/preview zoom/i)).not.toBeInTheDocument();
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewViewport = container.querySelector('.preview-viewport') as HTMLDivElement;
+    const previewCanvas = screen.getByLabelText(/meme preview canvas/i);
+    const initialWidthStyle = previewSurface.style.width;
+    const initialHeightStyle = previewSurface.style.height;
+    const initialWidth = previewCanvas.getAttribute('width');
+    const initialHeight = previewCanvas.getAttribute('height');
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+
+    expect(previewSurface.style.width).not.toBe(initialWidthStyle);
+    expect(previewSurface.style.height).not.toBe(initialHeightStyle);
+    expect(previewCanvas).toHaveAttribute('width', initialWidth ?? '');
+    expect(previewCanvas).toHaveAttribute('height', initialHeight ?? '');
+    expect(previewViewport).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom out/i }));
+    expect(previewSurface.style.width).toBe(initialWidthStyle);
+    expect(previewSurface.style.height).toBe(initialHeightStyle);
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    expect(previewSurface.style.width).not.toBe(initialWidthStyle);
+
+    fireEvent.click(screen.getByRole('button', { name: /reset zoom/i }));
+    expect(previewSurface.style.width).toBe(initialWidthStyle);
+  });
+
+  it('zooms the canvas with the mouse wheel while the pointer is over the preview stage', () => {
+    const { container } = render(<App />);
+
+    const previewStage = container.querySelector('.preview-stage') as HTMLDivElement;
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const initialWidthStyle = previewSurface.style.width;
+
+    fireEvent.wheel(previewStage, { deltaY: -100 });
+    expect(previewSurface.style.width).not.toBe(initialWidthStyle);
+
+    fireEvent.wheel(previewStage, { deltaY: 100 });
+    expect(previewSurface.style.width).toBe(initialWidthStyle);
+  });
+
+  it('pans the zoomed canvas with the middle mouse button instead of relying on scrollbars', () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+
+    const previewStage = container.querySelector('.preview-stage') as HTMLDivElement;
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+
+    expect(previewSurface.style.transform).toBe('translate(0px, 0px)');
+
+    fireEvent.mouseDown(previewStage, { button: 1, clientX: 200, clientY: 120 });
+    fireEvent.mouseMove(window, { clientX: 240, clientY: 150 });
+    fireEvent.mouseUp(window);
+
+    expect(previewSurface.style.transform).toBe('translate(40px, 30px)');
+  });
+
+  it('shows preview overlays when hovering the full preview stage', () => {
+    const { container } = render(<App />);
+
+    const previewStage = container.querySelector('.preview-stage') as HTMLDivElement;
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+
+    expect(previewSurface).not.toHaveClass('preview-surface-overlay-visible');
+
+    fireEvent.pointerEnter(previewStage);
+    expect(previewSurface).toHaveClass('preview-surface-overlay-visible');
+
+    fireEvent.pointerLeave(previewStage);
+    expect(previewSurface).not.toHaveClass('preview-surface-overlay-visible');
+  });
+
+  it('keeps preview overlays visible when the pointer moves from the stage onto visible zoom overflow', () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+
+    const previewStage = container.querySelector('.preview-stage') as HTMLDivElement;
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+
+    fireEvent.pointerEnter(previewStage);
+    fireEvent.pointerEnter(previewSurface);
+    expect(previewSurface).toHaveClass('preview-surface-overlay-visible');
+
+    fireEvent.pointerLeave(previewStage);
+
+    expect(previewSurface).toHaveClass('preview-surface-overlay-visible');
+  });
+
+  it('keeps image-layer overlay selection working after zoom', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 1350,
+      height: 1350,
+      left: 0,
+      right: 1350,
+      top: 0,
+      width: 1350,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(previewSurface);
+    fireEvent.focus(screen.getByRole('textbox', { name: /top text/i }));
+    expect(screen.getByRole('button', { name: /image 1 layer/i })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    const imageBox = container.querySelector('.transform-box-image') as HTMLDivElement;
+    fireEvent.pointerDown(imageBox, { button: 0, clientX: 675, clientY: 675 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+  });
+
+  it('maps scaled preview pointer coordinates back into canvas space', () => {
+    const shell = document.createElement('div');
+
+    vi.spyOn(shell, 'getBoundingClientRect').mockReturnValue({
+      bottom: 1350,
+      height: 1350,
+      left: 0,
+      right: 1350,
+      top: 0,
+      width: 1350,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    expect(getCanvasPoint(shell, 900, 900, 675, 675)).toEqual({ x: 450, y: 450 });
+  });
+
+  it('grows the canvas on outside-left insertion and shifts existing overlays to the right', async () => {
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const firstLayerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    const outsideLayerFile = new File(['outside-image'], 'outside.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200))
+      .mockResolvedValueOnce(createImageStub(200, 100));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [firstLayerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 900,
+      height: 900,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerEnter(previewSurface);
+
+    const firstImageBox = await waitFor(() => {
+      const activeImageBox = container.querySelector(
+        '.transform-box-image.transform-box-active',
+      );
+
+      if (!(activeImageBox instanceof HTMLDivElement)) {
+        throw new Error('Initial image layer overlay not ready');
+      }
+
+      return activeImageBox;
+    });
+    const initialLeft = parseFloat(firstImageBox.style.left);
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [outsideLayerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.change(screen.getByRole('combobox', { name: /placement mode/i }), {
+      target: { value: 'outside-left' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/outside\.png added outside left/i)).toBeInTheDocument();
+    });
+
+    const grownCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    expect(grownCanvas.width).toBe(1100);
+    expect(grownCanvas.height).toBe(900);
+
+    const shiftedImageBox = await waitFor(() => {
+      const imageBoxes = Array.from(container.querySelectorAll('.transform-box-image'));
+      const shiftedBox = imageBoxes.find((box) => {
+        return parseFloat((box as HTMLDivElement).style.left) > initialLeft;
+      });
+
+      if (!(shiftedBox instanceof HTMLDivElement)) {
+        throw new Error('Shifted image layer overlay not ready');
+      }
+
+      return shiftedBox;
+    });
+
+    expect(parseFloat(shiftedImageBox.style.left)).toBeGreaterThan(initialLeft);
+    expect(container.querySelector('.transform-box-image.transform-box-active')).toHaveStyle({
+      left: '0%',
+    });
+    expect(container.querySelector('.transform-box-text')).toHaveStyle({
+      left: `${(227 / 1100) * 100}%`,
+    });
+  });
+
+  it('shows image-only transform controls in the left rail and applies them to the selected image layer', async () => {
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /settings for image 1/i }));
+
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /rotate 90 counter-clockwise/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /flip horizontal/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /flip vertical/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove layer/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /rotate 90 clockwise for top/i })).not.toBeInTheDocument();
+
+    const imageBox = container.querySelector('.transform-box-image') as HTMLDivElement;
+    const initialTransform = imageBox.style.transform;
+
+    fireEvent.click(screen.getByRole('button', { name: /rotate 90 clockwise/i }));
+
+    await waitFor(() => {
+      const rotatedBox = container.querySelector('.transform-box-image') as HTMLDivElement;
+      expect(rotatedBox.style.transform).not.toBe(initialTransform);
+      expect(rotatedBox.style.transform).toContain('rotate(');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /flip horizontal/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flip vertical/i }));
+
+    await waitFor(() => {
+      expect(context.scale).toHaveBeenCalledWith(-1, -1);
+    });
+  });
+
+  it('selects an image layer from the canvas overlay', async () => {
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageStub(400, 200));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(baseFile);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
+
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [layerFile] },
+    });
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /add layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/sticker\.png added as image layer/i)).toBeInTheDocument();
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 900,
+      height: 900,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(previewSurface);
+    fireEvent.focus(screen.getByRole('textbox', { name: /top text/i }));
+    const imageBox = container.querySelector('.transform-box-image') as HTMLDivElement;
+    fireEvent.pointerDown(imageBox, { button: 0, clientX: 450, clientY: 450 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    expect(container.querySelector('.transform-box-image.transform-box-active')).toBeInTheDocument();
   });
 
   it('handles pasted images from the global paste event', async () => {
@@ -98,6 +916,361 @@ describe('App', () => {
     });
 
     expect(mocks.extractImageFromPasteEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replace the base image from paste while the upload modal is open', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const replacementFile = new File(['replacement-image'], 'replacement.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageElement(1200, 800));
+    mocks.extractImageFromPasteEvent.mockResolvedValue(createImageStub(1024, 512));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [replacementFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.paste(document);
+
+    expect(mocks.extractImageFromPasteEvent).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '900');
+    expect(screen.queryByText(/image pasted from the clipboard/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/replacement\.png loaded/i)).not.toBeInTheDocument();
+  });
+
+  it('does not copy the background canvas while the upload modal is open', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const blob = new Blob(['png'], { type: 'image/png' });
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const replacementFile = new File(['replacement-image'], 'replacement.png', { type: 'image/png' });
+
+    vi.stubGlobal('ClipboardItem', class ClipboardItemStub {
+      constructor(public items: Record<string, Blob>) {}
+    });
+    Object.assign(navigator, {
+      clipboard: {
+        write,
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+      callback(blob);
+    });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageElement(1200, 800));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [replacementFile] },
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.keyDown(dialog, { ctrlKey: true, key: 'c' });
+    fireEvent.copy(dialog);
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    });
+
+    expect(write).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    expect(screen.queryByText(/image copied to the clipboard/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps tab navigation inside the upload modal while it is open', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const replacementFile = new File(['replacement-image'], 'replacement.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageElement(1200, 800));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    const topTextInput = screen.getByRole('textbox', { name: /top text/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [replacementFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+
+    const closeButton = screen.getByRole('button', { name: /close modal/i });
+    const confirmButton = screen.getByRole('button', { name: /confirm/i });
+
+    confirmButton.focus();
+    fireEvent.keyDown(confirmButton, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+    expect(topTextInput).not.toHaveFocus();
+
+    closeButton.focus();
+    fireEvent.keyDown(closeButton, { key: 'Tab', shiftKey: true });
+    expect(confirmButton).toHaveFocus();
+    expect(topTextInput).not.toHaveFocus();
+  });
+
+  it('restores focus to the upload button after cancelling the real upload flow', async () => {
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    render(<App />);
+
+    const uploadButton = screen.getByRole('button', { name: /upload image/i });
+    const uploadInput = screen.getByLabelText(/upload image file/i);
+    uploadButton.focus();
+
+    fireEvent.click(uploadButton);
+    uploadInput.focus();
+    fireEvent.change(uploadInput, {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    expect(uploadButton).toHaveFocus();
+  });
+
+  it('restores focus to the upload button after confirming the real upload flow', async () => {
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    render(<App />);
+
+    const uploadButton = screen.getByRole('button', { name: /upload image/i });
+    const uploadInput = screen.getByLabelText(/upload image file/i);
+    uploadButton.focus();
+
+    fireEvent.click(uploadButton);
+    uploadInput.focus();
+    fireEvent.change(uploadInput, {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    expect(uploadButton).toHaveFocus();
+  });
+
+  it('keeps an in-flight upload-image request in the base-image flow even if advanced import starts before file decode resolves', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const replacementFile = new File(['replacement-image'], 'replacement.png', { type: 'image/png' });
+    const pendingReplacement = createDeferredPromise<HTMLImageElement>();
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockImplementationOnce(() => pendingReplacement.promise);
+    mocks.readImageFromClipboard.mockResolvedValue(createImageStub(320, 160));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [replacementFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/loading replacement\.png/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    pendingReplacement.resolve(createImageElement(1200, 800));
+
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+
+    expect(within(dialog).getByText(/^upload image$/i)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/^advanced import file$/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/replacement\.png loaded/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/replacement\.png added as image layer/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /image 1 layer/i })).not.toBeInTheDocument();
+  });
+
+  it('restores focus to the advanced import trigger after cancelling advanced file import', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const layerFile = new File(['layer-image'], 'sticker.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile
+      .mockResolvedValueOnce(createImageStub(900, 900))
+      .mockResolvedValueOnce(createImageElement(400, 200));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    const advancedImportButton = screen.getByRole('button', { name: /advanced import from file/i });
+    const uploadInput = screen.getByLabelText(/upload image file/i);
+
+    advancedImportButton.focus();
+    fireEvent.click(advancedImportButton);
+    uploadInput.focus();
+    fireEvent.change(uploadInput, {
+      target: { files: [layerFile] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
+    });
+
+    expect(advancedImportButton).toHaveFocus();
+  });
+
+  it('ignores stale clipboard results when a newer clipboard import action starts before the older one resolves', async () => {
+    const baseClipboardRead = createDeferredPromise<HTMLImageElement | null>();
+    const advancedClipboardRead = createDeferredPromise<HTMLImageElement | null>();
+
+    mocks.readImageFromClipboard
+      .mockImplementationOnce(() => baseClipboardRead.promise)
+      .mockImplementationOnce(() => advancedClipboardRead.promise);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /paste from clipboard/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/reading the clipboard/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/reading the clipboard for advanced import/i)).toBeInTheDocument();
+    });
+
+    advancedClipboardRead.resolve(createImageStub(320, 160));
+
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    expect(within(dialog).getByText(/advanced import clipboard/i)).toBeInTheDocument();
+
+    baseClipboardRead.resolve(createImageStub(1200, 800));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    expect(within(dialog).getByText(/advanced import clipboard/i)).toBeInTheDocument();
+    expect(screen.queryByText(/image loaded from clipboard/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+  });
+
+  it('applies preview transforms before confirming an uploaded base image', async () => {
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /rotate 90 clockwise/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flip horizontal/i }));
+
+    expect(container.querySelector('.pre-insert-preview-canvas')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/meme\.png loaded/i)).toBeInTheDocument();
+    });
+
+    expect(context.rotate).toHaveBeenCalledWith(Math.PI / 2);
+    expect(context.scale).toHaveBeenCalledWith(-1, 1);
+  });
+
+  it('applies a dragged crop box before confirming an uploaded base image', async () => {
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [file] },
+    });
+
+    await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(screen.getByRole('button', { name: /crop mode/i }));
+
+    const previewCanvas = container.querySelector('.pre-insert-preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewCanvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 200,
+      height: 200,
+      left: 0,
+      right: 300,
+      top: 0,
+      width: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(screen.getByLabelText(/pre-insert preview/i), {
+      clientX: 30,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(window, {
+      clientX: 180,
+      clientY: 120,
+    });
+    fireEvent.mouseUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByText('600 x 400')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/meme\.png loaded/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '600');
   });
 
   it('keeps layer ids stable after add, remove, and add again', async () => {
@@ -166,3 +1339,68 @@ describe('App', () => {
     });
   });
 });
+
+function createCanvasContextStub() {
+  return {
+    clearRect: vi.fn(),
+    drawImage: vi.fn(),
+    fillText: vi.fn(),
+    measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
+    restore: vi.fn(),
+    rotate: vi.fn(),
+    scale: vi.fn(),
+    save: vi.fn(),
+    strokeText: vi.fn(),
+    transform: vi.fn(),
+    translate: vi.fn(),
+    fillStyle: '#000000',
+    font: '10px sans-serif',
+    globalAlpha: 1,
+    lineJoin: 'round',
+    lineWidth: 1,
+    shadowBlur: 0,
+    shadowColor: '',
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
+    strokeStyle: '#000000',
+    textAlign: 'start',
+    textBaseline: 'alphabetic',
+  } as unknown as CanvasRenderingContext2D;
+}
+
+async function uploadBaseImage(file: File, expectedCanvasWidth?: number) {
+  fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+  fireEvent.change(screen.getByLabelText(/upload image file/i), {
+    target: { files: [file] },
+  });
+  await screen.findByRole('dialog', { name: /prepare image/i });
+  fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+  await waitFor(() => {
+    expect(screen.getByText(new RegExp(`${escapeForRegex(file.name)} loaded`, 'i'))).toBeInTheDocument();
+  });
+
+  if (expectedCanvasWidth) {
+    await waitFor(() => {
+      expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute(
+        'width',
+        String(expectedCanvasWidth),
+      );
+    });
+  }
+}
+
+function escapeForRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+
+  return { promise, reject, resolve };
+}

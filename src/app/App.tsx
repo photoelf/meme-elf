@@ -4,23 +4,65 @@ import {
   createTextLayer,
   DEFAULT_CANVAS_SIZE,
   DEFAULT_LAYER_EDGE_OFFSET,
+  DEFAULT_PREVIEW_ZOOM_FACTOR,
 } from './default-state';
 import { getContainedCanvasSize } from '../features/canvas/canvas-renderer';
 import {
   extractImageFromPasteEvent,
   readImageFromClipboard,
+  readImageFromClipboardResult,
 } from '../features/clipboard/clipboard-service';
 import { PreviewCanvas } from '../features/preview/preview-canvas';
 import { ControlPanel } from '../features/controls/control-panel';
-import { loadImageElementFromFile } from '../features/image/image-loader';
-import type { AppState, LayerId, TextLayer } from './types';
+import {
+  loadImageElementFromFile,
+  revokeLoadedImageObjectUrl,
+} from '../features/image/image-loader';
+import {
+  createDefaultImageLayer,
+  flipImageLayerHorizontal,
+  flipImageLayerVertical,
+  getDirectionalInsertionLayout,
+  reorderLayerStack,
+  rotateImageLayer90,
+} from '../features/image/image-layer-utils';
+import {
+  normalizeCropDraftBox,
+  resolvePreparedOutputDimensions,
+} from '../features/image/image-crop-utils';
+import {
+  rotateDraftClockwise,
+  rotateDraftCounterClockwise,
+  toggleDraftFlipHorizontal,
+  toggleDraftFlipVertical,
+} from '../features/image/pre-insert-state';
+import { PreInsertModal } from '../features/image/pre-insert-modal';
+import { isImageLayer, isTextLayer } from './types';
+import type { EditorLayer, LayerId, TextLayer } from './types';
 
 const MAX_PREVIEW_WIDTH = 960;
 const DEFAULT_INSPECTOR_WIDTH = 24;
 const MIN_PANEL_WIDTH = 300;
+const PREVIEW_ZOOM_STEP = 0.1;
+const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
+const MAX_PREVIEW_ZOOM_FACTOR = 3;
+type ToolMode = 'pointer' | 'image';
+type ImageInsertionMode =
+  | 'inside-canvas'
+  | 'outside-left'
+  | 'outside-right'
+  | 'outside-top'
+  | 'outside-bottom';
+type ImportTarget =
+  | { kind: 'base' }
+  | { kind: 'advanced-import-file' };
+type ImportRequestContext = {
+  restoreFocusTo: HTMLElement | null;
+  target: ImportTarget;
+};
 
 function createLayersForCanvas(
-  layers: TextLayer[],
+  layers: EditorLayer[],
   currentSize: { width: number; height: number },
   nextSize: { width: number; height: number },
 ) {
@@ -77,6 +119,10 @@ function getStoredInspectorWidth(): number {
   return storedWidth > 0 ? storedWidth : DEFAULT_INSPECTOR_WIDTH;
 }
 
+function clampPreviewZoom(nextZoom: number) {
+  return Math.min(MAX_PREVIEW_ZOOM_FACTOR, Math.max(MIN_PREVIEW_ZOOM_FACTOR, nextZoom));
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -103,6 +149,17 @@ function blurActiveEditable() {
   }
 }
 
+function resolveClipboardRouting(target: EventTarget | null, isPreInsertModalOpen: boolean) {
+  const modalOwnsClipboard = isPreInsertModalOpen;
+  const backgroundCopyAllowed =
+    !modalOwnsClipboard && !isEditableTarget(target) && !hasTextSelection();
+
+  return {
+    backgroundCopyAllowed,
+    modalOwnsClipboard,
+  };
+}
+
 export function App() {
   const [appState, setAppState] = useState(createDefaultAppState);
   const [statusMessage, setStatusMessage] = useState<string | null>(appState.errorMessage);
@@ -111,38 +168,143 @@ export function App() {
   const [inspectorWidth, setInspectorWidth] = useState(getStoredInspectorWidth);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadButtonRef = useRef<HTMLButtonElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const isDraggingSplitRef = useRef(false);
   const nextLayerSequenceRef = useRef(appState.layers.length + 1);
+  const nextImageLayerSequenceRef = useRef(1);
   const lastShortcutCopyAtRef = useRef(0);
+  const latestExplicitClipboardRequestTokenRef = useRef(0);
+  const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
+    restoreFocusTo: null,
+    target: { kind: 'base' },
+  });
+  const preInsertSessionRef = useRef<{
+    pendingUploadFileName: string | null;
+    previousStatusMessage: string | null;
+    requestContext: ImportRequestContext;
+  }>({
+    pendingUploadFileName: null,
+    previousStatusMessage: null,
+    requestContext: {
+      restoreFocusTo: null,
+      target: { kind: 'base' },
+    },
+  });
+  const isPreInsertModalOpenRef = useRef(false);
+  const [activeTool, setActiveTool] = useState<ToolMode>('pointer');
+  const [isPreInsertCropMode, setIsPreInsertCropMode] = useState(false);
+  const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const previewPanSessionRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    startPanX: number;
+    startPanY: number;
+  } | null>(null);
 
-  const activeLayer =
-    appState.layers.find((layer) => layer.id === appState.activeLayerId) ?? null;
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
 
-  function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
-    const canvasSize = getContainedCanvasSize(
-      image.naturalWidth || appState.canvasSize.width,
-      image.naturalHeight || appState.canvasSize.height,
-      MAX_PREVIEW_WIDTH,
-    );
+  function createImportRequestContext(
+    target: ImportTarget,
+    restoreFocusTo: HTMLElement | null,
+  ): ImportRequestContext {
+    return {
+      restoreFocusTo,
+      target,
+    };
+  }
 
-    setAppState((currentState) => ({
-      ...currentState,
-      canvasSize,
-      errorMessage: null,
-      image,
-      layers: createLayersForCanvas(currentState.layers, currentState.canvasSize, canvasSize),
-      status: 'idle',
-    }));
+  function beginExplicitClipboardRequest() {
+    latestExplicitClipboardRequestTokenRef.current += 1;
+    return latestExplicitClipboardRequestTokenRef.current;
+  }
+
+  function isLatestExplicitClipboardRequest(requestToken: number) {
+    return latestExplicitClipboardRequestTokenRef.current === requestToken;
+  }
+
+  function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
+    setAppState((currentState) => {
+      const sourceSize = getImageSourceSize(image, currentState.canvasSize);
+      const canvasSize = getContainedCanvasSize(
+        sourceSize.width,
+        sourceSize.height,
+        MAX_PREVIEW_WIDTH,
+      );
+
+      return {
+        ...currentState,
+        canvasSize,
+        errorMessage: null,
+        image,
+        layers: createLayersForCanvas(currentState.layers, currentState.canvasSize, canvasSize),
+        status: 'idle',
+      };
+    });
     setStatusMessage(nextStatus);
   }
 
-  function updateLayer(layerId: LayerId, updates: Partial<TextLayer>) {
+  function openPreInsertModal(
+    image: HTMLImageElement,
+    fileName: string,
+    sourceKind: 'upload-image' | 'advanced-import-file' | 'advanced-import-clipboard',
+    requestContext: ImportRequestContext,
+  ) {
+    preInsertSessionRef.current = {
+      pendingUploadFileName: fileName,
+      previousStatusMessage: statusMessage,
+      requestContext,
+    };
+    isPreInsertModalOpenRef.current = true;
+    setIsPreInsertCropMode(false);
+    setAppState((currentState) => ({
+      ...currentState,
+      preInsertModalDraft: {
+        pendingSource: {
+          image,
+          sourceKind,
+          sourceSize: {
+            width: image.naturalWidth || currentState.canvasSize.width,
+            height: image.naturalHeight || currentState.canvasSize.height,
+          },
+        },
+        cropBox: null,
+        rotationQuarterTurns: 0,
+        flipHorizontal: false,
+        flipVertical: false,
+        advancedPlacementMode: currentState.preferredAdvancedImportPlacementMode,
+      },
+      status: 'idle',
+    }));
+  }
+
+  function closePreInsertModal(nextStatusMessage: string | null) {
+    const pendingImage = appState.preInsertModalDraft?.pendingSource.image ?? null;
+
+    revokeLoadedImageObjectUrl(pendingImage);
+
+    // Keep mutable session metadata out of app state; only the draft itself drives rendering.
+    preInsertSessionRef.current = {
+      pendingUploadFileName: null,
+      previousStatusMessage: null,
+      requestContext: createImportRequestContext({ kind: 'base' }, null),
+    };
+    isPreInsertModalOpenRef.current = false;
+    setIsPreInsertCropMode(false);
+    setStatusMessage(nextStatusMessage);
+    setAppState((currentState) => ({
+      ...currentState,
+      preInsertModalDraft: null,
+      status: 'idle',
+    }));
+  }
+
+  function updateTextLayer(layerId: LayerId, updates: Partial<TextLayer>) {
     setAppState((currentState) => ({
       ...currentState,
       layers: currentState.layers.map((layer) => {
-        if (layer.id !== layerId) {
+        if (layer.id !== layerId || !isTextLayer(layer)) {
           return layer;
         }
 
@@ -151,18 +313,133 @@ export function App() {
     }));
   }
 
+  function updateLayer(layerId: LayerId, updates: Partial<EditorLayer>) {
+    setAppState((currentState) => ({
+      ...currentState,
+      layers: currentState.layers.map((layer) => {
+        if (layer.id !== layerId) {
+          return layer;
+        }
+
+        if (isTextLayer(layer)) {
+          return {
+            ...layer,
+            ...updates,
+            kind: 'text',
+          };
+        }
+
+        return {
+          ...layer,
+          ...updates,
+          kind: 'image',
+        };
+      }),
+    }));
+  }
+
+  function transformImageLayer(
+    layerId: LayerId,
+    transform: (layer: Extract<EditorLayer, { kind: 'image' }>) => Extract<EditorLayer, { kind: 'image' }>,
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      layers: currentState.layers.map((layer) => {
+        if (layer.id !== layerId || !isImageLayer(layer)) {
+          return layer;
+        }
+
+        return transform(layer);
+      }),
+    }));
+  }
+
+  function addImageLayer(
+    image: CanvasImageSource,
+    fileName: string,
+    insertionMode: ImageInsertionMode,
+  ) {
+    setAppState((currentState) => {
+      const nextSequence = nextImageLayerSequenceRef.current;
+      nextImageLayerSequenceRef.current += 1;
+      const nextLayerId = `image-${nextSequence}`;
+      const sourceSize = getImageSourceSize(
+        image as Pick<HTMLImageElement, 'naturalWidth' | 'naturalHeight'> &
+          Partial<Pick<HTMLCanvasElement, 'width' | 'height'>>,
+        currentState.canvasSize,
+      );
+
+      if (insertionMode === 'inside-canvas') {
+        const nextLayer = createDefaultImageLayer(
+          nextLayerId,
+          nextSequence,
+          image,
+          currentState.canvasSize,
+          sourceSize,
+        );
+
+        return {
+          ...currentState,
+          activeLayerId: nextLayerId,
+          layers: [nextLayer, ...currentState.layers],
+          status: 'idle',
+        };
+      }
+
+      const layout = getDirectionalInsertionLayout({
+        canvasSize: currentState.canvasSize,
+        imageSize: sourceSize,
+        direction: insertionMode,
+        layers: currentState.layers,
+      });
+      const nextBaseImage = currentState.image
+        ? createExpandedBaseImage(
+            currentState.image,
+            currentState.canvasSize,
+            layout.canvasSize,
+            layout.existingContentOffset,
+          )
+        : currentState.image;
+      const nextLayer = {
+        ...createDefaultImageLayer(
+          nextLayerId,
+          nextSequence,
+          image,
+          layout.canvasSize,
+          sourceSize,
+        ),
+        box: layout.insertedBox,
+      };
+
+      return {
+        ...currentState,
+        activeLayerId: nextLayerId,
+        canvasSize: layout.canvasSize,
+        image: nextBaseImage,
+        layers: [nextLayer, ...layout.shiftedLayers],
+        status: 'idle',
+      };
+    });
+
+    setStatusMessage(
+      insertionMode === 'inside-canvas'
+        ? `${fileName} added as image layer.`
+        : `${fileName} added ${insertionMode.replace('-', ' ')}.`,
+    );
+  }
+
   function applyLayerSettingsToAllLayers(sourceLayerId: LayerId) {
     setAppState((currentState) => {
       const sourceLayer = currentState.layers.find((layer) => layer.id === sourceLayerId);
 
-      if (!sourceLayer) {
+      if (!sourceLayer || !isTextLayer(sourceLayer)) {
         return currentState;
       }
 
       return {
         ...currentState,
         layers: currentState.layers.map((layer) =>
-          layer.id === sourceLayerId
+          layer.id === sourceLayerId || !isTextLayer(layer)
             ? layer
             : {
                 ...layer,
@@ -227,16 +504,9 @@ export function App() {
         return currentState;
       }
 
-      const nextLayers = [...currentState.layers];
-      const [movedLayer] = nextLayers.splice(sourceIndex, 1);
-      const adjustedTargetIndex =
-        sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-      const insertIndex = placement === 'before' ? adjustedTargetIndex : adjustedTargetIndex + 1;
-      nextLayers.splice(insertIndex, 0, movedLayer);
-
       return {
         ...currentState,
-        layers: nextLayers,
+        layers: reorderLayerStack(currentState.layers, sourceLayerId, targetLayerId, placement),
       };
     });
   }
@@ -262,9 +532,14 @@ export function App() {
   }
 
   async function handlePasteClick() {
+    const requestToken = beginExplicitClipboardRequest();
     setStatusMessage('Reading the clipboard...');
 
     const image = await readImageFromClipboard();
+
+    if (!isLatestExplicitClipboardRequest(requestToken)) {
+      return;
+    }
 
     if (!image) {
       setStatusMessage('No image was found in the clipboard. Try Ctrl+V or upload a file.');
@@ -274,8 +549,44 @@ export function App() {
     applyLoadedImage(image, 'Image loaded from clipboard.');
   }
 
-  function handleUploadClick() {
+  function handleUploadClick(opener: HTMLButtonElement) {
+    pendingFilePickerRequestRef.current = createImportRequestContext({ kind: 'base' }, opener);
     fileInputRef.current?.click();
+  }
+
+  function handleAdvancedImportFileClick(opener: HTMLButtonElement) {
+    pendingFilePickerRequestRef.current = createImportRequestContext(
+      { kind: 'advanced-import-file' },
+      opener,
+    );
+    fileInputRef.current?.click();
+  }
+
+  async function handleAdvancedImportClipboardClick(opener: HTMLButtonElement) {
+    const requestToken = beginExplicitClipboardRequest();
+    const requestContext = createImportRequestContext(
+      { kind: 'advanced-import-file' },
+      opener,
+    );
+    setStatusMessage('Reading the clipboard for advanced import...');
+
+    const result = await readImageFromClipboardResult();
+
+    if (!isLatestExplicitClipboardRequest(requestToken)) {
+      return;
+    }
+
+    if (!result.image) {
+      setStatusMessage('Clipboard import could not read an image. Try Paste or choose a file.');
+      return;
+    }
+
+    openPreInsertModal(
+      result.image,
+      'Clipboard image',
+      'advanced-import-clipboard',
+      requestContext,
+    );
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -287,13 +598,23 @@ export function App() {
 
     setAppState((currentState) => ({ ...currentState, status: 'loadingImage' }));
     setStatusMessage(`Loading ${file.name}...`);
+    const requestContext = pendingFilePickerRequestRef.current;
+    const sourceKind =
+      requestContext.target.kind === 'advanced-import-file'
+        ? 'advanced-import-file'
+        : 'upload-image';
 
     try {
       const image = await loadImageElementFromFile(file);
-      applyLoadedImage(image, `${file.name} loaded.`);
+      openPreInsertModal(image, file.name, sourceKind, requestContext);
     } catch {
-      setStatusMessage('That file could not be loaded. Try another PNG, JPEG, or WebP image.');
+      setStatusMessage(
+        requestContext.target.kind === 'advanced-import-file'
+          ? 'That advanced import image could not be loaded. Try another PNG, JPEG, or WebP image.'
+          : 'That file could not be loaded. Try another PNG, JPEG, or WebP image.',
+      );
     } finally {
+      pendingFilePickerRequestRef.current = createImportRequestContext({ kind: 'base' }, null);
       event.target.value = '';
     }
   }
@@ -342,7 +663,21 @@ export function App() {
   }
 
   useEffect(() => {
+    isPreInsertModalOpenRef.current = appState.preInsertModalDraft !== null;
+  }, [appState.preInsertModalDraft]);
+
+  useEffect(() => {
     async function handlePasteEvent(event: ClipboardEvent) {
+      const clipboardRouting = resolveClipboardRouting(
+        event.target,
+        isPreInsertModalOpenRef.current,
+      );
+
+      if (clipboardRouting.modalOwnsClipboard) {
+        event.preventDefault();
+        return;
+      }
+
       const image = await extractImageFromPasteEvent(event);
 
       if (!image) {
@@ -368,6 +703,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem('meme-elf.inspector-width', String(inspectorWidth));
   }, [inspectorWidth]);
+
+  useEffect(() => {
+    setPreviewPan({ x: 0, y: 0 });
+  }, [appState.canvasSize.height, appState.canvasSize.width, appState.image]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -400,10 +739,33 @@ export function App() {
   }, [isToolRailCollapsed]);
 
   useEffect(() => {
-    function shouldHandleCanvasCopy(target: EventTarget | null) {
-      return !isEditableTarget(target) && !hasTextSelection();
+    function handleMouseMove(event: MouseEvent) {
+      const panSession = previewPanSessionRef.current;
+
+      if (!panSession) {
+        return;
+      }
+
+      setPreviewPan({
+        x: panSession.startPanX + (event.clientX - panSession.startClientX),
+        y: panSession.startPanY + (event.clientY - panSession.startClientY),
+      });
     }
 
+    function handleMouseUp() {
+      previewPanSessionRef.current = null;
+    }
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [previewPan.x, previewPan.y]);
+
+  useEffect(() => {
     function requestShortcutCopy() {
       const now = Date.now();
 
@@ -416,7 +778,12 @@ export function App() {
     }
 
     function handleCopyEvent(event: ClipboardEvent) {
-      if (!shouldHandleCanvasCopy(event.target)) {
+      const clipboardRouting = resolveClipboardRouting(
+        event.target,
+        isPreInsertModalOpenRef.current,
+      );
+
+      if (!clipboardRouting.backgroundCopyAllowed) {
         return;
       }
 
@@ -435,7 +802,12 @@ export function App() {
         return;
       }
 
-      if (!shouldHandleCanvasCopy(event.target)) {
+      const clipboardRouting = resolveClipboardRouting(
+        event.target,
+        isPreInsertModalOpenRef.current,
+      );
+
+      if (!clipboardRouting.backgroundCopyAllowed) {
         return;
       }
 
@@ -456,6 +828,14 @@ export function App() {
   const workspaceStyle = {
     '--inspector-width': `${inspectorWidth}%`,
   } as CSSProperties;
+  const preInsertDraft = appState.preInsertModalDraft;
+
+  function updatePreviewZoom(resolveNextZoom: (currentZoom: number) => number) {
+    setAppState((currentState) => ({
+      ...currentState,
+      previewZoomFactor: clampPreviewZoom(resolveNextZoom(currentState.previewZoomFactor)),
+    }));
+  }
 
   return (
     <main className="app-shell">
@@ -471,7 +851,12 @@ export function App() {
           >
             Paste from Clipboard
           </button>
-          <button type="button" className="toolbar-button" onClick={handleUploadClick}>
+          <button
+            ref={uploadButtonRef}
+            type="button"
+            className="toolbar-button"
+            onClick={(event) => handleUploadClick(event.currentTarget)}
+          >
             Upload Image
           </button>
           <button
@@ -520,10 +905,21 @@ export function App() {
         >
           <button
             type="button"
-            className="tool-rail-button tool-rail-button-active"
+            className={`tool-rail-button${activeTool === 'pointer' ? ' tool-rail-button-active' : ''}`}
             aria-label="Pointer tool"
+            aria-pressed={activeTool === 'pointer'}
+            onClick={() => setActiveTool('pointer')}
           >
             ↖
+          </button>
+          <button
+            type="button"
+            className={`tool-rail-button${activeTool === 'image' ? ' tool-rail-button-active' : ''}`}
+            aria-label="Image tool"
+            aria-pressed={activeTool === 'image'}
+            onClick={() => setActiveTool('image')}
+          >
+            ▣
           </button>
         </aside>
 
@@ -539,10 +935,70 @@ export function App() {
             }}
           />
           <div className="preview-panel-header">
-            <h2 className="preview-title">MEME</h2>
-            <p className="preview-hint">Paste. Caption. Export.</p>
+            <div className="preview-heading">
+              <h2 className="preview-title">MEME</h2>
+              <p className="preview-hint">Paste. Caption. Export.</p>
+            </div>
+            <div className="preview-toolbar" role="toolbar" aria-label="Canvas zoom">
+              <span className="preview-zoom-label">
+                {Math.round(appState.previewZoomFactor * 100)}%
+              </span>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() =>
+                  updatePreviewZoom((currentZoom) => currentZoom - PREVIEW_ZOOM_STEP)
+                }
+              >
+                Zoom out
+              </button>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() =>
+                  updatePreviewZoom((currentZoom) => currentZoom + PREVIEW_ZOOM_STEP)
+                }
+              >
+                Zoom in
+              </button>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() => updatePreviewZoom(() => DEFAULT_PREVIEW_ZOOM_FACTOR)}
+              >
+                Reset zoom
+              </button>
+            </div>
           </div>
-          <div className="preview-stage">
+          <div
+            className="preview-stage"
+            onPointerEnter={() => setIsPreviewStageHovered(true)}
+            onPointerLeave={() => setIsPreviewStageHovered(false)}
+            onMouseDown={(event) => {
+              if (event.button !== 1) {
+                return;
+              }
+
+              event.preventDefault();
+              previewPanSessionRef.current = {
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                startPanX: previewPan.x,
+                startPanY: previewPan.y,
+              };
+            }}
+            onAuxClick={(event) => {
+              if (event.button === 1) {
+                event.preventDefault();
+              }
+            }}
+            onWheel={(event) => {
+              event.preventDefault();
+              updatePreviewZoom((currentZoom) =>
+                currentZoom + (event.deltaY < 0 ? PREVIEW_ZOOM_STEP : -PREVIEW_ZOOM_STEP),
+              );
+            }}
+          >
             <div className="preview-frame">
               <PreviewCanvas
                 canvasRef={canvasRef}
@@ -551,6 +1007,9 @@ export function App() {
                 width={appState.canvasSize.width}
                 height={appState.canvasSize.height}
                 layers={appState.layers}
+                previewPan={previewPan}
+                previewZoomFactor={appState.previewZoomFactor}
+                isStageHovered={isPreviewStageHovered}
                 onActiveLayerChange={(layerId) =>
                   setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
                 }
@@ -566,8 +1025,14 @@ export function App() {
         </section>
 
         <ControlPanel
+          activeTool={activeTool}
           activeLayerId={appState.activeLayerId}
+          isImportModalOpen={preInsertDraft !== null}
           layers={appState.layers}
+          onOpenAdvancedImportClipboard={(opener) => {
+            void handleAdvancedImportClipboardClick(opener);
+          }}
+          onOpenAdvancedImportFile={handleAdvancedImportFileClick}
           onBackgroundPointerDown={blurActiveEditable}
           onActiveLayerChange={(layerId) =>
             setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
@@ -577,7 +1042,16 @@ export function App() {
           }
           onAddLayer={addLayer}
           onApplySettingsToAllLayers={applyLayerSettingsToAllLayers}
-          onLayerChange={updateLayer}
+          onTextLayerChange={updateTextLayer}
+          onRotateImageLayer={(layerId, direction) =>
+            transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
+          }
+          onFlipImageLayerHorizontal={(layerId) =>
+            transformImageLayer(layerId, (layer) => flipImageLayerHorizontal(layer))
+          }
+          onFlipImageLayerVertical={(layerId) =>
+            transformImageLayer(layerId, (layer) => flipImageLayerVertical(layer))
+          }
           onReorderLayers={reorderLayers}
           onRemoveLayer={removeLayer}
         />
@@ -590,6 +1064,194 @@ export function App() {
         accept="image/png,image/jpeg,image/webp"
         onChange={handleFileChange}
       />
+      {preInsertDraft ? (
+        <PreInsertModal
+          confirmLabel={
+            preInsertDraft.pendingSource.sourceKind === 'upload-image' ? 'Confirm' : 'Add layer'
+          }
+          draft={preInsertDraft}
+          isCropMode={isPreInsertCropMode}
+          onCancel={() =>
+            closePreInsertModal(preInsertSessionRef.current.previousStatusMessage)
+          }
+          onConfirm={() => {
+            const preparedImage = createPreparedImageFromDraft(preInsertDraft);
+            const fileName = preInsertSessionRef.current.pendingUploadFileName ?? 'Image';
+            const requestContext = preInsertSessionRef.current.requestContext;
+
+            closePreInsertModal(null);
+
+            if (preparedImage) {
+              if (requestContext.target.kind === 'advanced-import-file') {
+                addImageLayer(preparedImage, fileName, preInsertDraft.advancedPlacementMode);
+                return;
+              }
+
+              applyLoadedImage(preparedImage, `${fileName} loaded.`);
+            }
+          }}
+          onFlipHorizontal={() =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? toggleDraftFlipHorizontal(currentState.preInsertModalDraft)
+                : null,
+            }))
+          }
+          onFlipVertical={() =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? toggleDraftFlipVertical(currentState.preInsertModalDraft)
+                : null,
+            }))
+          }
+          onPlacementModeChange={(advancedPlacementMode) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preferredAdvancedImportPlacementMode: advancedPlacementMode,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? {
+                    ...currentState.preInsertModalDraft,
+                    advancedPlacementMode,
+                  }
+                : null,
+            }))
+          }
+          onCropBoxChange={(cropBox) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? {
+                    ...currentState.preInsertModalDraft,
+                    cropBox,
+                  }
+                : null,
+            }))
+          }
+          onRotateClockwise={() =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? {
+                    ...currentState.preInsertModalDraft,
+                    rotationQuarterTurns: rotateDraftClockwise(
+                      currentState.preInsertModalDraft.rotationQuarterTurns,
+                    ),
+                  }
+                : null,
+            }))
+          }
+          onRotateCounterClockwise={() =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? {
+                    ...currentState.preInsertModalDraft,
+                    rotationQuarterTurns: rotateDraftCounterClockwise(
+                      currentState.preInsertModalDraft.rotationQuarterTurns,
+                    ),
+                  }
+                : null,
+            }))
+          }
+          onToggleCropMode={() => setIsPreInsertCropMode((currentState) => !currentState)}
+          restoreFocusTo={preInsertSessionRef.current.requestContext.restoreFocusTo}
+        />
+      ) : null}
     </main>
   );
+}
+
+function createExpandedBaseImage(
+  image: CanvasImageSource,
+  currentCanvasSize: { width: number; height: number },
+  nextCanvasSize: { width: number; height: number },
+  offset: { x: number; y: number },
+) {
+  const expandedCanvas = document.createElement('canvas');
+  expandedCanvas.width = nextCanvasSize.width;
+  expandedCanvas.height = nextCanvasSize.height;
+  const expandedContext = expandedCanvas.getContext('2d');
+
+  if (!expandedContext) {
+    return image as HTMLImageElement;
+  }
+
+  expandedContext.clearRect(0, 0, nextCanvasSize.width, nextCanvasSize.height);
+  expandedContext.drawImage(
+    image,
+    offset.x,
+    offset.y,
+    currentCanvasSize.width,
+    currentCanvasSize.height,
+  );
+
+  return expandedCanvas as unknown as HTMLImageElement;
+}
+
+function getImageSourceSize(
+  image: Pick<HTMLImageElement, 'naturalWidth' | 'naturalHeight'> &
+    Partial<Pick<HTMLCanvasElement, 'width' | 'height'>>,
+  fallbackSize: { width: number; height: number },
+) {
+  return {
+    width: image.naturalWidth || image.width || fallbackSize.width,
+    height: image.naturalHeight || image.height || fallbackSize.height,
+  };
+}
+
+function createPreparedImageFromDraft(preInsertModalDraft: NonNullable<ReturnType<typeof createDefaultAppState>['preInsertModalDraft']>) {
+  const sourceImage = preInsertModalDraft.pendingSource.image;
+
+  if (!sourceImage) {
+    return null;
+  }
+
+  const outputDimensions = resolvePreparedOutputDimensions({
+    sourceSize: preInsertModalDraft.pendingSource.sourceSize,
+    cropBox: preInsertModalDraft.cropBox,
+    rotationQuarterTurns: preInsertModalDraft.rotationQuarterTurns,
+  });
+  const cropBox = preInsertModalDraft.cropBox
+    ? normalizeCropDraftBox(
+        preInsertModalDraft.cropBox,
+        preInsertModalDraft.pendingSource.sourceSize,
+      )
+    : {
+        x: 0,
+        y: 0,
+        width: preInsertModalDraft.pendingSource.sourceSize.width,
+        height: preInsertModalDraft.pendingSource.sourceSize.height,
+      };
+  const preparedCanvas = document.createElement('canvas');
+  preparedCanvas.width = outputDimensions.width;
+  preparedCanvas.height = outputDimensions.height;
+  const preparedContext = preparedCanvas.getContext('2d');
+
+  if (!preparedContext) {
+    return sourceImage as HTMLImageElement;
+  }
+
+  preparedContext.save();
+  preparedContext.translate(outputDimensions.width / 2, outputDimensions.height / 2);
+  preparedContext.scale(
+    preInsertModalDraft.flipHorizontal ? -1 : 1,
+    preInsertModalDraft.flipVertical ? -1 : 1,
+  );
+  preparedContext.rotate((preInsertModalDraft.rotationQuarterTurns * Math.PI) / 2);
+  preparedContext.drawImage(
+    sourceImage,
+    cropBox.x,
+    cropBox.y,
+    cropBox.width,
+    cropBox.height,
+    Math.round(-cropBox.width / 2),
+    Math.round(-cropBox.height / 2),
+    cropBox.width,
+    cropBox.height,
+  );
+  preparedContext.restore();
+
+  return preparedCanvas as unknown as HTMLImageElement;
 }

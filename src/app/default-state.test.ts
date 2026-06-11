@@ -1,8 +1,10 @@
 import {
   createDefaultAppState,
+  DEFAULT_ADVANCED_IMPORT_PLACEMENT,
   DEFAULT_CANVAS_SIZE,
   DEFAULT_FONT_SIZE,
   DEFAULT_OUTLINE_WIDTH,
+  DEFAULT_PREVIEW_ZOOM_FACTOR,
 } from './default-state';
 
 describe('createDefaultAppState', () => {
@@ -13,6 +15,7 @@ describe('createDefaultAppState', () => {
       canvasSize: DEFAULT_CANVAS_SIZE,
       layers: [
         {
+          kind: 'text',
           id: 'top',
           name: 'Top text',
           text: '',
@@ -37,6 +40,7 @@ describe('createDefaultAppState', () => {
           italic: false,
         },
         {
+          kind: 'text',
           id: 'bottom',
           name: 'Bottom text',
           text: '',
@@ -63,6 +67,9 @@ describe('createDefaultAppState', () => {
       ],
       activeLayerId: null,
       errorMessage: null,
+      previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
+      preInsertModalDraft: null,
+      preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
     });
   });
 
@@ -79,9 +86,16 @@ describe('createDefaultAppState', () => {
     firstState.canvasSize.width = 123;
     firstState.layers[0].text = 'TOP';
     firstState.layers[1].fontSize = 99;
+    firstState.previewZoomFactor = 3;
+    firstState.preferredAdvancedImportPlacementMode = 'outside-left';
 
     expect(secondState.canvasSize.width).toBe(DEFAULT_CANVAS_SIZE.width);
     expect(secondState.layers[0].text).toBe('');
     expect(secondState.layers[1].fontSize).toBe(DEFAULT_FONT_SIZE);
+    expect(secondState.previewZoomFactor).toBe(DEFAULT_PREVIEW_ZOOM_FACTOR);
+    expect(secondState.preInsertModalDraft).toBeNull();
+    expect(secondState.preferredAdvancedImportPlacementMode).toBe(
+      DEFAULT_ADVANCED_IMPORT_PLACEMENT,
+    );
   });
 });

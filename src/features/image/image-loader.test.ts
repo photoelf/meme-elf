@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   loadImageElementFromBlob,
   loadImageElementFromFile,
+  revokeLoadedImageObjectUrl,
 } from './image-loader';
 
 const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
@@ -38,7 +39,7 @@ afterEach(() => {
 });
 
 describe('loadImageElementFromBlob', () => {
-  it('creates an image element from a blob URL and revokes it after load', async () => {
+  it('creates an image element from a blob URL and keeps it alive after load for preview usage', async () => {
     const blob = new Blob(['fake'], { type: 'image/png' });
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:demo');
     const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -59,7 +60,20 @@ describe('loadImageElementFromBlob', () => {
 
     expect(createObjectURL).toHaveBeenCalledWith(blob);
     expect(image.src).toBe('blob:demo');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('revokes the tracked object URL when explicitly released', () => {
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const image = document.createElement('img') as HTMLImageElement & {
+      __memeElfObjectUrl?: string;
+    };
+    image.__memeElfObjectUrl = 'blob:demo';
+
+    revokeLoadedImageObjectUrl(image);
+
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:demo');
+    expect(image.__memeElfObjectUrl).toBeUndefined();
   });
 });
 

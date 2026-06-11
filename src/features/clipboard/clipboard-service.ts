@@ -5,9 +5,16 @@ type ClipboardReadItem = {
   types: readonly string[];
 };
 
-export async function readImageFromClipboard(): Promise<HTMLImageElement | null> {
+export type ClipboardReadResult =
+  | { image: HTMLImageElement; reason: null }
+  | {
+      image: null;
+      reason: 'unsupported' | 'permission-denied' | 'no-image' | 'load-failed';
+    };
+
+export async function readImageFromClipboardResult(): Promise<ClipboardReadResult> {
   if (!('clipboard' in navigator) || typeof navigator.clipboard.read !== 'function') {
-    return null;
+    return { image: null, reason: 'unsupported' };
   }
 
   let clipboardItems: ClipboardReadItem[];
@@ -15,8 +22,10 @@ export async function readImageFromClipboard(): Promise<HTMLImageElement | null>
   try {
     clipboardItems = (await navigator.clipboard.read()) as ClipboardReadItem[];
   } catch {
-    return null;
+    return { image: null, reason: 'permission-denied' };
   }
+
+  let foundImageType = false;
 
   for (const item of clipboardItems) {
     const imageType = item.types.find((type) => type.startsWith('image/'));
@@ -25,15 +34,23 @@ export async function readImageFromClipboard(): Promise<HTMLImageElement | null>
       continue;
     }
 
+    foundImageType = true;
+
     try {
       const blob = await item.getType(imageType);
-      return await loadImageElementFromBlob(blob);
+      const image = await loadImageElementFromBlob(blob);
+      return { image, reason: null };
     } catch {
       continue;
     }
   }
 
-  return null;
+  return { image: null, reason: foundImageType ? 'load-failed' : 'no-image' };
+}
+
+export async function readImageFromClipboard(): Promise<HTMLImageElement | null> {
+  const result = await readImageFromClipboardResult();
+  return result.image;
 }
 
 export async function extractImageFromPasteEvent(

@@ -1,4 +1,5 @@
-import type { TextAlign, TextLayer, VerticalAlign } from '../../app/types';
+import { isImageLayer } from '../../app/types';
+import type { EditorLayer, ImageLayer, TextAlign, TextLayer, VerticalAlign } from '../../app/types';
 
 const BOX_PADDING_X = 18;
 const BOX_PADDING_Y = 12;
@@ -23,7 +24,7 @@ export function renderPreview(
   context: CanvasRenderingContext2D,
   image: CanvasImageSource | null,
   size: { width: number; height: number },
-  layers: TextLayer[],
+  layers: EditorLayer[],
 ) {
   context.clearRect(0, 0, size.width, size.height);
 
@@ -32,8 +33,36 @@ export function renderPreview(
   }
 
   for (const layer of [...layers].reverse()) {
+    if (isImageLayer(layer)) {
+      renderImageLayer(context, layer);
+      continue;
+    }
+
     renderTextLayer(context, layer);
   }
+}
+
+function renderImageLayer(context: CanvasRenderingContext2D, layer: ImageLayer) {
+  if (!layer.image) {
+    return;
+  }
+
+  const scaleX = layer.skew.x < 0 ? -1 : 1;
+  const scaleY = layer.skew.y < 0 ? -1 : 1;
+
+  context.save();
+  context.translate(layer.box.x + layer.box.width / 2, layer.box.y + layer.box.height / 2);
+  context.rotate(layer.box.rotation);
+  context.scale(scaleX, scaleY);
+  context.globalAlpha = layer.opacity;
+  context.drawImage(
+    layer.image,
+    -layer.box.width / 2,
+    -layer.box.height / 2,
+    layer.box.width,
+    layer.box.height,
+  );
+  context.restore();
 }
 
 function renderTextLayer(context: CanvasRenderingContext2D, layer: TextLayer) {

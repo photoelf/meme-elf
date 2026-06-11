@@ -15,7 +15,10 @@ Project is in working alpha.
 Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
+- advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - text layer editing, reorder, move, resize, and rotate
+- image layer insert, reorder, move, resize, rotate, and remove
+- preview zoom and middle-mouse pan for desktop editing
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
 
@@ -23,6 +26,8 @@ Current source documents:
 - [design.md](/D:/PETS/meme-elf/design.md)
 - [docs/2026-06-04-roadmap.md](/D:/PETS/meme-elf/docs/2026-06-04-roadmap.md)
 - [docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md](/D:/PETS/meme-elf/docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md)
+- [docs/superpowers/specs/2026-06-05-post-alpha-editor-evolution-design.md](/D:/PETS/meme-elf/docs/superpowers/specs/2026-06-05-post-alpha-editor-evolution-design.md)
+- [docs/superpowers/plans/2026-06-05-m6-image-edit-plus.md](/D:/PETS/meme-elf/docs/superpowers/plans/2026-06-05-m6-image-edit-plus.md)
 
 ## Planned Stack
 
@@ -87,12 +92,12 @@ Included:
 - file upload fallback
 - multiple editable text layers
 - basic text styling
+- image layers and pre-insert preparation for UI imports
 - desktop mouse interactions
 - copy/export as PNG
 
 Excluded:
 - auth
 - meme history
-- template catalog
 - GIF/video editing
 - AI features

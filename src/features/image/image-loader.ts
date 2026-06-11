@@ -1,11 +1,17 @@
+const OBJECT_URL_KEY = '__memeElfObjectUrl';
+
+type ImageWithObjectUrl = HTMLImageElement & {
+  [OBJECT_URL_KEY]?: string;
+};
+
 export function loadImageElementFromBlob(blob: Blob): Promise<HTMLImageElement> {
   const objectUrl = URL.createObjectURL(blob);
 
   return new Promise((resolve, reject) => {
-    const image = new Image();
+    const image = new Image() as ImageWithObjectUrl;
+    image[OBJECT_URL_KEY] = objectUrl;
 
     image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
       resolve(image);
     };
 
@@ -20,4 +26,20 @@ export function loadImageElementFromBlob(blob: Blob): Promise<HTMLImageElement> 
 
 export function loadImageElementFromFile(file: File): Promise<HTMLImageElement> {
   return loadImageElementFromBlob(file);
+}
+
+export function revokeLoadedImageObjectUrl(image: CanvasImageSource | null) {
+  if (!(image instanceof HTMLImageElement)) {
+    return;
+  }
+
+  const imageWithObjectUrl = image as ImageWithObjectUrl;
+  const objectUrl = imageWithObjectUrl[OBJECT_URL_KEY];
+
+  if (!objectUrl) {
+    return;
+  }
+
+  URL.revokeObjectURL(objectUrl);
+  delete imageWithObjectUrl[OBJECT_URL_KEY];
 }
