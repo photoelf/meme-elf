@@ -1555,6 +1555,45 @@ describe('App', () => {
     expect(screen.queryByText(/scene cropped/i)).not.toBeInTheDocument();
   });
 
+  it('cancels an in-flight scene crop draft when a crop-tab rotate action is used', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 600));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    openCropTab();
+    fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 300,
+      height: 300,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(previewSurface, { clientX: 120, clientY: 40, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 760, clientY: 240 });
+
+    expect(screen.getByRole('button', { name: /apply crop/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /rotate 90 clockwise/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/scene image stack rotated clockwise/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '600');
+    expect(screen.queryByRole('button', { name: /apply crop/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/scene cropped/i)).not.toBeInTheDocument();
+  });
+
   it('expands the scene from the left without scaling content before apply', async () => {
     const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
     mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));

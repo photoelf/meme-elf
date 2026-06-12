@@ -41,6 +41,11 @@ import {
   reorderLayerStack,
   rotateImageLayer90,
 } from '../features/image/image-layer-utils';
+import {
+  applySceneImageStackTransform,
+  createTransformedSceneImage,
+  type SceneImageStackTransform,
+} from '../features/image/scene-image-stack-utils';
 import { normalizeCropDraftBox, resolvePreparedOutputDimensions } from '../features/image/image-crop-utils';
 import { applySceneCrop, applySceneExpand } from '../features/bounds/scene-bounds';
 import { normalizeSceneCropRect } from '../features/bounds/crop-overlay';
@@ -403,6 +408,37 @@ export function App() {
         ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
       },
     }));
+  }
+
+  function applySceneImageTransform(transform: SceneImageStackTransform) {
+    applyAppStateChange((currentState) => {
+      const nextScene = applySceneImageStackTransform({
+        canvasSize: currentState.canvasSize,
+        layers: currentState.layers,
+        transform,
+      });
+
+      return {
+        ...currentState,
+        canvasSize: nextScene.canvasSize,
+        image: createTransformedSceneImage({
+          canvasSize: currentState.canvasSize,
+          image: currentState.image,
+          transform,
+        }),
+        layers: nextScene.layers,
+        activeSceneBoundsMode:
+          currentState.activeSceneBoundsMode === 'crop' ? 'idle' : currentState.activeSceneBoundsMode,
+        sceneBoundsDraft:
+          currentState.activeSceneBoundsMode === 'crop'
+            ? {
+                ...currentState.sceneBoundsDraft,
+                cropRect: null,
+              }
+            : currentState.sceneBoundsDraft,
+      };
+    });
+    setStatusMessage(getSceneImageTransformStatus(transform));
   }
 
   function applySceneExpandCommit() {
@@ -1468,6 +1504,7 @@ export function App() {
           onReorderSceneEffects={reorderSceneEffectStack}
           onResetSceneEffectStack={resetSceneEffectStack}
           onSceneBoundsPreset={applySceneBoundsPreset}
+          onSceneImageStackTransform={applySceneImageTransform}
           onSceneExpandDraftChange={updateSceneExpandDraft}
           onStartSceneCrop={() =>
             setAppState((currentState) => ({
@@ -1599,6 +1636,19 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+function getSceneImageTransformStatus(transform: SceneImageStackTransform) {
+  switch (transform) {
+    case 'rotate-clockwise':
+      return 'Scene image stack rotated clockwise.';
+    case 'rotate-counter-clockwise':
+      return 'Scene image stack rotated counter-clockwise.';
+    case 'flip-horizontal':
+      return 'Scene image stack flipped horizontally.';
+    case 'flip-vertical':
+      return 'Scene image stack flipped vertically.';
+  }
 }
 
 function ToolbarIconButton({

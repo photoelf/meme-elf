@@ -15,6 +15,7 @@ import type {
   VerticalAlign,
 } from '../../app/types';
 import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
+import type { SceneImageStackTransform } from '../image/scene-image-stack-utils';
 
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
@@ -55,6 +56,7 @@ type ControlPanelProps = {
   onSceneBoundsPreset: (
     preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
   ) => void;
+  onSceneImageStackTransform: (transform: SceneImageStackTransform) => void;
   onTextEditSessionEnd: () => void;
   onTextEditSessionStart: () => void;
   onSceneExpandDraftChange: (
@@ -109,6 +111,7 @@ export function ControlPanel({
   onReorderSceneEffects,
   onResetSceneEffectStack,
   onSceneBoundsPreset,
+  onSceneImageStackTransform,
   onTextEditSessionEnd,
   onTextEditSessionStart,
   onSceneExpandDraftChange,
@@ -410,6 +413,20 @@ export function ControlPanel({
                   </button>
                 </>
               ) : null}
+            </div>
+            <div className="settings-actions bounds-actions">
+              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-clockwise')}>
+                Rotate 90 clockwise
+              </button>
+              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-counter-clockwise')}>
+                Rotate 90 counter-clockwise
+              </button>
+              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-vertical')}>
+                Flip vertical
+              </button>
+              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-horizontal')}>
+                Flip horizontal
+              </button>
             </div>
             <div className="control-grid control-grid-compact bounds-grid">
               <div className="field-stack">

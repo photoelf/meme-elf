@@ -18,7 +18,7 @@ Current repo state:
 - top action bar with compact icon-only actions and delayed tooltips
 - right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, and `Effects`
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
-- scene crop with draggable crop box and resize handles
+- scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
 - expansion presets for equal margin, top caption space, bottom caption space, and square canvas
 - split image controls with fixed-order `Adjustments` and reorderable `Effects`
@@ -42,6 +42,7 @@ Current desktop layout conventions:
 - preview-local undo/redo and zoom controls stay with the preview header
 - advanced editing lives in the right inspector rather than a left tool rail
 - inspector navigation uses full-width icon tabs
+- scene-level rotate / flip actions in `Crop` affect only the image stack; text layers stay in place
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 
 Current source documents:
