@@ -15,6 +15,8 @@ Project is in working alpha.
 Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
+- top action bar with compact icon-only actions and delayed tooltips
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, and `Effects`
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box and resize handles
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
@@ -34,6 +36,13 @@ Known alpha behavior:
 - when `Apply to text` is disabled, scene effects apply only to non-text content and text stays above the filtered image stack
 - when `Apply to text` is enabled, text joins the filtered scene pass and can render behind imported image layers; this is currently accepted for alpha and the default remains `off`
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
+
+Current desktop layout conventions:
+- global actions live in the top bar as icon-only buttons with delayed tooltips
+- preview-local undo/redo and zoom controls stay with the preview header
+- advanced editing lives in the right inspector rather than a left tool rail
+- inspector navigation uses full-width icon tabs
+- text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 
 Current source documents:
 - [design.md](/D:/PETS/meme-elf/design.md)

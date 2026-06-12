@@ -228,29 +228,39 @@ type TextLayer = {
 ### 6.1. Layout
 
 - Desktop:
-    - Верхняя панель: логотип/название сервиса (минимализм).
+    - Верхняя панель: название сервиса слева и компактные icon-only editor actions справа.
     - Основная область:
-        - Слева/сверху — панель контролов:
-            - Кнопки: Вставить, Загрузить, Скопировать, Скачать.
-            - Поля ввода top/bottom текста.
-            - Настройки шрифта/цвета.
-        - Справа/в центре — canvas с изображением и текстом.
+        - Слева/в центре — большой preview workspace с canvas.
+        - Справа — компактный inspector, висящий рядом с canvas, а не вложенный в длинный sidebar-контейнер.
+        - Inspector навигация:
+            - full-width табы с понятными иконками
+            - разделы: `Layers`, `Crop`, `Adjustments`, `Effects`
+        - Preview-local controls:
+            - undo / redo
+            - zoom out / zoom in
+            - zoom preset
 - Mobile:
     - Сверху — canvas (по ширине экрана).
-    - Под ним — блок контролов (скроллимый).
+    - Под ним — inspector со вкладками и блоками контролов.
 
 Минимализм и интуитивность соответствуют паттернам популярных мем‑генераторов: сразу видна картинка, текстовые поля, и кнопка экспорта.[^1][^8][^7]
 
 ### 6.2. Controls
 
-- `Button` «Вставить из буфера»: primary.
-- `Button` «Загрузить файл»: secondary.
+- Top bar icon buttons:
+    - paste from clipboard
+    - upload image
+    - copy image
+    - download PNG
+    - theme toggle
 - `Input` «Верхний текст»: single-line либо `textarea` с автоподстройкой.
 - `Input` «Нижний текст».
 - `Color picker` для цвета текста.
 - `Slider` или select для размера шрифта.
 - `Select` для шрифта (Impact / Arial Black и т.п.).
-- `Button` «Скопировать картинку» + `Button` «Скачать PNG».
+- Inspector section buttons:
+    - text-labeled where the action benefits from readability
+    - icon-only only for dense navigation or compact layer actions, always with tooltip
 
 
 ### 6.3. Feedback

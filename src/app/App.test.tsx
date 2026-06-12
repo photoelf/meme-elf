@@ -60,8 +60,31 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /copy image/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /download png/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: /control sections/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /layers/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /crop/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /adjustments/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /effects/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+  });
+
+  it('switches right-side control tabs instead of pointer or image tools', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /adjustments/i }));
+    expect(screen.getByRole('heading', { name: /adjustments/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^layers$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
+    expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
+    expect(screen.getByRole('heading', { name: /crop/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /crop scene/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /image tool/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pointer tool/i })).not.toBeInTheDocument();
   });
 
   it('switches the manual theme from light to dark', () => {
@@ -187,7 +210,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
 
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
@@ -221,7 +243,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [firstLayerFile] },
@@ -287,7 +308,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [layerFile] },
@@ -311,7 +331,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
 
     await waitFor(() => {
@@ -336,7 +355,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [firstLayerFile] },
@@ -374,7 +392,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [layerFile] },
@@ -407,7 +424,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
 
     await waitFor(() => {
@@ -424,8 +440,6 @@ describe('App', () => {
   it('shows compact inside-vs-outside placement controls in the image rail', async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
-
     expect(screen.getByRole('button', { name: /advanced import from file/i })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /advanced import from clipboard/i }),
@@ -441,14 +455,19 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(file, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
-
+    openAdjustmentsTab();
     expect(screen.getByRole('heading', { name: /adjustments/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /brightness/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /contrast/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /saturation/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /hue/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /grayscale/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /sepia/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /invert/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /apply to text/i })).not.toBeChecked();
+
+    openEffectsTab();
+    expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /blur/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /sharpen/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /threshold/i })).toBeInTheDocument();
@@ -457,11 +476,8 @@ describe('App', () => {
     expect(screen.getByRole('slider', { name: /grain/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /posterize/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /jpeg degrade/i })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /grayscale/i })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /sepia/i })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /invert/i })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /apply to text/i })).not.toBeChecked();
 
+    openAdjustmentsTab();
     fireEvent.change(screen.getByRole('slider', { name: /brightness/i }), {
       target: { value: '125' },
     });
@@ -481,6 +497,7 @@ describe('App', () => {
       );
     });
 
+    openEffectsTab();
     fireEvent.change(screen.getByRole('slider', { name: /blur/i }), {
       target: { value: '4' },
     });
@@ -499,78 +516,56 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(file, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openAdjustmentsTab();
+    fireEvent.change(screen.getByRole('slider', { name: /brightness/i }), { target: { value: '145' } });
+    fireEvent.change(screen.getByRole('slider', { name: /contrast/i }), { target: { value: '115' } });
+    fireEvent.change(screen.getByRole('slider', { name: /saturation/i }), { target: { value: '60' } });
+    fireEvent.change(screen.getByRole('slider', { name: /hue/i }), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /grayscale/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /sepia/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /invert/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /apply to text/i }));
 
-    const brightness = screen.getByRole('slider', { name: /brightness/i });
-    const contrast = screen.getByRole('slider', { name: /contrast/i });
-    const saturation = screen.getByRole('slider', { name: /saturation/i });
-    const hue = screen.getByRole('slider', { name: /hue/i });
-    const blur = screen.getByRole('slider', { name: /blur/i });
-    const sharpen = screen.getByRole('slider', { name: /sharpen/i });
-    const threshold = screen.getByRole('slider', { name: /threshold/i });
-    const pixelate = screen.getByRole('slider', { name: /pixelate/i });
-    const noise = screen.getByRole('slider', { name: /noise/i });
-    const grain = screen.getByRole('slider', { name: /grain/i });
-    const posterize = screen.getByRole('slider', { name: /posterize/i });
-    const jpegDegrade = screen.getByRole('slider', { name: /jpeg degrade/i });
-    const grayscale = screen.getByRole('checkbox', { name: /grayscale/i });
-    const sepia = screen.getByRole('checkbox', { name: /sepia/i });
-    const invert = screen.getByRole('checkbox', { name: /invert/i });
-    const includeText = screen.getByRole('checkbox', { name: /apply to text/i });
-
-    fireEvent.change(brightness, { target: { value: '145' } });
-    fireEvent.change(contrast, { target: { value: '115' } });
-    fireEvent.change(saturation, { target: { value: '60' } });
-    fireEvent.change(hue, { target: { value: '45' } });
-    fireEvent.change(blur, { target: { value: '6' } });
-    fireEvent.change(sharpen, { target: { value: '30' } });
-    fireEvent.change(threshold, { target: { value: '55' } });
-    fireEvent.change(pixelate, { target: { value: '7' } });
-    fireEvent.change(noise, { target: { value: '12' } });
-    fireEvent.change(grain, { target: { value: '16' } });
-    fireEvent.change(posterize, { target: { value: '24' } });
-    fireEvent.change(jpegDegrade, { target: { value: '40' } });
-    fireEvent.click(grayscale);
-    fireEvent.click(sepia);
-    fireEvent.click(invert);
-    fireEvent.click(includeText);
+    openEffectsTab();
+    fireEvent.change(screen.getByRole('slider', { name: /blur/i }), { target: { value: '6' } });
+    fireEvent.change(screen.getByRole('slider', { name: /sharpen/i }), { target: { value: '30' } });
+    fireEvent.change(screen.getByRole('slider', { name: /threshold/i }), { target: { value: '55' } });
+    fireEvent.change(screen.getByRole('slider', { name: /pixelate/i }), { target: { value: '7' } });
+    fireEvent.change(screen.getByRole('slider', { name: /noise/i }), { target: { value: '12' } });
+    fireEvent.change(screen.getByRole('slider', { name: /grain/i }), { target: { value: '16' } });
+    fireEvent.change(screen.getByRole('slider', { name: /posterize/i }), { target: { value: '24' } });
+    fireEvent.change(screen.getByRole('slider', { name: /jpeg degrade/i }), { target: { value: '40' } });
 
     await waitFor(() => {
       expect(context.filter).toBe('blur(6px)');
     });
 
+    openAdjustmentsTab();
     fireEvent.click(screen.getByRole('button', { name: /reset adjustments/i }));
 
     await waitFor(() => {
-      expect(brightness).toHaveValue('100');
-      expect(contrast).toHaveValue('100');
-      expect(saturation).toHaveValue('100');
-      expect(hue).toHaveValue('0');
-      expect(grayscale).not.toBeChecked();
-      expect(sepia).not.toBeChecked();
-      expect(invert).not.toBeChecked();
-      expect(includeText).not.toBeChecked();
-      expect(blur).toHaveValue('6');
-      expect(sharpen).toHaveValue('30');
-      expect(threshold).toHaveValue('55');
-      expect(pixelate).toHaveValue('7');
-      expect(noise).toHaveValue('12');
-      expect(grain).toHaveValue('16');
-      expect(posterize).toHaveValue('24');
-      expect(jpegDegrade).toHaveValue('40');
+      expect(screen.getByRole('slider', { name: /brightness/i })).toHaveValue('100');
+      expect(screen.getByRole('slider', { name: /contrast/i })).toHaveValue('100');
+      expect(screen.getByRole('slider', { name: /saturation/i })).toHaveValue('100');
+      expect(screen.getByRole('slider', { name: /hue/i })).toHaveValue('0');
+      expect(screen.getByRole('checkbox', { name: /grayscale/i })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /sepia/i })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /invert/i })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /apply to text/i })).not.toBeChecked();
     });
 
+    openEffectsTab();
     fireEvent.click(screen.getByRole('button', { name: /reset effects/i }));
 
     await waitFor(() => {
-      expect(blur).toHaveValue('0');
-      expect(sharpen).toHaveValue('0');
-      expect(threshold).toHaveValue('0');
-      expect(pixelate).toHaveValue('0');
-      expect(noise).toHaveValue('0');
-      expect(grain).toHaveValue('0');
-      expect(posterize).toHaveValue('0');
-      expect(jpegDegrade).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /blur/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /sharpen/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /threshold/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /pixelate/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /noise/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /grain/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /posterize/i })).toHaveValue('0');
+      expect(screen.getByRole('slider', { name: /jpeg degrade/i })).toHaveValue('0');
     });
   });
 
@@ -581,8 +576,7 @@ describe('App', () => {
     const { container } = render(<App />);
     await uploadBaseImage(file, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
-
+    openEffectsTab();
     const getEffectOrder = () =>
       Array.from(container.querySelectorAll('.effect-card-title')).map((node) => node.textContent);
 
@@ -654,7 +648,6 @@ describe('App', () => {
     render(<App />);
 
     await uploadBaseImage(baseFile, 900);
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
 
     for (const file of [firstLayerFile, secondLayerFile]) {
       fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
@@ -708,8 +701,6 @@ describe('App', () => {
     render(<App />);
 
     await uploadBaseImage(baseFile, 900);
-
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [layerFile] },
@@ -732,8 +723,6 @@ describe('App', () => {
 
   it('adjusts canvas zoom from the meme header without changing canvas composition size', () => {
     const { container } = render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
 
     const editorToolbar = screen.getByRole('toolbar', { name: /editor actions/i });
     const zoomToolbar = screen.getByRole('toolbar', { name: /canvas zoom/i });
@@ -841,7 +830,6 @@ describe('App', () => {
   it('keeps preview overlays visible when the pointer moves from the stage onto visible zoom overflow', () => {
     const { container } = render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
     fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
 
@@ -868,7 +856,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [layerFile] },
@@ -948,7 +935,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [firstLayerFile] },
@@ -1040,7 +1026,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
       target: { files: [layerFile] },
@@ -1096,7 +1081,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from file/i }));
 
     fireEvent.change(screen.getByLabelText(/upload image file/i), {
@@ -1329,7 +1313,6 @@ describe('App', () => {
       expect(screen.getByText(/loading replacement\.png/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
 
     await screen.findByRole('dialog', { name: /prepare image/i });
@@ -1367,7 +1350,6 @@ describe('App', () => {
 
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     const advancedImportButton = screen.getByRole('button', { name: /advanced import from file/i });
     const uploadInput = screen.getByLabelText(/upload image file/i);
 
@@ -1403,7 +1385,6 @@ describe('App', () => {
       expect(screen.getByText(/reading the clipboard/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
     fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
 
     await waitFor(() => {
@@ -1513,7 +1494,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
     fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
 
     const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
@@ -1550,7 +1531,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 900);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
     fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
 
     const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
@@ -1581,7 +1562,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 800);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
     fireEvent.change(screen.getByRole('spinbutton', { name: /expand left/i }), {
       target: { value: '120' },
     });
@@ -1604,7 +1585,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 800);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
     fireEvent.change(screen.getByRole('spinbutton', { name: /expand top/i }), {
       target: { value: '60' },
     });
@@ -1622,7 +1603,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 800);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
     fireEvent.change(screen.getByRole('combobox', { name: /fill mode/i }), {
       target: { value: 'solid-color' },
     });
@@ -1653,7 +1634,7 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 800);
 
-    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    openCropTab();
 
     fireEvent.click(screen.getByRole('button', { name: /add margin equally/i }));
     expect(screen.getByRole('spinbutton', { name: /expand left/i })).toHaveValue(48);
@@ -1799,6 +1780,18 @@ async function uploadBaseImage(file: File, expectedCanvasWidth?: number) {
       );
     });
   }
+}
+
+function openCropTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
+}
+
+function openAdjustmentsTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /adjustments/i }));
+}
+
+function openEffectsTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
 }
 
 function escapeForRegex(value: string) {

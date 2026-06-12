@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import {
   createDefaultAppState,
   createTextLayer,
@@ -60,7 +69,7 @@ const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
-type ToolMode = 'pointer' | 'image';
+type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'effects';
 type ImageInsertionMode =
   | 'inside-canvas'
   | 'outside-left'
@@ -125,14 +134,6 @@ function getPreferredTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-function getStoredToolRailCollapsed(): boolean {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-
-  return window.localStorage.getItem('meme-elf.tool-rail-collapsed') !== 'false';
-}
-
 function getStoredInspectorWidth(): number {
   if (typeof window === 'undefined') {
     return DEFAULT_INSPECTOR_WIDTH;
@@ -192,7 +193,6 @@ export function App() {
   const [appState, setAppState] = useState(createDefaultAppState);
   const [statusMessage, setStatusMessage] = useState<string | null>(appState.errorMessage);
   const [theme, setTheme] = useState<'light' | 'dark'>(getPreferredTheme);
-  const [isToolRailCollapsed, setIsToolRailCollapsed] = useState(getStoredToolRailCollapsed);
   const [inspectorWidth, setInspectorWidth] = useState(getStoredInspectorWidth);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -220,7 +220,7 @@ export function App() {
     },
   });
   const isPreInsertModalOpenRef = useRef(false);
-  const [activeTool, setActiveTool] = useState<ToolMode>('pointer');
+  const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>('layers');
   const [isPreInsertCropMode, setIsPreInsertCropMode] = useState(false);
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
@@ -1067,10 +1067,6 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem('meme-elf.tool-rail-collapsed', String(isToolRailCollapsed));
-  }, [isToolRailCollapsed]);
-
-  useEffect(() => {
     window.localStorage.setItem('meme-elf.inspector-width', String(inspectorWidth));
   }, [inspectorWidth]);
 
@@ -1085,8 +1081,7 @@ export function App() {
       }
 
       const bounds = workspaceRef.current.getBoundingClientRect();
-      const railWidth = isToolRailCollapsed ? 0 : 66;
-      const availableWidth = bounds.width - railWidth;
+      const availableWidth = bounds.width;
       const inspectorPixels = bounds.right - event.clientX;
       const clampedInspectorPixels = Math.min(
         Math.max(MIN_PANEL_WIDTH, availableWidth - MIN_PANEL_WIDTH),
@@ -1106,10 +1101,10 @@ export function App() {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [isToolRailCollapsed]);
+  }, []);
 
   useEffect(() => {
-    function handleMouseMove(event: MouseEvent) {
+    function handleMouseMove(event: globalThis.MouseEvent) {
       const panSession = previewPanSessionRef.current;
 
       if (!panSession) {
@@ -1243,85 +1238,40 @@ export function App() {
           <h1>meme-elf</h1>
         </div>
         <div className="topbar-actions" role="toolbar" aria-label="Editor actions">
-          <button
-            type="button"
-            className="toolbar-button"
+          <ToolbarIconButton
+            label="Paste from Clipboard"
+            icon={<PasteIcon />}
             onClick={handlePasteClick}
-          >
-            Paste from Clipboard
-          </button>
-          <button
-            ref={uploadButtonRef}
-            type="button"
-            className="toolbar-button"
+          />
+          <ToolbarIconButton
+            label="Upload Image"
+            icon={<UploadIcon />}
+            buttonRef={uploadButtonRef}
             onClick={(event) => handleUploadClick(event.currentTarget)}
-          >
-            Upload Image
-          </button>
-          <button
-            type="button"
-            className="toolbar-button"
+          />
+          <ToolbarIconButton
+            label="Copy Image"
+            icon={<CopyIcon />}
             onClick={handleCopyClick}
-          >
-            Copy Image
-          </button>
-          <button
-            type="button"
-            className="toolbar-button"
+          />
+          <ToolbarIconButton
+            label="Download PNG"
+            icon={<DownloadIcon />}
             onClick={handleDownloadClick}
-          >
-            Download PNG
-          </button>
-          <button
-            type="button"
-            className="toolbar-icon-button"
+          />
+          <ToolbarIconButton
+            label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            icon={theme === 'light' ? <MoonIcon /> : <SunIcon />}
             onClick={() => setTheme((currentTheme) => (currentTheme === 'light' ? 'dark' : 'light'))}
-            aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-            title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-          >
-            {theme === 'light' ? '☾' : '☀'}
-          </button>
-          <button
-            type="button"
-            className="toolbar-icon-button"
-            onClick={() => setIsToolRailCollapsed((currentState) => !currentState)}
-            aria-label={isToolRailCollapsed ? 'Show tool rail' : 'Hide tool rail'}
-            title={isToolRailCollapsed ? 'Show tool rail' : 'Hide tool rail'}
-          >
-            [|]
-          </button>
+          />
         </div>
       </header>
 
       <section
         ref={workspaceRef}
         style={workspaceStyle}
-        className={`workspace-shell${isToolRailCollapsed ? ' workspace-shell-rail-collapsed' : ''}`}
+        className="workspace-shell"
       >
-        <aside
-          className={`tool-rail${isToolRailCollapsed ? ' tool-rail-collapsed' : ''}`}
-          aria-label="Tools"
-        >
-          <button
-            type="button"
-            className={`tool-rail-button${activeTool === 'pointer' ? ' tool-rail-button-active' : ''}`}
-            aria-label="Pointer tool"
-            aria-pressed={activeTool === 'pointer'}
-            onClick={() => setActiveTool('pointer')}
-          >
-            ↖
-          </button>
-          <button
-            type="button"
-            className={`tool-rail-button${activeTool === 'image' ? ' tool-rail-button-active' : ''}`}
-            aria-label="Image tool"
-            aria-pressed={activeTool === 'image'}
-            onClick={() => setActiveTool('image')}
-          >
-            ▣
-          </button>
-        </aside>
-
         <section className="preview-panel" aria-label="Preview">
           <div
             className="splitter"
@@ -1336,7 +1286,6 @@ export function App() {
           <div className="preview-panel-header">
             <div className="preview-heading">
               <h2 className="preview-title">MEME</h2>
-              <p className="preview-hint">Paste. Caption. Export.</p>
             </div>
             <div className="preview-toolbar" role="toolbar" aria-label="Canvas zoom">
               <button
@@ -1467,7 +1416,7 @@ export function App() {
         </section>
 
         <ControlPanel
-          activeTool={activeTool}
+          activeTab={activeInspectorTab}
           activeSceneBoundsMode={appState.activeSceneBoundsMode}
           activeLayerId={appState.activeLayerId}
           isImportModalOpen={preInsertDraft !== null}
@@ -1488,6 +1437,7 @@ export function App() {
           onActiveLayerChange={(layerId) =>
             setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
           }
+          onActiveTabChange={setActiveInspectorTab}
           onCancelSceneBounds={cancelSceneBounds}
           onClearActiveLayer={() =>
             setAppState((currentState) => ({ ...currentState, activeLayerId: null }))
@@ -1648,6 +1598,92 @@ export function App() {
         />
       ) : null}
     </main>
+  );
+}
+
+function ToolbarIconButton({
+  buttonRef,
+  icon,
+  label,
+  onClick,
+}: {
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+  icon: ReactNode;
+  label: string;
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      className="toolbar-icon-button icon-button-with-tooltip"
+      aria-label={label}
+      data-tooltip={label}
+      onClick={onClick}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function IconBase({ children, viewBox = '0 0 20 20' }: { children: ReactNode; viewBox?: string }) {
+  return (
+    <svg aria-hidden="true" className="toolbar-icon-svg" viewBox={viewBox} fill="none">
+      {children}
+    </svg>
+  );
+}
+
+function PasteIcon() {
+  return (
+    <IconBase>
+      <path d="M7 4.5h6M8 3h4l.7 1.5H15a1 1 0 0 1 1 1V15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5.5a1 1 0 0 1 1-1h2.3L8 3Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 8h6M7 11h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <IconBase>
+      <path d="M10 13V4.5M6.5 8 10 4.5 13.5 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 14.5V16h11v-1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <IconBase>
+      <rect x="7" y="5" width="8" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5 12.5H4.5A1.5 1.5 0 0 1 3 11V5.5A1.5 1.5 0 0 1 4.5 4H10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <IconBase>
+      <path d="M10 4.5v8.5M6.5 10 10 13.5 13.5 10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 15.5V16h11v-.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <IconBase>
+      <path d="M13.8 12.8A5.8 5.8 0 0 1 7.2 6.2a5.7 5.7 0 0 0 6.6 6.6Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function SunIcon() {
+  return (
+    <IconBase>
+      <circle cx="10" cy="10" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
   );
 }
 
