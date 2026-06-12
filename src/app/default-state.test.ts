@@ -5,6 +5,7 @@ import {
   DEFAULT_FONT_SIZE,
   DEFAULT_OUTLINE_WIDTH,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
+  DEFAULT_SCENE_BOUNDS_DRAFT,
 } from './default-state';
 
 describe('createDefaultAppState', () => {
@@ -70,6 +71,17 @@ describe('createDefaultAppState', () => {
       previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
       preInsertModalDraft: null,
       preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
+      sceneImageEffects: {
+        brightness: 100,
+        contrast: 100,
+        saturation: 100,
+        hue: 0,
+        grayscale: false,
+        sepia: false,
+        invert: false,
+      },
+      sceneBoundsDraft: DEFAULT_SCENE_BOUNDS_DRAFT,
+      activeSceneBoundsMode: 'idle',
     });
   });
 
@@ -88,6 +100,8 @@ describe('createDefaultAppState', () => {
     firstState.layers[1].fontSize = 99;
     firstState.previewZoomFactor = 3;
     firstState.preferredAdvancedImportPlacementMode = 'outside-left';
+    firstState.sceneImageEffects.brightness = 160;
+    firstState.sceneBoundsDraft.cropRect = { startX: 0, startY: 0, endX: 10, endY: 10 };
 
     expect(secondState.canvasSize.width).toBe(DEFAULT_CANVAS_SIZE.width);
     expect(secondState.layers[0].text).toBe('');
@@ -97,5 +111,8 @@ describe('createDefaultAppState', () => {
     expect(secondState.preferredAdvancedImportPlacementMode).toBe(
       DEFAULT_ADVANCED_IMPORT_PLACEMENT,
     );
+    expect(secondState.sceneImageEffects.brightness).toBe(100);
+    expect(secondState.sceneBoundsDraft).toEqual(DEFAULT_SCENE_BOUNDS_DRAFT);
+    expect(secondState.activeSceneBoundsMode).toBe('idle');
   });
 });

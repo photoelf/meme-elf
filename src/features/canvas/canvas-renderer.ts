@@ -1,11 +1,25 @@
 import { isImageLayer } from '../../app/types';
-import type { EditorLayer, ImageLayer, TextAlign, TextLayer, VerticalAlign } from '../../app/types';
+import type {
+  EditorLayer,
+  ImageLayer,
+  SceneImageEffects,
+  TextAlign,
+  TextLayer,
+  VerticalAlign,
+} from '../../app/types';
+import {
+  buildCanvasFilter,
+  createDefaultSceneImageEffects,
+  hasActiveSceneImageEffects,
+} from '../image/image-effects';
 
 const BOX_PADDING_X = 18;
 const BOX_PADDING_Y = 12;
 const DEFAULT_LINE_HEIGHT_RATIO = 1.04;
 const MIN_RENDER_FONT_SIZE = 8;
 let measurementContext: CanvasRenderingContext2D | null = null;
+let filteredPreviewSurface: HTMLCanvasElement | null = null;
+let filteredPreviewContext: CanvasRenderingContext2D | null = null;
 
 export function getContainedCanvasSize(width: number, height: number, maxWidth: number) {
   if (width <= maxWidth) {
@@ -25,6 +39,32 @@ export function renderPreview(
   image: CanvasImageSource | null,
   size: { width: number; height: number },
   layers: EditorLayer[],
+  sceneImageEffects: SceneImageEffects = createDefaultSceneImageEffects(),
+) {
+  context.clearRect(0, 0, size.width, size.height);
+
+  if (hasActiveSceneImageEffects(sceneImageEffects)) {
+    const filteredSurface = getFilteredPreviewSurface(size);
+
+    if (filteredSurface) {
+      filteredSurface.context.clearRect(0, 0, size.width, size.height);
+      renderSceneContent(filteredSurface.context, image, size, layers);
+      context.save();
+      context.filter = buildCanvasFilter(sceneImageEffects);
+      context.drawImage(filteredSurface.canvas, 0, 0, size.width, size.height);
+      context.restore();
+      return;
+    }
+  }
+
+  renderSceneContent(context, image, size, layers);
+}
+
+function renderSceneContent(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource | null,
+  size: { width: number; height: number },
+  layers: EditorLayer[],
 ) {
   context.clearRect(0, 0, size.width, size.height);
 
@@ -40,6 +80,35 @@ export function renderPreview(
 
     renderTextLayer(context, layer);
   }
+}
+
+function getFilteredPreviewSurface(size: { width: number; height: number }) {
+  if (!filteredPreviewSurface) {
+    filteredPreviewSurface = document.createElement('canvas');
+    filteredPreviewContext = filteredPreviewSurface.getContext('2d');
+  }
+
+  if (!filteredPreviewSurface || !filteredPreviewContext) {
+    return null;
+  }
+
+  if (
+    filteredPreviewSurface.width !== size.width ||
+    filteredPreviewSurface.height !== size.height
+  ) {
+    filteredPreviewSurface.width = size.width;
+    filteredPreviewSurface.height = size.height;
+    filteredPreviewContext = filteredPreviewSurface.getContext('2d');
+  }
+
+  if (!filteredPreviewContext) {
+    return null;
+  }
+
+  return {
+    canvas: filteredPreviewSurface,
+    context: filteredPreviewContext,
+  };
 }
 
 function renderImageLayer(context: CanvasRenderingContext2D, layer: ImageLayer) {

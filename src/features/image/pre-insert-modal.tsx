@@ -1,5 +1,9 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { normalizeCropDraftBox, resolvePreparedOutputDimensions } from './image-crop-utils';
+import {
+  normalizeCropDraftBox,
+  resolvePreparedOutputDimensions,
+  type NormalizedCropBox,
+} from './image-crop-utils';
 import type {
   AdvancedImportPlacementMode,
   CropDraftBox,
@@ -24,6 +28,18 @@ type PreInsertModalProps = {
   restoreFocusTo?: HTMLElement | null;
 };
 
+type CropHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
+type CropInteraction =
+  | { type: 'new'; startX: number; startY: number }
+  | { type: 'move'; startX: number; startY: number; cropBox: NormalizedCropBox }
+  | {
+      type: 'resize';
+      handle: CropHandle;
+      startX: number;
+      startY: number;
+      cropBox: NormalizedCropBox;
+    };
+
 export function PreInsertModal({
   confirmLabel = 'Confirm',
   copy = 'Prepare the incoming image before it enters the editor.',
@@ -44,7 +60,7 @@ export function PreInsertModal({
   const dialogRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cropDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  const cropInteractionRef = useRef<CropInteraction | null>(null);
   const previewSize = resolvePreparedOutputDimensions({
     sourceSize: draft.pendingSource.sourceSize,
     cropBox: draft.cropBox,
@@ -147,7 +163,7 @@ export function PreInsertModal({
 
   useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
-      if (!isCropMode || !cropDragRef.current) {
+      if (!isCropMode || !cropInteractionRef.current) {
         return;
       }
 
@@ -165,16 +181,47 @@ export function PreInsertModal({
         return;
       }
 
-      onCropBoxChange?.({
-        startX: cropDragRef.current.startX,
-        startY: cropDragRef.current.startY,
-        endX: sourcePoint.x,
-        endY: sourcePoint.y,
-      });
+      const interaction = cropInteractionRef.current;
+
+      if (interaction.type === 'new') {
+        onCropBoxChange?.({
+          startX: interaction.startX,
+          startY: interaction.startY,
+          endX: sourcePoint.x,
+          endY: sourcePoint.y,
+        });
+        return;
+      }
+
+      if (interaction.type === 'move') {
+        const nextBox = clampNormalizedCropBox(
+          {
+            ...interaction.cropBox,
+            x: interaction.cropBox.x + (sourcePoint.x - interaction.startX),
+            y: interaction.cropBox.y + (sourcePoint.y - interaction.startY),
+          },
+          draft.pendingSource.sourceSize,
+        );
+
+        onCropBoxChange?.(toCropDraftBox(nextBox));
+        return;
+      }
+
+      const nextBox = resizeCropBoxFromHandle(
+        interaction.cropBox,
+        interaction.handle,
+        {
+          x: sourcePoint.x,
+          y: sourcePoint.y,
+        },
+        draft.pendingSource.sourceSize,
+      );
+
+      onCropBoxChange?.(toCropDraftBox(nextBox));
     }
 
     function handleMouseUp() {
-      cropDragRef.current = null;
+      cropInteractionRef.current = null;
     }
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -283,7 +330,8 @@ export function PreInsertModal({
                 }
 
                 event.preventDefault();
-                cropDragRef.current = {
+                cropInteractionRef.current = {
+                  type: 'new',
                   startX: sourcePoint.x,
                   startY: sourcePoint.y,
                 };
@@ -304,8 +352,89 @@ export function PreInsertModal({
                     height={previewCanvasSize.height}
                   />
                   {cropOverlayStyle ? (
-                    <div className="pre-insert-crop-overlay" style={cropOverlayStyle}>
+                    <div
+                      className={`pre-insert-crop-overlay${isCropMode ? ' pre-insert-crop-overlay-interactive' : ''}`}
+                      style={cropOverlayStyle}
+                      onMouseDown={(event) => {
+                        if (!isCropMode || !draft.cropBox) {
+                          return;
+                        }
+
+                        const normalizedCropBox = normalizeCropDraftBox(
+                          draft.cropBox,
+                          draft.pendingSource.sourceSize,
+                        );
+
+                        const sourcePoint = resolveCropSourcePoint(
+                          previewCanvasRef.current,
+                          event.clientX,
+                          event.clientY,
+                          draft.pendingSource.sourceSize,
+                          draft.rotationQuarterTurns,
+                          draft.flipHorizontal,
+                          draft.flipVertical,
+                        );
+
+                        if (!sourcePoint) {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+                        cropInteractionRef.current = {
+                          type: 'move',
+                          startX: sourcePoint.x,
+                          startY: sourcePoint.y,
+                          cropBox: normalizedCropBox,
+                        };
+                      }}
+                    >
                       <div className="pre-insert-crop-overlay-frame" />
+                      {isCropMode && draft.cropBox ? (
+                        <>
+                          {(['top-left', 'top-right', 'bottom-right', 'bottom-left'] as CropHandle[]).map((handle) => (
+                            <button
+                              key={handle}
+                              type="button"
+                              className={`pre-insert-crop-handle pre-insert-crop-handle-${handle}`}
+                              aria-label={`Resize crop from ${handle}`}
+                              onMouseDown={(event) => {
+                                if (!draft.cropBox) {
+                                  return;
+                                }
+
+                                const normalizedCropBox = normalizeCropDraftBox(
+                                  draft.cropBox,
+                                  draft.pendingSource.sourceSize,
+                                );
+                                const sourcePoint = resolveCropSourcePoint(
+                                  previewCanvasRef.current,
+                                  event.clientX,
+                                  event.clientY,
+                                  draft.pendingSource.sourceSize,
+                                  draft.rotationQuarterTurns,
+                                  draft.flipHorizontal,
+                                  draft.flipVertical,
+                                );
+
+                                if (!sourcePoint) {
+                                  return;
+                                }
+
+                                event.preventDefault();
+                                event.stopPropagation();
+                                cropInteractionRef.current = {
+                                  type: 'resize',
+                                  handle,
+                                  startX: sourcePoint.x,
+                                  startY: sourcePoint.y,
+                                  cropBox: normalizedCropBox,
+                                };
+                              }}
+                            />
+                          ))}
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -558,4 +687,73 @@ function rotateAroundCenter(x: number, y: number, angle: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function toCropDraftBox(cropBox: NormalizedCropBox): CropDraftBox {
+  return {
+    startX: cropBox.x,
+    startY: cropBox.y,
+    endX: cropBox.x + cropBox.width,
+    endY: cropBox.y + cropBox.height,
+  };
+}
+
+function clampNormalizedCropBox(
+  cropBox: NormalizedCropBox,
+  sourceSize: { width: number; height: number },
+) {
+  const width = Math.max(1, Math.min(cropBox.width, sourceSize.width));
+  const height = Math.max(1, Math.min(cropBox.height, sourceSize.height));
+
+  return {
+    x: clamp(cropBox.x, 0, sourceSize.width - width),
+    y: clamp(cropBox.y, 0, sourceSize.height - height),
+    width,
+    height,
+  };
+}
+
+function resizeCropBoxFromHandle(
+  cropBox: NormalizedCropBox,
+  handle: CropHandle,
+  point: { x: number; y: number },
+  sourceSize: { width: number; height: number },
+) {
+  let left = cropBox.x;
+  let top = cropBox.y;
+  let right = cropBox.x + cropBox.width;
+  let bottom = cropBox.y + cropBox.height;
+
+  if (handle === 'top-left' || handle === 'bottom-left') {
+    left = point.x;
+  }
+
+  if (handle === 'top-right' || handle === 'bottom-right') {
+    right = point.x;
+  }
+
+  if (handle === 'top-left' || handle === 'top-right') {
+    top = point.y;
+  }
+
+  if (handle === 'bottom-left' || handle === 'bottom-right') {
+    bottom = point.y;
+  }
+
+  const normalized = normalizeCropDraftBox(
+    {
+      startX: left,
+      startY: top,
+      endX: right,
+      endY: bottom,
+    },
+    sourceSize,
+  );
+
+  return {
+    x: normalized.x,
+    y: normalized.y,
+    width: Math.max(1, normalized.width),
+    height: Math.max(1, normalized.height),
+  };
 }

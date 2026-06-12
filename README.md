@@ -16,9 +16,14 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
+- scene crop with draggable crop box and resize handles
+- canvas expansion with transparent, solid, sampled-edge, and average-border fill
+- expansion presets for equal margin, top caption space, bottom caption space, and square canvas
 - text layer editing, reorder, move, resize, and rotate
+- inline canvas text editing with multiline entry and live box-fit recovery after line removal
 - image layer insert, reorder, move, resize, rotate, and remove
 - preview zoom and middle-mouse pan for desktop editing
+- undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
 
@@ -28,6 +33,8 @@ Current source documents:
 - [docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md](/D:/PETS/meme-elf/docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md)
 - [docs/superpowers/specs/2026-06-05-post-alpha-editor-evolution-design.md](/D:/PETS/meme-elf/docs/superpowers/specs/2026-06-05-post-alpha-editor-evolution-design.md)
 - [docs/superpowers/plans/2026-06-05-m6-image-edit-plus.md](/D:/PETS/meme-elf/docs/superpowers/plans/2026-06-05-m6-image-edit-plus.md)
+- [docs/superpowers/plans/2026-06-05-m6-post-playtest-polish.md](/D:/PETS/meme-elf/docs/superpowers/plans/2026-06-05-m6-post-playtest-polish.md)
+- [docs/superpowers/plans/2026-06-12-m6-effects-watermarks.md](/D:/PETS/meme-elf/docs/superpowers/plans/2026-06-12-m6-effects-watermarks.md)
 
 ## Planned Stack
 
@@ -93,6 +100,7 @@ Included:
 - multiple editable text layers
 - basic text styling
 - image layers and pre-insert preparation for UI imports
+- scene crop and canvas bounds expansion
 - desktop mouse interactions
 - copy/export as PNG
 

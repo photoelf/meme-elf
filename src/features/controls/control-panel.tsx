@@ -4,27 +4,55 @@ import { isImageLayer, isTextLayer } from '../../app/types';
 import type {
   EditorLayer,
   LayerId,
+  SceneCropDraftRect,
+  SceneBoundsFillMode,
+  SceneExpandDraft,
   TextEffect,
   TextLayer,
   TextAlign,
   VerticalAlign,
 } from '../../app/types';
+import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
 
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
   activeTool: 'pointer' | 'image';
+  activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
   layers: EditorLayer[];
+  sceneCropDraft: SceneCropDraftRect | null;
+  sceneBoundsFillColor: string;
+  sceneBoundsFillMode: SceneBoundsFillMode;
+  sceneExpandDraft: SceneExpandDraft;
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
   onBackgroundPointerDown: () => void;
+  onApplySceneCrop: () => void;
+  onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
+  onCancelSceneBounds: () => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
-  onTextLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onSceneBoundsFillColorChange: (value: string) => void;
+  onSceneBoundsFillModeChange: (value: SceneBoundsFillMode) => void;
+  onSceneBoundsPreset: (
+    preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
+  ) => void;
+  onTextEditSessionEnd: () => void;
+  onTextEditSessionStart: () => void;
+  onSceneExpandDraftChange: (
+    side: keyof SceneExpandDraft,
+    value: number,
+  ) => void;
+  onStartSceneCrop: () => void;
+  onTextLayerChange: (
+    layerId: LayerId,
+    updates: Partial<TextLayer>,
+    historyMode?: 'immediate' | 'defer',
+  ) => void;
   onRotateImageLayer: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
   onFlipImageLayerHorizontal: (layerId: LayerId) => void;
   onFlipImageLayerVertical: (layerId: LayerId) => void;
@@ -38,16 +66,31 @@ type ControlPanelProps = {
 
 export function ControlPanel({
   activeTool,
+  activeSceneBoundsMode,
   activeLayerId,
   isImportModalOpen,
   layers,
+  sceneCropDraft,
+  sceneBoundsFillColor,
+  sceneBoundsFillMode,
+  sceneExpandDraft,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
   onBackgroundPointerDown,
+  onApplySceneCrop,
+  onApplySceneExpand,
   onActiveLayerChange,
+  onCancelSceneBounds,
   onClearActiveLayer,
   onAddLayer,
   onApplySettingsToAllLayers,
+  onSceneBoundsFillColorChange,
+  onSceneBoundsFillModeChange,
+  onSceneBoundsPreset,
+  onTextEditSessionEnd,
+  onTextEditSessionStart,
+  onSceneExpandDraftChange,
+  onStartSceneCrop,
   onTextLayerChange,
   onRotateImageLayer,
   onFlipImageLayerHorizontal,
@@ -66,6 +109,11 @@ export function ControlPanel({
     () => openSettingsLayerIds.filter((layerId) => layers.some((layer) => layer.id === layerId)),
     [layers, openSettingsLayerIds],
   );
+  const hasPendingSceneExpand =
+    sceneExpandDraft.left !== 0 ||
+    sceneExpandDraft.right !== 0 ||
+    sceneExpandDraft.top !== 0 ||
+    sceneExpandDraft.bottom !== 0;
 
   return (
     <aside
@@ -78,30 +126,211 @@ export function ControlPanel({
       }}
     >
       {activeTool === 'image' ? (
-        <div className="inspector-section">
-          <div className="section-heading">
-            <h2 className="section-title">IMAGE</h2>
-            <p className="section-copy">Advanced import</p>
+        <>
+          <div className="inspector-section">
+            <div className="section-heading">
+              <h2 className="section-title">IMAGE</h2>
+              <p className="section-copy">Advanced import</p>
+            </div>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="mini-action-button image-import-button"
+                disabled={isImportModalOpen}
+                onClick={(event) => onOpenAdvancedImportFile(event.currentTarget)}
+              >
+                Advanced import from file
+              </button>
+              <button
+                type="button"
+                className="mini-action-button image-import-button"
+                disabled={isImportModalOpen}
+                onClick={(event) => onOpenAdvancedImportClipboard(event.currentTarget)}
+              >
+                Advanced import from clipboard
+              </button>
+            </div>
           </div>
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="mini-action-button image-import-button"
-              disabled={isImportModalOpen}
-              onClick={(event) => onOpenAdvancedImportFile(event.currentTarget)}
-            >
-              Advanced import from file
-            </button>
-            <button
-              type="button"
-              className="mini-action-button image-import-button"
-              disabled={isImportModalOpen}
-              onClick={(event) => onOpenAdvancedImportClipboard(event.currentTarget)}
-            >
-              Advanced import from clipboard
-            </button>
+
+          <div className="inspector-section">
+            <div className="section-heading">
+              <h2 className="section-title">BOUNDS</h2>
+              <p className="section-copy">Scene crop and expand</p>
+            </div>
+            <div className="settings-actions bounds-actions">
+              <button
+                type="button"
+                className={`mini-action-button${activeSceneBoundsMode === 'crop' ? ' settings-button-active' : ''}`}
+                onClick={onStartSceneCrop}
+              >
+                Crop scene
+              </button>
+              {activeSceneBoundsMode === 'crop' ? (
+                <>
+                  <button
+                    type="button"
+                    className="mini-action-button"
+                    disabled={!sceneCropDraft}
+                    onClick={onApplySceneCrop}
+                  >
+                    Apply crop
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-action-button"
+                    onClick={onCancelSceneBounds}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : null}
+            </div>
+            <div className="control-grid control-grid-compact bounds-grid">
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-expand-left">
+                  Expand left
+                </label>
+                <input
+                  id="scene-expand-left"
+                  className="number-input"
+                  type="number"
+                  step={1}
+                  value={sceneExpandDraft.left}
+                  onChange={(event) =>
+                    onSceneExpandDraftChange('left', Number(event.target.value))
+                  }
+                />
+              </div>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-expand-right">
+                  Expand right
+                </label>
+                <input
+                  id="scene-expand-right"
+                  className="number-input"
+                  type="number"
+                  step={1}
+                  value={sceneExpandDraft.right}
+                  onChange={(event) =>
+                    onSceneExpandDraftChange('right', Number(event.target.value))
+                  }
+                />
+              </div>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-expand-top">
+                  Expand top
+                </label>
+                <input
+                  id="scene-expand-top"
+                  className="number-input"
+                  type="number"
+                  step={1}
+                  value={sceneExpandDraft.top}
+                  onChange={(event) =>
+                    onSceneExpandDraftChange('top', Number(event.target.value))
+                  }
+                />
+              </div>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-expand-bottom">
+                  Expand bottom
+                </label>
+                <input
+                  id="scene-expand-bottom"
+                  className="number-input"
+                  type="number"
+                  step={1}
+                  value={sceneExpandDraft.bottom}
+                  onChange={(event) =>
+                    onSceneExpandDraftChange('bottom', Number(event.target.value))
+                  }
+                />
+              </div>
+            </div>
+            <div className="control-grid control-grid-compact bounds-grid">
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-bounds-fill-mode">
+                  Fill mode
+                </label>
+                <select
+                  id="scene-bounds-fill-mode"
+                  className="select-input"
+                  value={sceneBoundsFillMode}
+                  onChange={(event) =>
+                    onSceneBoundsFillModeChange(event.target.value as SceneBoundsFillMode)
+                  }
+                >
+                  {SCENE_BOUNDS_FILL_MODE_OPTIONS.map((fillMode) => (
+                    <option key={fillMode} value={fillMode}>
+                      {fillMode}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-bounds-fill-color">
+                  Fill color
+                </label>
+                <input
+                  id="scene-bounds-fill-color"
+                  className="layer-swatch bounds-fill-swatch"
+                  type="color"
+                  value={sceneBoundsFillColor}
+                  onChange={(event) => onSceneBoundsFillColorChange(event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="settings-actions bounds-actions">
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() => onSceneBoundsPreset('equal-margin')}
+              >
+                Add margin equally
+              </button>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() => onSceneBoundsPreset('top-caption')}
+              >
+                Add top caption space
+              </button>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() => onSceneBoundsPreset('bottom-caption')}
+              >
+                Add bottom caption space
+              </button>
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={() => onSceneBoundsPreset('square-canvas')}
+              >
+                Square canvas
+              </button>
+            </div>
+            {activeSceneBoundsMode === 'expand' ? (
+              <div className="settings-actions bounds-actions">
+                <button
+                  type="button"
+                  className="mini-action-button"
+                  disabled={!hasPendingSceneExpand}
+                  onClick={onApplySceneExpand}
+                >
+                  Apply bounds
+                </button>
+                <button
+                  type="button"
+                  className="mini-action-button"
+                  onClick={onCancelSceneBounds}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
           </div>
-        </div>
+        </>
       ) : null}
 
       <div className="inspector-section">
@@ -173,8 +402,12 @@ export function ControlPanel({
                       aria-label={layer.name}
                       rows={2}
                       value={layer.text}
-                      onFocus={() => onActiveLayerChange(layer.id)}
-                      onChange={(event) => onTextLayerChange(layer.id, { text: event.target.value })}
+                      onFocus={() => {
+                        onActiveLayerChange(layer.id);
+                        onTextEditSessionStart();
+                      }}
+                      onBlur={onTextEditSessionEnd}
+                      onChange={(event) => onTextLayerChange(layer.id, { text: event.target.value }, 'defer')}
                       placeholder={`TEXT ${index + 1}`}
                     />
                     <LayerRowActions
@@ -205,7 +438,7 @@ export function ControlPanel({
                         tabIndex={-1}
                         value={layer.fillStyle}
                         onChange={(event) =>
-                          onTextLayerChange(layer.id, { fillStyle: event.target.value })
+                          onTextLayerChange(layer.id, { fillStyle: event.target.value }, 'immediate')
                         }
                       />
                       <input
@@ -214,7 +447,7 @@ export function ControlPanel({
                         tabIndex={-1}
                         value={layer.strokeStyle}
                         onChange={(event) =>
-                          onTextLayerChange(layer.id, { strokeStyle: event.target.value })
+                          onTextLayerChange(layer.id, { strokeStyle: event.target.value }, 'immediate')
                         }
                       />
                     </LayerRowActions>
@@ -350,7 +583,11 @@ type LayerSettingsProps = {
   layer: TextLayer;
   layerCount: number;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
-  onTextLayerChange: (layerId: LayerId, updates: Partial<TextLayer>) => void;
+  onTextLayerChange: (
+    layerId: LayerId,
+    updates: Partial<TextLayer>,
+    historyMode?: 'immediate' | 'defer',
+  ) => void;
   onRemoveLayer: (layerId: LayerId) => void;
 };
 
@@ -372,7 +609,7 @@ function LayerSettings({
             id={`font-family-${layer.id}`}
             className="select-input"
             value={layer.fontFamily}
-            onChange={(event) => onTextLayerChange(layer.id, { fontFamily: event.target.value })}
+            onChange={(event) => onTextLayerChange(layer.id, { fontFamily: event.target.value }, 'immediate')}
           >
             {FONT_OPTIONS.map((fontOption) => (
               <option key={fontOption} value={fontOption}>
@@ -395,7 +632,7 @@ function LayerSettings({
             onChange={(event) =>
               onTextLayerChange(layer.id, {
                 fontSize: Number(event.target.value),
-              })
+              }, 'immediate')
             }
           />
         </div>
@@ -405,17 +642,17 @@ function LayerSettings({
         <CheckToggle
           checked={layer.allCaps}
           label="ALL CAPS"
-          onChange={(checked) => onTextLayerChange(layer.id, { allCaps: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { allCaps: checked }, 'immediate')}
         />
         <CheckToggle
           checked={layer.bold}
           label="Bold"
-          onChange={(checked) => onTextLayerChange(layer.id, { bold: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { bold: checked }, 'immediate')}
         />
         <CheckToggle
           checked={layer.italic}
           label="Italic"
-          onChange={(checked) => onTextLayerChange(layer.id, { italic: checked })}
+          onChange={(checked) => onTextLayerChange(layer.id, { italic: checked }, 'immediate')}
         />
       </div>
 
@@ -427,21 +664,21 @@ function LayerSettings({
             label="Shadow"
             name={`effect-${layer.id}`}
             value="shadow"
-            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value }, 'immediate')}
           />
           <EffectOption
             checked={layer.effect === 'outline'}
             label="Outline"
             name={`effect-${layer.id}`}
             value="outline"
-            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value }, 'immediate')}
           />
           <EffectOption
             checked={layer.effect === 'none'}
             label="None"
             name={`effect-${layer.id}`}
             value="none"
-            onChange={(value) => onTextLayerChange(layer.id, { effect: value })}
+            onChange={(value) => onTextLayerChange(layer.id, { effect: value }, 'immediate')}
           />
         </div>
       </div>
@@ -460,7 +697,7 @@ function LayerSettings({
             onChange={(event) =>
               onTextLayerChange(layer.id, {
                 outlineWidth: Number(event.target.value),
-              })
+              }, 'immediate')
             }
           />
         </div>
@@ -480,7 +717,7 @@ function LayerSettings({
             onChange={(event) =>
               onTextLayerChange(layer.id, {
                 opacity: Number(event.target.value),
-              })
+              }, 'immediate')
             }
           />
         </div>
@@ -496,7 +733,7 @@ function LayerSettings({
             className="select-input"
             value={layer.textAlign}
             onChange={(event) =>
-              onTextLayerChange(layer.id, { textAlign: event.target.value as TextAlign })
+              onTextLayerChange(layer.id, { textAlign: event.target.value as TextAlign }, 'immediate')
             }
           >
             <option value="left">Left</option>
@@ -516,7 +753,7 @@ function LayerSettings({
             onChange={(event) =>
               onTextLayerChange(layer.id, {
                 verticalAlign: event.target.value as VerticalAlign,
-              })
+              }, 'immediate')
             }
           >
             <option value="top">Top</option>

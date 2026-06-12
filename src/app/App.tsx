@@ -30,6 +30,9 @@ import {
   normalizeCropDraftBox,
   resolvePreparedOutputDimensions,
 } from '../features/image/image-crop-utils';
+import { applySceneCrop, applySceneExpand } from '../features/bounds/scene-bounds';
+import { normalizeSceneCropRect } from '../features/bounds/crop-overlay';
+import { resolveBoundsFill } from '../features/bounds/fill-modes';
 import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
@@ -46,6 +49,8 @@ const MIN_PANEL_WIDTH = 300;
 const PREVIEW_ZOOM_STEP = 0.1;
 const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
+const EQUAL_MARGIN_PRESET = 48;
+const CAPTION_SPACE_PRESET = 120;
 type ToolMode = 'pointer' | 'image';
 type ImageInsertionMode =
   | 'inside-canvas'
@@ -60,6 +65,18 @@ type ImportRequestContext = {
   restoreFocusTo: HTMLElement | null;
   target: ImportTarget;
 };
+type HistoryMode = 'immediate' | 'defer';
+type EditorHistorySnapshot = {
+  image: HTMLImageElement | null;
+  canvasSize: {
+    width: number;
+    height: number;
+  };
+  layers: EditorLayer[];
+  activeLayerId: LayerId | null;
+};
+
+const MAX_HISTORY_STEPS = 10;
 
 function createLayersForCanvas(
   layers: EditorLayer[],
@@ -196,14 +213,132 @@ export function App() {
   const [isPreInsertCropMode, setIsPreInsertCropMode] = useState(false);
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
   const previewPanSessionRef = useRef<{
     startClientX: number;
     startClientY: number;
     startPanX: number;
     startPanY: number;
   } | null>(null);
+  const appStateRef = useRef(appState);
+  const historyPastRef = useRef<EditorHistorySnapshot[]>([]);
+  const historyFutureRef = useRef<EditorHistorySnapshot[]>([]);
+  const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
+
+  function syncHistoryState() {
+    setHistoryState({
+      canUndo: historyPastRef.current.length > 0,
+      canRedo: historyFutureRef.current.length > 0,
+    });
+  }
+
+  function createHistorySnapshot(state: typeof appState): EditorHistorySnapshot {
+    return {
+      image: state.image,
+      canvasSize: { ...state.canvasSize },
+      layers: cloneLayers(state.layers),
+      activeLayerId: state.activeLayerId,
+    };
+  }
+
+  function beginHistoryTransaction() {
+    if (historyTransactionRef.current) {
+      return;
+    }
+
+    historyTransactionRef.current = createHistorySnapshot(appStateRef.current);
+  }
+
+  function commitHistoryTransaction() {
+    const snapshot = historyTransactionRef.current;
+    historyTransactionRef.current = null;
+
+    if (!snapshot) {
+      return;
+    }
+
+    if (historySnapshotsEqual(snapshot, createHistorySnapshot(appStateRef.current))) {
+      return;
+    }
+
+    historyPastRef.current = [...historyPastRef.current, snapshot].slice(-MAX_HISTORY_STEPS);
+    historyFutureRef.current = [];
+    syncHistoryState();
+  }
+
+  function applyAppStateChange(
+    updater: (currentState: typeof appState) => typeof appState,
+    historyMode: HistoryMode = 'immediate',
+  ) {
+    setAppState((currentState) => {
+      const nextState = updater(currentState);
+
+      if (historyMode === 'immediate' && !historySnapshotsEqual(createHistorySnapshot(currentState), createHistorySnapshot(nextState))) {
+        historyPastRef.current = [
+          ...historyPastRef.current,
+          createHistorySnapshot(currentState),
+        ].slice(-MAX_HISTORY_STEPS);
+        historyFutureRef.current = [];
+      }
+
+      return nextState;
+    });
+
+    if (historyMode === 'immediate') {
+      syncHistoryState();
+    }
+  }
+
+  function restoreHistorySnapshot(snapshot: EditorHistorySnapshot, status: string) {
+    setAppState((currentState) => ({
+      ...currentState,
+      image: snapshot.image,
+      canvasSize: { ...snapshot.canvasSize },
+      layers: cloneLayers(snapshot.layers),
+      activeLayerId: snapshot.activeLayerId,
+      status: 'idle',
+      errorMessage: null,
+      preInsertModalDraft: null,
+      activeSceneBoundsMode: 'idle',
+      sceneBoundsDraft: createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+    }));
+    setStatusMessage(status);
+  }
+
+  function handleUndo() {
+    if (historyPastRef.current.length === 0 || isPreInsertModalOpenRef.current) {
+      return;
+    }
+
+    const previousSnapshot = historyPastRef.current[historyPastRef.current.length - 1] as EditorHistorySnapshot;
+    historyPastRef.current = historyPastRef.current.slice(0, -1);
+    historyFutureRef.current = [createHistorySnapshot(appStateRef.current), ...historyFutureRef.current].slice(
+      0,
+      MAX_HISTORY_STEPS,
+    );
+    restoreHistorySnapshot(previousSnapshot, 'Undo applied.');
+    syncHistoryState();
+  }
+
+  function handleRedo() {
+    if (historyFutureRef.current.length === 0 || isPreInsertModalOpenRef.current) {
+      return;
+    }
+
+    const nextSnapshot = historyFutureRef.current[0] as EditorHistorySnapshot;
+    historyFutureRef.current = historyFutureRef.current.slice(1);
+    historyPastRef.current = [...historyPastRef.current, createHistorySnapshot(appStateRef.current)].slice(
+      -MAX_HISTORY_STEPS,
+    );
+    restoreHistorySnapshot(nextSnapshot, 'Redo applied.');
+    syncHistoryState();
+  }
+
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
 
   function createImportRequestContext(
     target: ImportTarget,
@@ -225,7 +360,7 @@ export function App() {
   }
 
   function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       const sourceSize = getImageSourceSize(image, currentState.canvasSize);
       const canvasSize = getContainedCanvasSize(
         sourceSize.width,
@@ -243,6 +378,141 @@ export function App() {
       };
     });
     setStatusMessage(nextStatus);
+  }
+
+  function cancelSceneBounds() {
+    setAppState((currentState) => ({
+      ...currentState,
+      activeSceneBoundsMode: 'idle',
+      sceneBoundsDraft: {
+        ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+      },
+    }));
+  }
+
+  function applySceneExpandCommit() {
+    applyAppStateChange((currentState) => {
+      const nextScene = applySceneExpand({
+        canvasSize: currentState.canvasSize,
+        expand: currentState.sceneBoundsDraft.expand,
+        layers: currentState.layers,
+      });
+
+      if (
+        nextScene.canvasSize.width === currentState.canvasSize.width &&
+        nextScene.canvasSize.height === currentState.canvasSize.height
+      ) {
+        return {
+          ...currentState,
+          activeSceneBoundsMode: 'idle',
+          sceneBoundsDraft: {
+            ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+          },
+        };
+      }
+
+      return {
+        ...currentState,
+        canvasSize: nextScene.canvasSize,
+        image: createExpandedBaseImage(
+          currentState.image,
+          currentState.canvasSize,
+          nextScene.canvasSize,
+          nextScene.contentOffset,
+          {
+            fillColor: currentState.sceneBoundsDraft.fillColor,
+            fillMode: currentState.sceneBoundsDraft.fillMode,
+          },
+        ),
+        layers: nextScene.layers,
+        activeSceneBoundsMode: 'idle',
+        sceneBoundsDraft: {
+          ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+        },
+      };
+    });
+    setStatusMessage('Canvas expanded.');
+  }
+
+  function updateSceneExpandDraft(
+    side: 'left' | 'right' | 'top' | 'bottom',
+    value: number,
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      activeSceneBoundsMode: 'expand',
+      sceneBoundsDraft: {
+        cropRect: null,
+        expand: {
+          ...currentState.sceneBoundsDraft.expand,
+          [side]: Number.isFinite(value) ? value : 0,
+        },
+        fillMode: currentState.sceneBoundsDraft.fillMode,
+        fillColor: currentState.sceneBoundsDraft.fillColor,
+      },
+    }));
+  }
+
+  function applySceneBoundsPreset(
+    preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      activeSceneBoundsMode: 'expand',
+      sceneBoundsDraft: {
+        cropRect: null,
+        expand: resolveSceneExpandPreset(preset, currentState.canvasSize),
+        fillMode: currentState.sceneBoundsDraft.fillMode,
+        fillColor: currentState.sceneBoundsDraft.fillColor,
+      },
+    }));
+  }
+
+  function applySceneCropCommit() {
+    applyAppStateChange((currentState) => {
+      const draftCropRect = currentState.sceneBoundsDraft.cropRect;
+
+      if (!draftCropRect) {
+        return currentState;
+      }
+
+      const nextCropRect = normalizeSceneCropRect(draftCropRect, currentState.canvasSize);
+
+      if (nextCropRect.width === 0 || nextCropRect.height === 0) {
+        return {
+          ...currentState,
+          activeSceneBoundsMode: 'idle',
+          sceneBoundsDraft: {
+            ...currentState.sceneBoundsDraft,
+            cropRect: null,
+          },
+        };
+      }
+
+      const nextScene = applySceneCrop({
+        canvasSize: currentState.canvasSize,
+        cropRect: nextCropRect,
+        layers: currentState.layers,
+      });
+
+      return {
+        ...currentState,
+        canvasSize: nextScene.canvasSize,
+        image: currentState.image
+          ? createSceneCroppedImage(currentState.image, currentState.canvasSize, nextCropRect)
+          : currentState.image,
+        layers: nextScene.layers,
+        activeLayerId: nextScene.layers.some((layer) => layer.id === currentState.activeLayerId)
+          ? currentState.activeLayerId
+          : nextScene.layers[0]?.id ?? null,
+        activeSceneBoundsMode: 'idle',
+        sceneBoundsDraft: {
+          ...currentState.sceneBoundsDraft,
+          cropRect: null,
+        },
+      };
+    });
+    setStatusMessage('Scene cropped.');
   }
 
   function openPreInsertModal(
@@ -300,8 +570,12 @@ export function App() {
     }));
   }
 
-  function updateTextLayer(layerId: LayerId, updates: Partial<TextLayer>) {
-    setAppState((currentState) => ({
+  function updateTextLayer(
+    layerId: LayerId,
+    updates: Partial<TextLayer>,
+    historyMode: HistoryMode = 'immediate',
+  ) {
+    applyAppStateChange((currentState) => ({
       ...currentState,
       layers: currentState.layers.map((layer) => {
         if (layer.id !== layerId || !isTextLayer(layer)) {
@@ -310,11 +584,15 @@ export function App() {
 
         return { ...layer, ...updates };
       }),
-    }));
+    }), historyMode);
   }
 
-  function updateLayer(layerId: LayerId, updates: Partial<EditorLayer>) {
-    setAppState((currentState) => ({
+  function updateLayer(
+    layerId: LayerId,
+    updates: Partial<EditorLayer>,
+    historyMode: HistoryMode = 'immediate',
+  ) {
+    applyAppStateChange((currentState) => ({
       ...currentState,
       layers: currentState.layers.map((layer) => {
         if (layer.id !== layerId) {
@@ -335,14 +613,14 @@ export function App() {
           kind: 'image',
         };
       }),
-    }));
+    }), historyMode);
   }
 
   function transformImageLayer(
     layerId: LayerId,
     transform: (layer: Extract<EditorLayer, { kind: 'image' }>) => Extract<EditorLayer, { kind: 'image' }>,
   ) {
-    setAppState((currentState) => ({
+    applyAppStateChange((currentState) => ({
       ...currentState,
       layers: currentState.layers.map((layer) => {
         if (layer.id !== layerId || !isImageLayer(layer)) {
@@ -359,7 +637,7 @@ export function App() {
     fileName: string,
     insertionMode: ImageInsertionMode,
   ) {
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       const nextSequence = nextImageLayerSequenceRef.current;
       nextImageLayerSequenceRef.current += 1;
       const nextLayerId = `image-${nextSequence}`;
@@ -429,7 +707,7 @@ export function App() {
   }
 
   function applyLayerSettingsToAllLayers(sourceLayerId: LayerId) {
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       const sourceLayer = currentState.layers.find((layer) => layer.id === sourceLayerId);
 
       if (!sourceLayer || !isTextLayer(sourceLayer)) {
@@ -462,7 +740,7 @@ export function App() {
   }
 
   function addLayer() {
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       const nextSequence = nextLayerSequenceRef.current;
       nextLayerSequenceRef.current += 1;
       const nextLayerId = `layer-${nextSequence}`;
@@ -496,7 +774,7 @@ export function App() {
       return;
     }
 
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       const sourceIndex = currentState.layers.findIndex((layer) => layer.id === sourceLayerId);
       const targetIndex = currentState.layers.findIndex((layer) => layer.id === targetLayerId);
 
@@ -512,7 +790,7 @@ export function App() {
   }
 
   function removeLayer(layerId: LayerId) {
-    setAppState((currentState) => {
+    applyAppStateChange((currentState) => {
       if (currentState.layers.length <= 1) {
         return currentState;
       }
@@ -825,6 +1103,35 @@ export function App() {
     };
   });
 
+  useEffect(() => {
+    function handleHistoryKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || isPreInsertModalOpenRef.current || isEditableTarget(event.target)) {
+        return;
+      }
+
+      const isUndoShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.code === 'KeyZ';
+
+      if (!isUndoShortcut) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (event.shiftKey) {
+        handleRedo();
+        return;
+      }
+
+      handleUndo();
+    }
+
+    document.addEventListener('keydown', handleHistoryKeyDown);
+    return () => document.removeEventListener('keydown', handleHistoryKeyDown);
+  }, []);
+
   const workspaceStyle = {
     '--inspector-width': `${inspectorWidth}%`,
   } as CSSProperties;
@@ -940,33 +1247,59 @@ export function App() {
               <p className="preview-hint">Paste. Caption. Export.</p>
             </div>
             <div className="preview-toolbar" role="toolbar" aria-label="Canvas zoom">
+              <button
+                type="button"
+                className="mini-action-button preview-toolbar-button"
+                onClick={handleUndo}
+                disabled={!historyState.canUndo}
+                aria-label="Undo"
+                title="Undo"
+              >
+                ↶
+              </button>
+              <button
+                type="button"
+                className="mini-action-button preview-toolbar-button"
+                onClick={handleRedo}
+                disabled={!historyState.canRedo}
+                aria-label="Redo"
+                title="Redo"
+              >
+                ↷
+              </button>
               <span className="preview-zoom-label">
                 {Math.round(appState.previewZoomFactor * 100)}%
               </span>
               <button
                 type="button"
-                className="mini-action-button"
+                className="mini-action-button preview-toolbar-button"
                 onClick={() =>
                   updatePreviewZoom((currentZoom) => currentZoom - PREVIEW_ZOOM_STEP)
                 }
+                aria-label="Zoom out"
+                title="Zoom out"
               >
-                Zoom out
+                −
               </button>
               <button
                 type="button"
-                className="mini-action-button"
+                className="mini-action-button preview-toolbar-button"
                 onClick={() =>
                   updatePreviewZoom((currentZoom) => currentZoom + PREVIEW_ZOOM_STEP)
                 }
+                aria-label="Zoom in"
+                title="Zoom in"
               >
-                Zoom in
+                +
               </button>
               <button
                 type="button"
-                className="mini-action-button"
+                className="mini-action-button preview-toolbar-button"
                 onClick={() => updatePreviewZoom(() => DEFAULT_PREVIEW_ZOOM_FACTOR)}
+                aria-label="Reset zoom"
+                title="Reset zoom"
               >
-                Reset zoom
+                1:1
               </button>
             </div>
           </div>
@@ -1007,13 +1340,29 @@ export function App() {
                 width={appState.canvasSize.width}
                 height={appState.canvasSize.height}
                 layers={appState.layers}
+                sceneImageEffects={appState.sceneImageEffects}
                 previewPan={previewPan}
                 previewZoomFactor={appState.previewZoomFactor}
+                isSceneCropMode={appState.activeSceneBoundsMode === 'crop'}
+                sceneCropDraft={appState.sceneBoundsDraft.cropRect}
                 isStageHovered={isPreviewStageHovered}
+                onDocumentInteractionStart={beginHistoryTransaction}
+                onDocumentInteractionEnd={commitHistoryTransaction}
+                onInlineTextEditStart={beginHistoryTransaction}
+                onInlineTextEditEnd={commitHistoryTransaction}
                 onActiveLayerChange={(layerId) =>
                   setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
                 }
                 onLayerChange={updateLayer}
+                onSceneCropDraftChange={(cropRect) =>
+                  setAppState((currentState) => ({
+                    ...currentState,
+                    sceneBoundsDraft: {
+                      ...currentState.sceneBoundsDraft,
+                      cropRect,
+                    },
+                  }))
+                }
               />
             </div>
           </div>
@@ -1026,23 +1375,62 @@ export function App() {
 
         <ControlPanel
           activeTool={activeTool}
+          activeSceneBoundsMode={appState.activeSceneBoundsMode}
           activeLayerId={appState.activeLayerId}
           isImportModalOpen={preInsertDraft !== null}
           layers={appState.layers}
+          sceneCropDraft={appState.sceneBoundsDraft.cropRect}
+          sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
+          sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
+          sceneExpandDraft={appState.sceneBoundsDraft.expand}
           onOpenAdvancedImportClipboard={(opener) => {
             void handleAdvancedImportClipboardClick(opener);
           }}
           onOpenAdvancedImportFile={handleAdvancedImportFileClick}
           onBackgroundPointerDown={blurActiveEditable}
+          onApplySceneCrop={applySceneCropCommit}
+          onApplySceneExpand={applySceneExpandCommit}
           onActiveLayerChange={(layerId) =>
             setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
           }
+          onCancelSceneBounds={cancelSceneBounds}
           onClearActiveLayer={() =>
             setAppState((currentState) => ({ ...currentState, activeLayerId: null }))
           }
           onAddLayer={addLayer}
           onApplySettingsToAllLayers={applyLayerSettingsToAllLayers}
+          onSceneBoundsFillColorChange={(fillColor) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              sceneBoundsDraft: {
+                ...currentState.sceneBoundsDraft,
+                fillColor,
+              },
+            }))
+          }
+          onSceneBoundsFillModeChange={(fillMode) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              sceneBoundsDraft: {
+                ...currentState.sceneBoundsDraft,
+                fillMode,
+              },
+            }))
+          }
+          onSceneBoundsPreset={applySceneBoundsPreset}
+          onSceneExpandDraftChange={updateSceneExpandDraft}
+          onStartSceneCrop={() =>
+            setAppState((currentState) => ({
+              ...currentState,
+              activeSceneBoundsMode: 'crop',
+              sceneBoundsDraft: {
+                ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+              },
+            }))
+          }
           onTextLayerChange={updateTextLayer}
+          onTextEditSessionStart={beginHistoryTransaction}
+          onTextEditSessionEnd={commitHistoryTransaction}
           onRotateImageLayer={(layerId, direction) =>
             transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
           }
@@ -1164,10 +1552,17 @@ export function App() {
 }
 
 function createExpandedBaseImage(
-  image: CanvasImageSource,
+  image: CanvasImageSource | null,
   currentCanvasSize: { width: number; height: number },
   nextCanvasSize: { width: number; height: number },
   offset: { x: number; y: number },
+  fillOptions: {
+    fillMode: ReturnType<typeof createDefaultAppState>['sceneBoundsDraft']['fillMode'];
+    fillColor: string;
+  } = {
+    fillMode: 'transparent',
+    fillColor: '#000000',
+  },
 ) {
   const expandedCanvas = document.createElement('canvas');
   expandedCanvas.width = nextCanvasSize.width;
@@ -1175,17 +1570,28 @@ function createExpandedBaseImage(
   const expandedContext = expandedCanvas.getContext('2d');
 
   if (!expandedContext) {
-    return image as HTMLImageElement;
+    return image as HTMLImageElement | null;
   }
 
   expandedContext.clearRect(0, 0, nextCanvasSize.width, nextCanvasSize.height);
-  expandedContext.drawImage(
+  paintExpandedCanvasFill(expandedContext, {
     image,
-    offset.x,
-    offset.y,
-    currentCanvasSize.width,
-    currentCanvasSize.height,
-  );
+    currentCanvasSize,
+    nextCanvasSize,
+    offset,
+    fillMode: fillOptions.fillMode,
+    fillColor: fillOptions.fillColor,
+  });
+
+  if (image) {
+    expandedContext.drawImage(
+      image,
+      offset.x,
+      offset.y,
+      currentCanvasSize.width,
+      currentCanvasSize.height,
+    );
+  }
 
   return expandedCanvas as unknown as HTMLImageElement;
 }
@@ -1254,4 +1660,358 @@ function createPreparedImageFromDraft(preInsertModalDraft: NonNullable<ReturnTyp
   preparedContext.restore();
 
   return preparedCanvas as unknown as HTMLImageElement;
+}
+
+function createSceneCroppedImage(
+  image: HTMLImageElement,
+  currentCanvasSize: { width: number; height: number },
+  cropRect: { x: number; y: number; width: number; height: number },
+) {
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = currentCanvasSize.width;
+  sourceCanvas.height = currentCanvasSize.height;
+  const sourceContext = sourceCanvas.getContext('2d');
+  const croppedCanvas = document.createElement('canvas');
+  croppedCanvas.width = cropRect.width;
+  croppedCanvas.height = cropRect.height;
+  const croppedContext = croppedCanvas.getContext('2d');
+
+  if (!sourceContext || !croppedContext) {
+    return image;
+  }
+
+  sourceContext.clearRect(0, 0, currentCanvasSize.width, currentCanvasSize.height);
+  sourceContext.drawImage(image, 0, 0, currentCanvasSize.width, currentCanvasSize.height);
+  croppedContext.clearRect(0, 0, cropRect.width, cropRect.height);
+  croppedContext.drawImage(
+    sourceCanvas,
+    cropRect.x,
+    cropRect.y,
+    cropRect.width,
+    cropRect.height,
+    0,
+    0,
+    cropRect.width,
+    cropRect.height,
+  );
+
+  return croppedCanvas as unknown as HTMLImageElement;
+}
+
+function createResetSceneBoundsDraft(
+  draft: ReturnType<typeof createDefaultAppState>['sceneBoundsDraft'],
+) {
+  return {
+    cropRect: null,
+    expand: {
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+    },
+    fillMode: draft.fillMode,
+    fillColor: draft.fillColor,
+  };
+}
+
+function cloneLayers(layers: EditorLayer[]) {
+  return layers.map((layer) => {
+    if (isTextLayer(layer)) {
+      return {
+        ...layer,
+        box: { ...layer.box },
+      };
+    }
+
+    return {
+      ...layer,
+      box: { ...layer.box },
+      sourceSize: { ...layer.sourceSize },
+      skew: { ...layer.skew },
+    };
+  });
+}
+
+function historySnapshotsEqual(a: EditorHistorySnapshot, b: EditorHistorySnapshot) {
+  if (a.image !== b.image || a.activeLayerId !== b.activeLayerId) {
+    return false;
+  }
+
+  if (
+    a.canvasSize.width !== b.canvasSize.width ||
+    a.canvasSize.height !== b.canvasSize.height ||
+    a.layers.length !== b.layers.length
+  ) {
+    return false;
+  }
+
+  return a.layers.every((layer, index) => {
+    const candidate = b.layers[index];
+
+    if (!candidate || layer.kind !== candidate.kind || layer.id !== candidate.id) {
+      return false;
+    }
+
+    if (
+      layer.name !== candidate.name ||
+      layer.opacity !== candidate.opacity ||
+      layer.box.x !== candidate.box.x ||
+      layer.box.y !== candidate.box.y ||
+      layer.box.width !== candidate.box.width ||
+      layer.box.height !== candidate.box.height ||
+      layer.box.rotation !== candidate.box.rotation
+    ) {
+      return false;
+    }
+
+    if (isTextLayer(layer) && isTextLayer(candidate)) {
+      return (
+        layer.text === candidate.text &&
+        layer.fontFamily === candidate.fontFamily &&
+        layer.fontSize === candidate.fontSize &&
+        layer.fillStyle === candidate.fillStyle &&
+        layer.strokeStyle === candidate.strokeStyle &&
+        layer.outlineWidth === candidate.outlineWidth &&
+        layer.textAlign === candidate.textAlign &&
+        layer.verticalAlign === candidate.verticalAlign &&
+        layer.effect === candidate.effect &&
+        layer.allCaps === candidate.allCaps &&
+        layer.bold === candidate.bold &&
+        layer.italic === candidate.italic
+      );
+    }
+
+    if (isImageLayer(layer) && isImageLayer(candidate)) {
+      return (
+        layer.image === candidate.image &&
+        layer.sourceSize.width === candidate.sourceSize.width &&
+        layer.sourceSize.height === candidate.sourceSize.height &&
+        layer.skew.x === candidate.skew.x &&
+        layer.skew.y === candidate.skew.y
+      );
+    }
+
+    return false;
+  });
+}
+
+function resolveSceneExpandPreset(
+  preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
+  canvasSize: { width: number; height: number },
+) {
+  if (preset === 'equal-margin') {
+    return {
+      left: EQUAL_MARGIN_PRESET,
+      right: EQUAL_MARGIN_PRESET,
+      top: EQUAL_MARGIN_PRESET,
+      bottom: EQUAL_MARGIN_PRESET,
+    };
+  }
+
+  if (preset === 'top-caption') {
+    return {
+      left: 0,
+      right: 0,
+      top: CAPTION_SPACE_PRESET,
+      bottom: 0,
+    };
+  }
+
+  if (preset === 'bottom-caption') {
+    return {
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: CAPTION_SPACE_PRESET,
+    };
+  }
+
+  if (canvasSize.width === canvasSize.height) {
+    return {
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+    };
+  }
+
+  if (canvasSize.width > canvasSize.height) {
+    const difference = canvasSize.width - canvasSize.height;
+    const top = Math.floor(difference / 2);
+    const bottom = difference - top;
+
+    return {
+      left: 0,
+      right: 0,
+      top,
+      bottom,
+    };
+  }
+
+  const difference = canvasSize.height - canvasSize.width;
+  const left = Math.floor(difference / 2);
+  const right = difference - left;
+
+  return {
+    left,
+    right,
+    top: 0,
+    bottom: 0,
+  };
+}
+
+function paintExpandedCanvasFill(
+  context: CanvasRenderingContext2D,
+  input: {
+    image: CanvasImageSource | null;
+    currentCanvasSize: { width: number; height: number };
+    nextCanvasSize: { width: number; height: number };
+    offset: { x: number; y: number };
+    fillMode: ReturnType<typeof createDefaultAppState>['sceneBoundsDraft']['fillMode'];
+    fillColor: string;
+  },
+) {
+  if (input.fillMode === 'transparent') {
+    return;
+  }
+
+  if (input.fillMode === 'solid-color') {
+    context.fillStyle = input.fillColor;
+    context.fillRect(0, 0, input.nextCanvasSize.width, input.nextCanvasSize.height);
+    return;
+  }
+
+  const sourceContext = createSourceCanvasContext(
+    input.image,
+    input.currentCanvasSize,
+  );
+
+  if (!sourceContext) {
+    return;
+  }
+
+  if (input.fillMode === 'average-border') {
+    const averageColor = resolveBoundsFill({
+      fillMode: input.fillMode,
+      solidColor: input.fillColor,
+      borderPixels: [
+        ...getBorderPixels(sourceContext, input.currentCanvasSize, 'left'),
+        ...getBorderPixels(sourceContext, input.currentCanvasSize, 'right'),
+        ...getBorderPixels(sourceContext, input.currentCanvasSize, 'top'),
+        ...getBorderPixels(sourceContext, input.currentCanvasSize, 'bottom'),
+      ],
+      side: 'left',
+    });
+
+    if (!averageColor) {
+      return;
+    }
+
+    context.fillStyle = averageColor;
+    context.fillRect(0, 0, input.nextCanvasSize.width, input.nextCanvasSize.height);
+    return;
+  }
+
+  const leftFill = resolveBoundsFill({
+    fillMode: input.fillMode,
+    solidColor: input.fillColor,
+    borderPixels: getBorderPixels(sourceContext, input.currentCanvasSize, 'left'),
+    side: 'left',
+  });
+  const rightFill = resolveBoundsFill({
+    fillMode: input.fillMode,
+    solidColor: input.fillColor,
+    borderPixels: getBorderPixels(sourceContext, input.currentCanvasSize, 'right'),
+    side: 'right',
+  });
+  const topFill = resolveBoundsFill({
+    fillMode: input.fillMode,
+    solidColor: input.fillColor,
+    borderPixels: getBorderPixels(sourceContext, input.currentCanvasSize, 'top'),
+    side: 'top',
+  });
+  const bottomFill = resolveBoundsFill({
+    fillMode: input.fillMode,
+    solidColor: input.fillColor,
+    borderPixels: getBorderPixels(sourceContext, input.currentCanvasSize, 'bottom'),
+    side: 'bottom',
+  });
+  const rightStart = input.offset.x + input.currentCanvasSize.width;
+  const bottomStart = input.offset.y + input.currentCanvasSize.height;
+
+  if (leftFill && input.offset.x > 0) {
+    context.fillStyle = leftFill;
+    context.fillRect(0, 0, input.offset.x, input.nextCanvasSize.height);
+  }
+
+  if (rightFill && rightStart < input.nextCanvasSize.width) {
+    context.fillStyle = rightFill;
+    context.fillRect(
+      rightStart,
+      0,
+      input.nextCanvasSize.width - rightStart,
+      input.nextCanvasSize.height,
+    );
+  }
+
+  if (topFill && input.offset.y > 0) {
+    context.fillStyle = topFill;
+    context.fillRect(input.offset.x, 0, input.currentCanvasSize.width, input.offset.y);
+  }
+
+  if (bottomFill && bottomStart < input.nextCanvasSize.height) {
+    context.fillStyle = bottomFill;
+    context.fillRect(
+      input.offset.x,
+      bottomStart,
+      input.currentCanvasSize.width,
+      input.nextCanvasSize.height - bottomStart,
+    );
+  }
+}
+
+function createSourceCanvasContext(
+  image: CanvasImageSource | null,
+  canvasSize: { width: number; height: number },
+) {
+  if (!image) {
+    return null;
+  }
+
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = canvasSize.width;
+  sourceCanvas.height = canvasSize.height;
+  const sourceContext = sourceCanvas.getContext('2d');
+
+  if (!sourceContext) {
+    return null;
+  }
+
+  sourceContext.clearRect(0, 0, canvasSize.width, canvasSize.height);
+  sourceContext.drawImage(image, 0, 0, canvasSize.width, canvasSize.height);
+  return sourceContext;
+}
+
+function getBorderPixels(
+  context: CanvasRenderingContext2D,
+  canvasSize: { width: number; height: number },
+  side: 'left' | 'right' | 'top' | 'bottom',
+) {
+  if (side === 'left') {
+    return Array.from(context.getImageData(0, 0, 1, canvasSize.height).data);
+  }
+
+  if (side === 'right') {
+    return Array.from(
+      context.getImageData(Math.max(0, canvasSize.width - 1), 0, 1, canvasSize.height).data,
+    );
+  }
+
+  if (side === 'top') {
+    return Array.from(context.getImageData(0, 0, canvasSize.width, 1).data);
+  }
+
+  return Array.from(
+    context.getImageData(0, Math.max(0, canvasSize.height - 1), canvasSize.width, 1).data,
+  );
 }

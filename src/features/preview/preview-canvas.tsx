@@ -5,8 +5,17 @@ import {
   getTextLayers,
   resizeImageLayerBox,
 } from '../image/image-layer-utils';
+import { createDefaultSceneImageEffects } from '../image/image-effects';
+import { normalizeSceneCropRect } from '../bounds/crop-overlay';
 import { isImageLayer, isTextLayer } from '../../app/types';
-import type { EditorLayer, LayerId, TextLayer, TextBox } from '../../app/types';
+import type {
+  EditorLayer,
+  LayerId,
+  SceneCropDraftRect,
+  SceneImageEffects,
+  TextLayer,
+  TextBox,
+} from '../../app/types';
 import { getTextLayoutMetrics, renderPreview } from '../canvas/canvas-renderer';
 
 type PreviewCanvasProps = {
@@ -19,8 +28,20 @@ type PreviewCanvasProps = {
   layers: EditorLayer[];
   previewPan?: Point;
   previewZoomFactor?: number;
+  sceneImageEffects?: SceneImageEffects;
+  isSceneCropMode?: boolean;
+  sceneCropDraft?: SceneCropDraftRect | null;
+  onDocumentInteractionEnd?: () => void;
+  onDocumentInteractionStart?: () => void;
+  onInlineTextEditEnd?: () => void;
+  onInlineTextEditStart?: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onLayerChange: (layerId: LayerId, updates: Partial<EditorLayer>) => void;
+  onLayerChange: (
+    layerId: LayerId,
+    updates: Partial<EditorLayer>,
+    historyMode?: 'immediate' | 'defer',
+  ) => void;
+  onSceneCropDraftChange?: (draft: SceneCropDraftRect | null) => void;
 };
 
 type InteractionMode =
@@ -35,12 +56,29 @@ type InteractionMode =
     }
   | { type: 'rotate'; layerId: LayerId; startAngle: number; startRotation: number }
   | null;
+type SceneCropInteractionMode =
+  | { type: 'new'; startPoint: Point }
+  | { type: 'move'; startPointer: Point; startRect: NormalizedSceneCropRect }
+  | {
+      type: 'resize';
+      axisX: 'left' | 'right' | null;
+      axisY: 'top' | 'bottom' | null;
+      startPointer: Point;
+      startRect: NormalizedSceneCropRect;
+    }
+  | null;
 
 type Point = { x: number; y: number };
 type ResizeHandle = {
   axisX: 'left' | 'right' | null;
   axisY: 'top' | 'bottom' | null;
   className: string;
+};
+type NormalizedSceneCropRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 const MIN_BOX_WIDTH = 60;
@@ -66,18 +104,106 @@ export function PreviewCanvas({
   layers,
   previewPan = { x: 0, y: 0 },
   previewZoomFactor = 1,
+  sceneImageEffects = createDefaultSceneImageEffects(),
+  isSceneCropMode = false,
+  sceneCropDraft = null,
+  onDocumentInteractionEnd,
+  onDocumentInteractionStart,
+  onInlineTextEditEnd,
+  onInlineTextEditStart,
   onActiveLayerChange,
   onLayerChange,
+  onSceneCropDraftChange,
 }: PreviewCanvasProps) {
   const internalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionMode>(null);
+  const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resolvedCanvasRef = canvasRef ?? internalCanvasRef;
   const [isInteracting, setIsInteracting] = useState(false);
   const [editingLayerId, setEditingLayerId] = useState<LayerId | null>(null);
   const [isPreviewSurfaceHovered, setIsPreviewSurfaceHovered] = useState(false);
   const textLayers = getTextLayers(layers);
+
+  function startSceneCrop(clientX: number, clientY: number) {
+    const point = getCanvasPoint(shellRef.current, width, height, clientX, clientY);
+
+    if (!point) {
+      return;
+    }
+
+    sceneCropInteractionRef.current = {
+      type: 'new',
+      startPoint: point,
+    };
+    onSceneCropDraftChange?.(toSceneCropDraftRect({ x: point.x, y: point.y, width: 0, height: 0 }));
+    setEditingLayerId(null);
+    setIsInteracting(true);
+  }
+
+  function updateSceneCrop(clientX: number, clientY: number) {
+    if (!isSceneCropMode || !sceneCropInteractionRef.current) {
+      return;
+    }
+
+    const point = getCanvasPoint(shellRef.current, width, height, clientX, clientY);
+
+    if (!point) {
+      return;
+    }
+
+    const interaction = sceneCropInteractionRef.current;
+
+    if (interaction.type === 'new') {
+      onSceneCropDraftChange?.(
+        toSceneCropDraftRect(
+          normalizeSceneCropRect(
+            {
+              startX: interaction.startPoint.x,
+              startY: interaction.startPoint.y,
+              endX: point.x,
+              endY: point.y,
+            },
+            { width, height },
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (interaction.type === 'move') {
+      onSceneCropDraftChange?.(
+        toSceneCropDraftRect(
+          moveSceneCropRect(
+            interaction.startRect,
+            {
+              x: point.x - interaction.startPointer.x,
+              y: point.y - interaction.startPointer.y,
+            },
+            { width, height },
+          ),
+        ),
+      );
+      return;
+    }
+
+    onSceneCropDraftChange?.(
+      toSceneCropDraftRect(
+        resizeSceneCropRect(
+          interaction.startRect,
+          interaction.axisX,
+          interaction.axisY,
+          {
+            x: point.x - interaction.startPointer.x,
+            y: point.y - interaction.startPointer.y,
+          },
+          { width, height },
+        ),
+      ),
+    );
+  }
 
   useEffect(() => {
     const canvas = resolvedCanvasRef.current;
@@ -101,8 +227,9 @@ export function PreviewCanvas({
       editingLayerId
         ? layers.filter((layer) => !isTextLayer(layer) || layer.id !== editingLayerId)
         : layers,
+      sceneImageEffects,
     );
-  }, [editingLayerId, height, image, layers, resolvedCanvasRef, width]);
+  }, [editingLayerId, height, image, layers, resolvedCanvasRef, sceneImageEffects, width]);
 
   useEffect(() => {
     if (!editingLayerId || textLayers.some((layer) => layer.id === editingLayerId)) {
@@ -149,6 +276,37 @@ export function PreviewCanvas({
   }, [editingLayerId, previewZoomFactor, textLayers]);
 
   useEffect(() => {
+    function handleSceneCropPointerMove(event: PointerEvent) {
+      updateSceneCrop(event.clientX, event.clientY);
+    }
+
+    function handleSceneCropMouseMove(event: MouseEvent) {
+      updateSceneCrop(event.clientX, event.clientY);
+    }
+
+    function handleSceneCropPointerUp() {
+      if (!isSceneCropMode) {
+        return;
+      }
+
+      sceneCropInteractionRef.current = null;
+      setIsInteracting(false);
+    }
+
+    window.addEventListener('pointermove', handleSceneCropPointerMove);
+    window.addEventListener('mousemove', handleSceneCropMouseMove);
+    window.addEventListener('pointerup', handleSceneCropPointerUp);
+    window.addEventListener('mouseup', handleSceneCropPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleSceneCropPointerMove);
+      window.removeEventListener('mousemove', handleSceneCropMouseMove);
+      window.removeEventListener('pointerup', handleSceneCropPointerUp);
+      window.removeEventListener('mouseup', handleSceneCropPointerUp);
+    };
+  }, [height, isSceneCropMode, onSceneCropDraftChange, width]);
+
+  useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       if (!interactionRef.current || !shellRef.current) {
         return;
@@ -184,7 +342,7 @@ export function PreviewCanvas({
             x: interaction.startBox.x + moveDelta.x,
             y: interaction.startBox.y + moveDelta.y,
           },
-        });
+        }, 'defer');
         return;
       }
 
@@ -208,7 +366,7 @@ export function PreviewCanvas({
 
         onLayerChange(interaction.layerId, {
           box: nextBox,
-        });
+        }, 'defer');
         return;
       }
 
@@ -221,11 +379,15 @@ export function PreviewCanvas({
             ...layer.box,
             rotation: interaction.startRotation + (currentAngle - interaction.startAngle),
           },
-        });
+        }, 'defer');
       }
     }
 
     function handlePointerUp() {
+      if (interactionRef.current) {
+        onDocumentInteractionEnd?.();
+      }
+
       interactionRef.current = null;
       setIsInteracting(false);
     }
@@ -237,14 +399,42 @@ export function PreviewCanvas({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [height, layers, onLayerChange, textLayers, width]);
+  }, [height, layers, onDocumentInteractionEnd, onLayerChange, textLayers, width]);
 
   const isOverlayVisible =
     isStageHovered || isPreviewSurfaceHovered || isInteracting || editingLayerId !== null;
+  const normalizedSceneCropRect =
+    isSceneCropMode && sceneCropDraft
+      ? normalizeSceneCropRect(sceneCropDraft, { width, height })
+      : null;
+  const showLayerOverlay = !isSceneCropMode && isOverlayVisible;
 
   return (
     <div className="preview-viewport">
-      <div className="preview-viewport-content">
+      <div
+        ref={viewportRef}
+        className="preview-viewport-content"
+        onPointerDown={(event) => {
+          if (!isSceneCropMode) {
+            return;
+          }
+
+          if (event.button === 1 || event.button === 2) {
+            return;
+          }
+
+          event.preventDefault();
+          startSceneCrop(event.clientX, event.clientY);
+        }}
+        onMouseDown={(event) => {
+          if (!isSceneCropMode || event.button !== 0) {
+            return;
+          }
+
+          event.preventDefault();
+          startSceneCrop(event.clientX, event.clientY);
+        }}
+      >
         <div
           ref={shellRef}
           className={`preview-surface${isOverlayVisible ? ' preview-surface-overlay-visible' : ''}`}
@@ -283,8 +473,73 @@ export function PreviewCanvas({
             aria-label="Meme preview canvas"
             className="preview-canvas"
           />
+          {normalizedSceneCropRect ? (
+            <div
+              className="scene-crop-overlay"
+              aria-hidden="true"
+              style={getSceneCropOverlayStyle(normalizedSceneCropRect, width, height)}
+            >
+              <button
+                type="button"
+                className="scene-crop-hitbox"
+                aria-label="Move crop selection"
+                onPointerDown={(event) => {
+                  if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
+                    return;
+                  }
+
+                  const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+                  if (!point) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  sceneCropInteractionRef.current = {
+                    type: 'move',
+                    startPointer: point,
+                    startRect: normalizedSceneCropRect,
+                  };
+                  setEditingLayerId(null);
+                  setIsInteracting(true);
+                }}
+              />
+              {RESIZE_HANDLES.map(({ axisX, axisY, className }) => (
+                <button
+                  key={`scene-crop-${axisX ?? 'center'}-${axisY ?? 'center'}`}
+                  type="button"
+                  className={`transform-handle ${className}`}
+                  aria-label="Resize crop selection"
+                  onPointerDown={(event) => {
+                    if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
+                      return;
+                    }
+
+                    const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+                    if (!point) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    event.stopPropagation();
+                    sceneCropInteractionRef.current = {
+                      type: 'resize',
+                      axisX,
+                      axisY,
+                      startPointer: point,
+                      startRect: normalizedSceneCropRect,
+                    };
+                    setEditingLayerId(null);
+                    setIsInteracting(true);
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
           <div className="preview-overlay" aria-hidden="true">
-            {[...layers].reverse().map((layer) => {
+            {!isSceneCropMode ? [...layers].reverse().map((layer) => {
               const isActive = layer.id === activeLayerId;
               const boxStyle = getOverlayBoxStyle(layer.box, width, height);
               const isEditing = isTextLayer(layer) && editingLayerId === layer.id;
@@ -309,6 +564,7 @@ export function PreviewCanvas({
                       return;
                     }
 
+                    onDocumentInteractionStart?.();
                     interactionRef.current = {
                       type: 'move',
                       layerId: layer.id,
@@ -325,6 +581,7 @@ export function PreviewCanvas({
                     event.preventDefault();
                     event.stopPropagation();
                     onActiveLayerChange(layer.id);
+                    onInlineTextEditStart?.();
                     setEditingLayerId(layer.id);
                   }}
                 >
@@ -337,21 +594,37 @@ export function PreviewCanvas({
                       suppressContentEditableWarning
                       style={getEditorTextStyle(layer, previewZoomFactor)}
                       onPointerDown={(event) => event.stopPropagation()}
-                      onBlur={() => setEditingLayerId(null)}
+                      onBlur={(event) => {
+                        onLayerChange(layer.id, {
+                          text: finalizeInlineEditorText(
+                            (event.currentTarget as HTMLDivElement).innerText,
+                          ),
+                        }, 'defer');
+                        setEditingLayerId(null);
+                        onInlineTextEditEnd?.();
+                      }}
                       onInput={(event) =>
                         onLayerChange(layer.id, {
-                          text: (event.currentTarget as HTMLDivElement).innerText,
-                        })
+                          text: normalizeInlineEditorInput(
+                            (event.currentTarget as HTMLDivElement).innerText,
+                          ),
+                        }, 'defer')
                       }
                       onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         if (event.key === 'Escape') {
                           event.preventDefault();
+                          onLayerChange(layer.id, {
+                            text: finalizeInlineEditorText(
+                              (event.currentTarget as HTMLDivElement).innerText,
+                            ),
+                          }, 'defer');
                           setEditingLayerId(null);
+                          onInlineTextEditEnd?.();
                         }
                       }}
                     />
                   ) : null}
-                  {isOverlayVisible ? (
+                  {showLayerOverlay ? (
                     <>
                       {RESIZE_HANDLES.map(({ axisX, axisY, className }) => (
                         <button
@@ -379,6 +652,7 @@ export function PreviewCanvas({
 
                             onActiveLayerChange(layer.id);
                             setEditingLayerId(null);
+                            onDocumentInteractionStart?.();
                             interactionRef.current = {
                               type: 'resize',
                               axisX,
@@ -416,6 +690,7 @@ export function PreviewCanvas({
                           const center = getBoxCenter(layer.box);
                           onActiveLayerChange(layer.id);
                           setEditingLayerId(null);
+                          onDocumentInteractionStart?.();
 
                           interactionRef.current = {
                             type: 'rotate',
@@ -432,7 +707,7 @@ export function PreviewCanvas({
                   ) : null}
                 </div>
               );
-            })}
+            }) : null}
           </div>
         </div>
       </div>
@@ -573,7 +848,86 @@ function getOverlayBoxStyle(box: TextLayer['box'], canvasWidth: number, canvasHe
   };
 }
 
-function getEditorTextStyle(layer: TextLayer, previewZoomFactor: number) {
+function getSceneCropOverlayStyle(
+  cropRect: { x: number; y: number; width: number; height: number },
+  canvasWidth: number,
+  canvasHeight: number,
+) {
+  return {
+    left: `${(cropRect.x / canvasWidth) * 100}%`,
+    top: `${(cropRect.y / canvasHeight) * 100}%`,
+    width: `${(cropRect.width / canvasWidth) * 100}%`,
+    height: `${(cropRect.height / canvasHeight) * 100}%`,
+  };
+}
+
+function toSceneCropDraftRect(rect: NormalizedSceneCropRect): SceneCropDraftRect {
+  return {
+    startX: rect.x,
+    startY: rect.y,
+    endX: rect.x + rect.width,
+    endY: rect.y + rect.height,
+  };
+}
+
+function moveSceneCropRect(
+  rect: NormalizedSceneCropRect,
+  delta: Point,
+  canvasSize: { width: number; height: number },
+) {
+  const x = clamp(rect.x + delta.x, 0, canvasSize.width - rect.width);
+  const y = clamp(rect.y + delta.y, 0, canvasSize.height - rect.height);
+
+  return {
+    ...rect,
+    x,
+    y,
+  };
+}
+
+function resizeSceneCropRect(
+  startRect: NormalizedSceneCropRect,
+  axisX: 'left' | 'right' | null,
+  axisY: 'top' | 'bottom' | null,
+  delta: Point,
+  canvasSize: { width: number; height: number },
+) {
+  let left = startRect.x;
+  let top = startRect.y;
+  let right = startRect.x + startRect.width;
+  let bottom = startRect.y + startRect.height;
+
+  if (axisX === 'left') {
+    left += delta.x;
+  } else if (axisX === 'right') {
+    right += delta.x;
+  }
+
+  if (axisY === 'top') {
+    top += delta.y;
+  } else if (axisY === 'bottom') {
+    bottom += delta.y;
+  }
+
+  const normalized = normalizeSceneCropRect(
+    {
+      startX: left,
+      startY: top,
+      endX: right,
+      endY: bottom,
+    },
+    canvasSize,
+  );
+
+  return {
+    x: normalized.x,
+    y: normalized.y,
+    width: Math.max(1, normalized.width),
+    height: Math.max(1, normalized.height),
+  };
+}
+
+function getEditorTextStyle(layer: TextLayer, previewZoomFactor = 1) {
   const metrics = getTextLayoutMetrics(layer);
   const computedTextAlign =
     layer.textAlign === 'left' ? 'left' : layer.textAlign === 'right' ? 'right' : 'center';
@@ -622,6 +976,14 @@ function syncEditableText(element: HTMLDivElement, text: string) {
   element.innerText = text;
 }
 
+export function normalizeInlineEditorInput(text: string) {
+  return text.replace(/\r\n/g, '\n');
+}
+
+export function finalizeInlineEditorText(text: string) {
+  return normalizeInlineEditorInput(text).replace(/\n+$/, '');
+}
+
 function fitEditorTextToBounds(
   element: HTMLDivElement,
   layer: TextLayer | null,
@@ -631,7 +993,10 @@ function fitEditorTextToBounds(
     return;
   }
 
-  const baseMetrics = getTextLayoutMetrics(layer);
+  const baseMetrics = getTextLayoutMetrics({
+    ...layer,
+    text: finalizeInlineEditorText(element.innerText || layer.text),
+  });
 
   if (!baseMetrics) {
     return;
@@ -667,4 +1032,8 @@ function moveCaretToEnd(element: HTMLDivElement) {
   range.collapse(false);
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }

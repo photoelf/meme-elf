@@ -14,6 +14,21 @@ export const ADVANCED_IMPORT_PLACEMENT_MODE_OPTIONS = [
   'outside-top',
   'outside-bottom',
 ] as const;
+export const SCENE_BOUNDS_FILL_MODE_OPTIONS = [
+  'transparent',
+  'solid-color',
+  'sampled-edge',
+  'average-border',
+] as const;
+export const SCENE_IMAGE_EFFECT_OPTIONS = [
+  'brightness',
+  'contrast',
+  'saturation',
+  'hue',
+  'grayscale',
+  'sepia',
+  'invert',
+] as const;
 
 export type LayerId = string;
 export type TextAlign = (typeof TEXT_ALIGN_OPTIONS)[number];
@@ -23,7 +38,9 @@ export type LayerKind = (typeof LAYER_KIND_OPTIONS)[number];
 export type ModalSourceKind = (typeof MODAL_SOURCE_KIND_OPTIONS)[number];
 export type AdvancedImportPlacementMode =
   (typeof ADVANCED_IMPORT_PLACEMENT_MODE_OPTIONS)[number];
+export type SceneBoundsFillMode = (typeof SCENE_BOUNDS_FILL_MODE_OPTIONS)[number];
 export type PreviewRotationQuarterTurns = 0 | 1 | 2 | 3;
+export type SceneImageEffectKind = (typeof SCENE_IMAGE_EFFECT_OPTIONS)[number];
 
 export type TextBox = {
   x: number;
@@ -43,6 +60,37 @@ export type CropDraftBox = {
   startY: number;
   endX: number;
   endY: number;
+};
+
+export type SceneCropDraftRect = {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+};
+
+export type SceneExpandDraft = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+export type SceneBoundsDraft = {
+  cropRect: SceneCropDraftRect | null;
+  expand: SceneExpandDraft;
+  fillMode: SceneBoundsFillMode;
+  fillColor: string;
+};
+
+export type SceneImageEffects = {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  hue: number;
+  grayscale: boolean;
+  sepia: boolean;
+  invert: boolean;
 };
 
 export type PendingPreparedImageSource = {
@@ -122,4 +170,7 @@ export type AppState = {
   previewZoomFactor: number;
   preInsertModalDraft: PreInsertModalDraft | null;
   preferredAdvancedImportPlacementMode: AdvancedImportPlacementMode;
+  sceneImageEffects: SceneImageEffects;
+  sceneBoundsDraft: SceneBoundsDraft;
+  activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
 };

@@ -3,10 +3,12 @@ import type {
   AppState,
   BaseLayer,
   LayerKind,
+  SceneBoundsDraft,
   TextBox,
   TextLayer,
   VerticalAlign,
 } from './types';
+import { createDefaultSceneImageEffects } from '../features/image/image-effects';
 
 export const DEFAULT_CANVAS_SIZE = {
   width: 800,
@@ -21,6 +23,17 @@ export const DEFAULT_STROKE = '#000000';
 export const DEFAULT_OUTLINE_WIDTH = 5;
 export const DEFAULT_PREVIEW_ZOOM_FACTOR = 1;
 export const DEFAULT_ADVANCED_IMPORT_PLACEMENT: AdvancedImportPlacementMode = 'inside-canvas';
+export const DEFAULT_SCENE_BOUNDS_DRAFT: SceneBoundsDraft = {
+  cropRect: null,
+  expand: {
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  fillMode: 'transparent',
+  fillColor: '#000000',
+};
 
 function createDefaultTextBox(y: number, height: number): TextBox {
   return {
@@ -88,5 +101,13 @@ export function createDefaultAppState(): AppState {
     previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
     preInsertModalDraft: null,
     preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
+    sceneImageEffects: createDefaultSceneImageEffects(),
+    sceneBoundsDraft: {
+      cropRect: null,
+      expand: { ...DEFAULT_SCENE_BOUNDS_DRAFT.expand },
+      fillMode: DEFAULT_SCENE_BOUNDS_DRAFT.fillMode,
+      fillColor: DEFAULT_SCENE_BOUNDS_DRAFT.fillColor,
+    },
+    activeSceneBoundsMode: 'idle',
   };
 }

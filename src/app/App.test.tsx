@@ -573,6 +573,29 @@ describe('App', () => {
     expect(previewSurface.style.width).toBe(initialWidthStyle);
   });
 
+  it('undoes with the physical Z key even when the keyboard layout is not English', async () => {
+    render(<App />);
+    const topTextarea = screen.getByRole('textbox', { name: /top text/i });
+
+    fireEvent.focus(topTextarea);
+    fireEvent.change(topTextarea, {
+      target: { value: 'NEW TOP TEXT' },
+    });
+    fireEvent.blur(topTextarea);
+
+    expect(topTextarea).toHaveValue('NEW TOP TEXT');
+
+    fireEvent.keyDown(document, {
+      code: 'KeyZ',
+      ctrlKey: true,
+      key: 'я',
+    });
+
+    await waitFor(() => {
+      expect(topTextarea).toHaveValue('');
+    });
+  });
+
   it('pans the zoomed canvas with the middle mouse button instead of relying on scrollbars', () => {
     const { container } = render(<App />);
 
@@ -1273,6 +1296,176 @@ describe('App', () => {
     expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '600');
   });
 
+  it('applies a scene crop from the bounds controls without mutating the canvas before apply', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(previewSurface, { clientX: 100, clientY: 60, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 700, clientY: 360 });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '900');
+
+    fireEvent.click(screen.getByRole('button', { name: /apply crop/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/scene cropped/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '600');
+  });
+
+  it('cancels scene crop draft state without changing the committed canvas size', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(previewSurface, { clientX: 100, clientY: 60, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 700, clientY: 360 });
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '900');
+    expect(screen.queryByText(/scene cropped/i)).not.toBeInTheDocument();
+  });
+
+  it('expands the scene from the left without scaling content before apply', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 800);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /expand left/i }), {
+      target: { value: '120' },
+    });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+
+    fireEvent.click(screen.getByRole('button', { name: /apply bounds/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/canvas expanded/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '920');
+  });
+
+  it('cancels pending scene expansion without mutating the committed canvas size', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 800);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /expand top/i }), {
+      target: { value: '60' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+    expect(screen.queryByText(/canvas expanded/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /expand top/i })).toHaveValue(0);
+  });
+
+  it('keeps bounds fill controls selectable before applying expansion', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 800);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /fill mode/i }), {
+      target: { value: 'solid-color' },
+    });
+    fireEvent.change(screen.getByLabelText(/fill color/i), {
+      target: { value: '#112233' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /expand right/i }), {
+      target: { value: '40' },
+    });
+
+    expect(screen.getByRole('combobox', { name: /fill mode/i })).toHaveValue('solid-color');
+    expect(screen.getByLabelText(/fill color/i)).toHaveValue('#112233');
+
+    fireEvent.click(screen.getByRole('button', { name: /apply bounds/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/canvas expanded/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('combobox', { name: /fill mode/i })).toHaveValue('solid-color');
+    expect(screen.getByLabelText(/fill color/i)).toHaveValue('#112233');
+  });
+
+  it('applies expansion presets into the pending bounds draft', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 800);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /add margin equally/i }));
+    expect(screen.getByRole('spinbutton', { name: /expand left/i })).toHaveValue(48);
+    expect(screen.getByRole('spinbutton', { name: /expand right/i })).toHaveValue(48);
+    expect(screen.getByRole('spinbutton', { name: /expand top/i })).toHaveValue(48);
+    expect(screen.getByRole('spinbutton', { name: /expand bottom/i })).toHaveValue(48);
+
+    fireEvent.click(screen.getByRole('button', { name: /add top caption space/i }));
+    expect(screen.getByRole('spinbutton', { name: /expand top/i })).toHaveValue(120);
+    expect(screen.getByRole('spinbutton', { name: /expand bottom/i })).toHaveValue(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /add bottom caption space/i }));
+    expect(screen.getByRole('spinbutton', { name: /expand top/i })).toHaveValue(0);
+    expect(screen.getByRole('spinbutton', { name: /expand bottom/i })).toHaveValue(120);
+
+    fireEvent.click(screen.getByRole('button', { name: /square canvas/i }));
+    expect(screen.getByRole('spinbutton', { name: /expand left/i })).toHaveValue(0);
+    expect(screen.getByRole('spinbutton', { name: /expand right/i })).toHaveValue(0);
+    expect(screen.getByRole('spinbutton', { name: /expand top/i })).toHaveValue(175);
+    expect(screen.getByRole('spinbutton', { name: /expand bottom/i })).toHaveValue(175);
+  });
+
   it('keeps layer ids stable after add, remove, and add again', async () => {
     const { container } = render(<App />);
 
@@ -1344,7 +1537,11 @@ function createCanvasContextStub() {
   return {
     clearRect: vi.fn(),
     drawImage: vi.fn(),
+    fillRect: vi.fn(),
     fillText: vi.fn(),
+    getImageData: vi.fn((x: number, y: number, width: number, height: number) => ({
+      data: new Uint8ClampedArray(Math.max(1, width * height) * 4),
+    })),
     measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
     restore: vi.fn(),
     rotate: vi.fn(),

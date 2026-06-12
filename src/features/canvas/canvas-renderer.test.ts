@@ -5,6 +5,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { AppState, TextLayer } from '../../app/types';
 import { getContainedCanvasSize, renderPreview } from './canvas-renderer';
 import { PreviewCanvas } from '../preview/preview-canvas';
+import { createDefaultSceneImageEffects } from '../image/image-effects';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -583,6 +584,41 @@ describe('renderPreview', () => {
     expect(context.rotate).toHaveBeenCalledWith(Math.PI / 2);
     expect(context.scale).toHaveBeenCalledWith(-1, 1);
     expect(context.drawImage).toHaveBeenCalledWith(imageLayerImage, -120, -90, 240, 180);
+  });
+
+  it('renders the full scene through an offscreen filter pass when scene effects are active', () => {
+    const context = createContextStub();
+    const filteredSurface = document.createElement('canvas');
+    const filteredContext = createContextStub();
+    vi.spyOn(filteredSurface, 'getContext').mockReturnValue(filteredContext);
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, 'createElement');
+    createElementSpy.mockImplementation((tagName: string) => {
+      if (tagName === 'canvas') {
+        return filteredSurface;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    renderPreview(
+      context,
+      {} as CanvasImageSource,
+      { width: 800, height: 450 },
+      [],
+      {
+        ...createDefaultSceneImageEffects(),
+        brightness: 125,
+      },
+    );
+
+    expect(filteredSurface.width).toBe(800);
+    expect(filteredSurface.height).toBe(450);
+    expect(filteredContext.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 800, 450);
+    expect(context.filter).toBe(
+      'brightness(125%) contrast(100%) saturate(100%) hue-rotate(0deg) grayscale(0%) sepia(0%) invert(0%)',
+    );
+    expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
   });
 });
 
