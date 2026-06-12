@@ -514,6 +514,10 @@ button {
   width: 100%;
 }
 
+.tool-rail-tabs-five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .inspector-card {
   display: grid;
   gap: 10px;
@@ -730,6 +734,13 @@ button {
   gap: 8px;
 }
 
+.watermark-section {
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
 .effect-card {
   display: grid;
   gap: 8px;
@@ -889,6 +900,11 @@ button {
 .text-input {
   min-height: 78px;
   resize: vertical;
+}
+
+.watermark-text-input {
+  min-height: 42px;
+  resize: none;
 }
 
 .text-input::placeholder {

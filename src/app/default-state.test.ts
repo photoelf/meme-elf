@@ -91,6 +91,16 @@ describe('createDefaultAppState', () => {
         { id: 'posterize', kind: 'posterize', value: 0 },
         { id: 'jpeg', kind: 'jpeg', value: 0 },
       ],
+      sceneWatermark: {
+        enabled: false,
+        text: 'meme-elf',
+        mode: 'corner',
+        corner: 'bottom-left',
+        opacity: 50,
+        size: 16,
+        color: '#808080',
+        rotation: 0,
+      },
       sceneBoundsDraft: DEFAULT_SCENE_BOUNDS_DRAFT,
       activeSceneBoundsMode: 'idle',
     });
@@ -114,6 +124,7 @@ describe('createDefaultAppState', () => {
     firstState.sceneImageAdjustments.brightness = 160;
     firstState.sceneImageAdjustments.includeText = true;
     firstState.sceneEffectStack[0]!.value = 12;
+    firstState.sceneWatermark.text = 'PRIVATE';
     firstState.sceneBoundsDraft.cropRect = { startX: 0, startY: 0, endX: 10, endY: 10 };
 
     expect(secondState.canvasSize.width).toBe(DEFAULT_CANVAS_SIZE.width);
@@ -127,6 +138,7 @@ describe('createDefaultAppState', () => {
     expect(secondState.sceneImageAdjustments.brightness).toBe(100);
     expect(secondState.sceneImageAdjustments.includeText).toBe(false);
     expect(secondState.sceneEffectStack[0]?.value).toBe(0);
+    expect(secondState.sceneWatermark.text).toBe('meme-elf');
     expect(secondState.sceneBoundsDraft).toEqual(DEFAULT_SCENE_BOUNDS_DRAFT);
     expect(secondState.activeSceneBoundsMode).toBe('idle');
   });

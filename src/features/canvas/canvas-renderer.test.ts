@@ -13,6 +13,7 @@ import {
   createDefaultSceneEffectStack,
   createDefaultSceneImageAdjustments,
 } from '../image/image-effects';
+import { createDefaultSceneWatermark } from '../image/watermark-utils';
 
 afterEach(() => {
   resetPreviewRenderSurfacesForTests();
@@ -718,6 +719,29 @@ describe('renderPreview', () => {
     expect(filteredContext.getImageData).toHaveBeenCalledWith(0, 0, 800, 450);
     expect(filteredContext.putImageData).toHaveBeenCalledTimes(1);
     expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
+  });
+
+  it('renders a tiled watermark with clockwise rotation above the processed scene', () => {
+    const context = createContextStub();
+
+    renderPreview(
+      context,
+      {} as CanvasImageSource,
+      { width: 800, height: 450 },
+      [],
+      createDefaultSceneImageAdjustments(),
+      createDefaultSceneEffectStack(),
+      {
+        ...createDefaultSceneWatermark(),
+        enabled: true,
+        text: 'PRIVATE',
+        mode: 'tile',
+        rotation: 35,
+      },
+    );
+
+    expect(context.rotate).toHaveBeenCalledWith(0.6108652381980153);
+    expect(context.fillText).toHaveBeenCalledWith('PRIVATE', 0, 0);
   });
 });
 

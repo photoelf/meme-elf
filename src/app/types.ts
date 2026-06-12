@@ -39,6 +39,18 @@ export const SCENE_EFFECT_STACK_KIND_OPTIONS = [
   'posterize',
   'jpeg',
 ] as const;
+export const SCENE_WATERMARK_MODE_OPTIONS = [
+  'center',
+  'corner',
+  'tile',
+  'diagonal',
+] as const;
+export const SCENE_WATERMARK_CORNER_OPTIONS = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+] as const;
 
 export type LayerId = string;
 export type TextAlign = (typeof TEXT_ALIGN_OPTIONS)[number];
@@ -52,6 +64,8 @@ export type SceneBoundsFillMode = (typeof SCENE_BOUNDS_FILL_MODE_OPTIONS)[number
 export type PreviewRotationQuarterTurns = 0 | 1 | 2 | 3;
 export type SceneImageAdjustmentKind = (typeof SCENE_IMAGE_ADJUSTMENT_OPTIONS)[number];
 export type SceneEffectStackKind = (typeof SCENE_EFFECT_STACK_KIND_OPTIONS)[number];
+export type SceneWatermarkMode = (typeof SCENE_WATERMARK_MODE_OPTIONS)[number];
+export type SceneWatermarkCorner = (typeof SCENE_WATERMARK_CORNER_OPTIONS)[number];
 
 export type TextBox = {
   x: number;
@@ -109,6 +123,17 @@ export type SceneEffectStackItem = {
   id: string;
   kind: SceneEffectStackKind;
   value: number;
+};
+
+export type SceneWatermark = {
+  enabled: boolean;
+  text: string;
+  mode: SceneWatermarkMode;
+  corner: SceneWatermarkCorner;
+  opacity: number;
+  size: number;
+  color: string;
+  rotation: number;
 };
 
 export type PendingPreparedImageSource = {
@@ -190,6 +215,7 @@ export type AppState = {
   preferredAdvancedImportPlacementMode: AdvancedImportPlacementMode;
   sceneImageAdjustments: SceneImageAdjustments;
   sceneEffectStack: SceneEffectStackItem[];
+  sceneWatermark: SceneWatermark;
   sceneBoundsDraft: SceneBoundsDraft;
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
 };

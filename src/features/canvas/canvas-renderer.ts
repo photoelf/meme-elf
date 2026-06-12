@@ -4,6 +4,7 @@ import type {
   ImageLayer,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SceneWatermark,
   TextAlign,
   TextLayer,
   VerticalAlign,
@@ -18,6 +19,11 @@ import {
   isRasterSceneEffectKind,
   normalizeSceneEffectStack,
 } from '../image/image-effects';
+import {
+  buildWatermarkLayout,
+  createDefaultSceneWatermark,
+  normalizeSceneWatermark,
+} from '../image/watermark-utils';
 
 const BOX_PADDING_X = 18;
 const BOX_PADDING_Y = 12;
@@ -60,6 +66,7 @@ export function renderPreview(
   layers: EditorLayer[],
   sceneImageAdjustments: SceneImageAdjustments = createDefaultSceneImageAdjustments(),
   sceneEffectStack: SceneEffectStackItem[] = createDefaultSceneEffectStack(),
+  sceneWatermark: SceneWatermark = createDefaultSceneWatermark(),
 ) {
   context.clearRect(0, 0, size.width, size.height);
 
@@ -83,6 +90,7 @@ export function renderPreview(
           sceneEffectStack,
         );
         context.drawImage(filteredSurface.canvas, 0, 0, size.width, size.height);
+        renderSceneWatermark(context, size, sceneWatermark);
         return;
       }
 
@@ -102,11 +110,13 @@ export function renderPreview(
         includeNonText: false,
         includeText: true,
       });
+      renderSceneWatermark(context, size, sceneWatermark);
       return;
     }
   }
 
   renderSceneContent(context, image, size, layers);
+  renderSceneWatermark(context, size, sceneWatermark);
 }
 
 function renderSceneContent(
@@ -359,6 +369,42 @@ function renderTextLayer(context: CanvasRenderingContext2D, layer: TextLayer) {
   }
 
   context.restore();
+}
+
+function renderSceneWatermark(
+  context: CanvasRenderingContext2D,
+  size: { width: number; height: number },
+  watermark: SceneWatermark,
+) {
+  const normalized = normalizeSceneWatermark(watermark);
+
+  if (!normalized.enabled || !normalized.text.trim()) {
+    return;
+  }
+
+  const layout = buildWatermarkLayout({
+    canvasSize: size,
+    color: normalized.color,
+    corner: normalized.corner,
+    mode: normalized.mode,
+    opacity: normalized.opacity,
+    rotation: normalized.rotation,
+    size: normalized.size,
+    text: normalized.text,
+  });
+
+  for (const item of layout) {
+    context.save();
+    context.translate(item.x, item.y);
+    context.rotate(item.rotation);
+    context.font = `400 ${normalized.size}px Arial`;
+    context.fillStyle = item.color;
+    context.globalAlpha = item.opacity;
+    context.textAlign = item.textAlign;
+    context.textBaseline = item.textBaseline;
+    context.fillText(item.text, 0, 0);
+    context.restore();
+  }
 }
 
 export function getTextLayoutForLayer(

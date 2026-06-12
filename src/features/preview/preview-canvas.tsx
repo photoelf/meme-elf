@@ -9,6 +9,7 @@ import {
   createDefaultSceneEffectStack,
   createDefaultSceneImageAdjustments,
 } from '../image/image-effects';
+import { createDefaultSceneWatermark } from '../image/watermark-utils';
 import { normalizeSceneCropRect } from '../bounds/crop-overlay';
 import { isImageLayer, isTextLayer } from '../../app/types';
 import type {
@@ -17,6 +18,7 @@ import type {
   SceneCropDraftRect,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SceneWatermark,
   TextLayer,
   TextBox,
 } from '../../app/types';
@@ -34,6 +36,7 @@ type PreviewCanvasProps = {
   previewZoomFactor?: number;
   sceneImageAdjustments?: SceneImageAdjustments;
   sceneEffectStack?: SceneEffectStackItem[];
+  sceneWatermark?: SceneWatermark;
   isSceneCropMode?: boolean;
   sceneCropDraft?: SceneCropDraftRect | null;
   onDocumentInteractionEnd?: () => void;
@@ -111,6 +114,7 @@ export function PreviewCanvas({
   previewZoomFactor = 1,
   sceneImageAdjustments = createDefaultSceneImageAdjustments(),
   sceneEffectStack = createDefaultSceneEffectStack(),
+  sceneWatermark = createDefaultSceneWatermark(),
   isSceneCropMode = false,
   sceneCropDraft = null,
   onDocumentInteractionEnd,
@@ -235,6 +239,7 @@ export function PreviewCanvas({
         : layers,
       sceneImageAdjustments,
       sceneEffectStack,
+      sceneWatermark,
     );
   }, [
     editingLayerId,
@@ -244,6 +249,7 @@ export function PreviewCanvas({
     resolvedCanvasRef,
     sceneEffectStack,
     sceneImageAdjustments,
+    sceneWatermark,
     width,
   ]);
 

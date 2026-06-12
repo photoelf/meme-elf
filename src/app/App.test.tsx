@@ -65,6 +65,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: /crop/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /adjustments/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /effects/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /watermark/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
@@ -79,6 +80,9 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
     expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
+    expect(screen.getByRole('heading', { name: /watermark/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
     expect(screen.getByRole('heading', { name: /crop/i })).toBeInTheDocument();
@@ -476,6 +480,16 @@ describe('App', () => {
     expect(screen.getByRole('slider', { name: /grain/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /posterize/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /jpeg degrade/i })).toBeInTheDocument();
+    openWatermarkTab();
+    expect(screen.getByRole('heading', { name: /watermark/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /enable watermark/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /watermark text/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /watermark mode/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /watermark corner/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /watermark opacity/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /watermark size/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /tile rotation/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/watermark color/i)).toBeInTheDocument();
 
     openAdjustmentsTab();
     fireEvent.change(screen.getByRole('slider', { name: /brightness/i }), {
@@ -566,6 +580,87 @@ describe('App', () => {
       expect(screen.getByRole('slider', { name: /grain/i })).toHaveValue('0');
       expect(screen.getByRole('slider', { name: /posterize/i })).toHaveValue('0');
       expect(screen.getByRole('slider', { name: /jpeg degrade/i })).toHaveValue('0');
+    });
+  });
+
+  it('renders and resets watermark controls independently from the effect stack', async () => {
+    const file = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(file, 900);
+
+    openWatermarkTab();
+    fireEvent.click(screen.getByRole('checkbox', { name: /enable watermark/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /watermark text/i }), {
+      target: { value: '' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: /watermark text/i })).toHaveValue('');
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: /watermark text/i }), {
+      target: { value: 'PRIVATE' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /watermark mode/i }), {
+      target: { value: 'tile' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /tile rotation/i }), {
+      target: { value: '35' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /watermark opacity/i }), {
+      target: { value: '50' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /watermark size/i }), {
+      target: { value: '40' },
+    });
+    fireEvent.change(screen.getByLabelText(/watermark color/i), {
+      target: { value: '#808080' },
+    });
+
+    await waitFor(() => {
+      expect(context.fillText).toHaveBeenCalledWith('PRIVATE', 0, 0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /reset watermark/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: /enable watermark/i })).not.toBeChecked();
+      expect(screen.getByRole('textbox', { name: /watermark text/i })).toHaveValue('meme-elf');
+      expect(screen.getByRole('combobox', { name: /watermark mode/i })).toHaveValue('corner');
+      expect(screen.getByRole('combobox', { name: /watermark corner/i })).toHaveValue('bottom-left');
+      expect(screen.getByRole('slider', { name: /watermark opacity/i })).toHaveValue('50');
+      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('16');
+      expect(screen.getByRole('slider', { name: /tile rotation/i })).toHaveValue('0');
+      expect(screen.getByLabelText(/watermark color/i)).toHaveValue('#808080');
+    });
+  });
+
+  it('changes size defaults when switching between centered and corner watermark modes', async () => {
+    const file = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(file, 900);
+
+    openWatermarkTab();
+    fireEvent.change(screen.getByRole('combobox', { name: /watermark mode/i }), {
+      target: { value: 'center' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('240');
+    });
+
+    fireEvent.change(screen.getByRole('combobox', { name: /watermark mode/i }), {
+      target: { value: 'corner' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('16');
     });
   });
 
@@ -1831,6 +1926,10 @@ function openAdjustmentsTab() {
 
 function openEffectsTab() {
   fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
+}
+
+function openWatermarkTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
 }
 
 function escapeForRegex(value: string) {

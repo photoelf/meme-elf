@@ -12,6 +12,7 @@ import {
   createDefaultSceneEffectStack,
   createDefaultSceneImageAdjustments,
 } from '../features/image/image-effects';
+import { createDefaultSceneWatermark } from '../features/image/watermark-utils';
 
 export const DEFAULT_CANVAS_SIZE = {
   width: 800,
@@ -106,6 +107,7 @@ export function createDefaultAppState(): AppState {
     preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
     sceneImageAdjustments: createDefaultSceneImageAdjustments(),
     sceneEffectStack: createDefaultSceneEffectStack(),
+    sceneWatermark: createDefaultSceneWatermark(),
     sceneBoundsDraft: {
       cropRect: null,
       expand: { ...DEFAULT_SCENE_BOUNDS_DRAFT.expand },

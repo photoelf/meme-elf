@@ -16,7 +16,7 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
 - top action bar with compact icon-only actions and delayed tooltips
-- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, and `Effects`
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Effects`, and `Watermark`
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
@@ -24,6 +24,7 @@ Current repo state:
 - split image controls with fixed-order `Adjustments` and reorderable `Effects`
 - scene-wide `Adjustments` for brightness, contrast, saturation, hue, grayscale, sepia, and invert, with `Apply to text` scope toggle
 - reorderable `Effects` stack for blur, sharpen, threshold, pixelate, noise, grain, posterize, and JPEG degrade
+- scene-wide watermark modes for centered, corner, tiled, and diagonal text overlays with dedicated corner selection, tile rotation, and independent color, opacity, and size controls
 - text layer editing, reorder, move, resize, and rotate
 - inline canvas text editing with multiline entry and live box-fit recovery after line removal
 - image layer insert, reorder, move, resize, rotate, and remove
@@ -36,12 +37,14 @@ Known alpha behavior:
 - when `Apply to text` is disabled, scene effects apply only to non-text content and text stays above the filtered image stack
 - when `Apply to text` is enabled, text joins the filtered scene pass and can render behind imported image layers; this is currently accepted for alpha and the default remains `off`
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
+- watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
+- watermark defaults now start from `meme-elf` in gray `Arial` at `50%` opacity with no outline, using the lower-left corner preset
 
 Current desktop layout conventions:
 - global actions live in the top bar as icon-only buttons with delayed tooltips
 - preview-local undo/redo and zoom controls stay with the preview header
 - advanced editing lives in the right inspector rather than a left tool rail
-- inspector navigation uses full-width icon tabs
+- inspector navigation uses full-width icon tabs, including a dedicated `Watermark` section
 - scene-level rotate / flip actions in `Crop` affect only the image stack; text layers stay in place
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 

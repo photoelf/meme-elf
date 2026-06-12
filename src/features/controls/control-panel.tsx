@@ -8,6 +8,9 @@ import type {
   SceneBoundsFillMode,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SceneWatermark,
+  SceneWatermarkCorner,
+  SceneWatermarkMode,
   SceneExpandDraft,
   TextEffect,
   TextLayer,
@@ -20,7 +23,7 @@ import type { SceneImageStackTransform } from '../image/scene-image-stack-utils'
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
-  activeTab: 'layers' | 'crop' | 'adjustments' | 'effects';
+  activeTab: 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
@@ -30,6 +33,7 @@ type ControlPanelProps = {
   sceneBoundsFillMode: SceneBoundsFillMode;
   sceneImageAdjustments: SceneImageAdjustments;
   sceneEffectStack: SceneEffectStackItem[];
+  sceneWatermark: SceneWatermark;
   sceneExpandDraft: SceneExpandDraft;
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
@@ -37,7 +41,7 @@ type ControlPanelProps = {
   onApplySceneCrop: () => void;
   onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'effects') => void;
+  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark') => void;
   onCancelSceneBounds: () => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
@@ -53,6 +57,8 @@ type ControlPanelProps = {
     placement: 'before' | 'after',
   ) => void;
   onResetSceneEffectStack: () => void;
+  onSceneWatermarkChange: (updates: Partial<SceneWatermark>) => void;
+  onResetSceneWatermark: () => void;
   onSceneBoundsPreset: (
     preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
   ) => void;
@@ -91,6 +97,7 @@ export function ControlPanel({
   sceneBoundsFillMode,
   sceneImageAdjustments,
   sceneEffectStack,
+  sceneWatermark,
   sceneExpandDraft,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
@@ -110,6 +117,8 @@ export function ControlPanel({
   onSceneEffectValueChange,
   onReorderSceneEffects,
   onResetSceneEffectStack,
+  onSceneWatermarkChange,
+  onResetSceneWatermark,
   onSceneBoundsPreset,
   onSceneImageStackTransform,
   onTextEditSessionEnd,
@@ -156,11 +165,12 @@ export function ControlPanel({
       }}
     >
       <div className="tool-rail inspector-rail">
-        <div className="tool-rail-tabs" role="tablist" aria-label="Control sections">
+        <div className="tool-rail-tabs tool-rail-tabs-five" role="tablist" aria-label="Control sections">
           <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => onActiveTabChange('layers')} />
           <InspectorTabButton icon={<CropIcon />} isActive={activeTab === 'crop'} label="Crop" onClick={() => onActiveTabChange('crop')} />
           <InspectorTabButton icon={<AdjustmentsIcon />} isActive={activeTab === 'adjustments'} label="Adjustments" onClick={() => onActiveTabChange('adjustments')} />
           <InspectorTabButton icon={<EffectsIcon />} isActive={activeTab === 'effects'} label="Effects" onClick={() => onActiveTabChange('effects')} />
+          <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => onActiveTabChange('watermark')} />
         </div>
       </div>
 
@@ -609,6 +619,135 @@ export function ControlPanel({
             </div>
           </div>
         ) : null}
+
+        {activeTab === 'watermark' ? (
+          <div className="inspector-section">
+            <div className="section-heading">
+              <div>
+                <h2 className="section-title">WATERMARK</h2>
+                <p className="section-copy">Scene-wide text overlay above the processed image</p>
+              </div>
+            </div>
+            <div className="toggle-row">
+              <CheckToggle
+                checked={sceneWatermark.enabled}
+                label="Enable watermark"
+                onChange={(checked) => onSceneWatermarkChange({ enabled: checked })}
+              />
+            </div>
+            <div className="field-stack">
+              <label className="field-label" htmlFor="scene-watermark-text">
+                Watermark text
+              </label>
+              <input
+                id="scene-watermark-text"
+                className="text-input watermark-text-input"
+                type="text"
+                value={sceneWatermark.text}
+                onChange={(event) => onSceneWatermarkChange({ text: event.target.value })}
+              />
+            </div>
+            <div className="control-grid control-grid-compact">
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-watermark-mode">
+                  Watermark mode
+                </label>
+                <select
+                  id="scene-watermark-mode"
+                  className="select-input"
+                  value={sceneWatermark.mode}
+                  onChange={(event) => {
+                    const nextMode = event.target.value as SceneWatermarkMode;
+
+                    onSceneWatermarkChange(
+                      nextMode === 'center'
+                        ? { mode: nextMode, size: 240 }
+                        : nextMode === 'corner'
+                          ? { mode: nextMode, corner: 'bottom-left', size: 16 }
+                          : { mode: nextMode },
+                    );
+                  }}
+                >
+                  <option value="center">Centered word</option>
+                  <option value="corner">Corner mark</option>
+                  <option value="tile">Tiled text</option>
+                  <option value="diagonal">Diagonal</option>
+                </select>
+              </div>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-watermark-corner">
+                  Watermark corner
+                </label>
+                <select
+                  id="scene-watermark-corner"
+                  className="select-input"
+                  value={sceneWatermark.corner}
+                  onChange={(event) =>
+                    onSceneWatermarkChange({ corner: event.target.value as SceneWatermarkCorner })
+                  }
+                >
+                  <option value="top-left">Top left</option>
+                  <option value="top-right">Top right</option>
+                  <option value="bottom-left">Bottom left</option>
+                  <option value="bottom-right">Bottom right</option>
+                </select>
+              </div>
+            </div>
+            <div className="control-grid control-grid-compact">
+              <div className="field-stack">
+                <label className="field-label" htmlFor="scene-watermark-color">
+                  Watermark color
+                </label>
+                <input
+                  id="scene-watermark-color"
+                  className="color-input"
+                  type="color"
+                  value={sceneWatermark.color}
+                  onChange={(event) => onSceneWatermarkChange({ color: event.target.value })}
+                />
+              </div>
+            </div>
+            <div className="control-grid control-grid-compact">
+              <RangeField
+                id="scene-watermark-opacity"
+                label="Watermark opacity"
+                max={100}
+                min={0}
+                step={1}
+                unit="%"
+                value={sceneWatermark.opacity}
+                onChange={(value) => onSceneWatermarkChange({ opacity: value })}
+              />
+              <RangeField
+                id="scene-watermark-size"
+                label="Watermark size"
+                max={240}
+                min={16}
+                step={1}
+                unit="px"
+                value={sceneWatermark.size}
+                onChange={(value) => onSceneWatermarkChange({ size: value })}
+              />
+            </div>
+            <div className="control-grid control-grid-compact">
+              <RangeField
+                id="scene-watermark-rotation"
+                label="Tile rotation"
+                max={180}
+                min={0}
+                step={1}
+                unit="deg"
+                value={sceneWatermark.rotation}
+                onChange={(value) => onSceneWatermarkChange({ rotation: value })}
+              />
+            </div>
+            <div className="settings-actions">
+              <button type="button" className="mini-action-button" onClick={onResetSceneWatermark}>
+                Reset watermark
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -676,6 +815,15 @@ function EffectsIcon() {
   return (
     <RailIconBase>
       <path d="M10 3.5 12 7.5l4 .5-3 2.8.8 4.2L10 13l-3.8 2 .8-4.2-3-2.8 4-.5 2-4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </RailIconBase>
+  );
+}
+
+function WatermarkIcon() {
+  return (
+    <RailIconBase>
+      <path d="M4.5 14.5 8 5.5l2 5 2-3 3.5 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 14.5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </RailIconBase>
   );
 }

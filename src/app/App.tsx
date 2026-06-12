@@ -34,6 +34,10 @@ import {
   normalizeSceneImageAdjustments,
 } from '../features/image/image-effects';
 import {
+  createDefaultSceneWatermark,
+  normalizeSceneWatermark,
+} from '../features/image/watermark-utils';
+import {
   createDefaultImageLayer,
   flipImageLayerHorizontal,
   flipImageLayerVertical,
@@ -63,6 +67,7 @@ import type {
   LayerId,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SceneWatermark,
   TextLayer,
 } from './types';
 
@@ -74,7 +79,7 @@ const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
-type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'effects';
+type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark';
 type ImageInsertionMode =
   | 'inside-canvas'
   | 'outside-left'
@@ -99,6 +104,7 @@ type EditorHistorySnapshot = {
   activeLayerId: LayerId | null;
   sceneImageAdjustments: SceneImageAdjustments;
   sceneEffectStack: SceneEffectStackItem[];
+  sceneWatermark: SceneWatermark;
 };
 
 const MAX_HISTORY_STEPS = 10;
@@ -258,6 +264,7 @@ export function App() {
       activeLayerId: state.activeLayerId,
       sceneImageAdjustments: { ...state.sceneImageAdjustments },
       sceneEffectStack: state.sceneEffectStack.map((effect) => ({ ...effect })),
+      sceneWatermark: { ...state.sceneWatermark },
     };
   }
 
@@ -318,6 +325,7 @@ export function App() {
       activeLayerId: snapshot.activeLayerId,
       sceneImageAdjustments: { ...snapshot.sceneImageAdjustments },
       sceneEffectStack: snapshot.sceneEffectStack.map((effect) => ({ ...effect })),
+      sceneWatermark: { ...snapshot.sceneWatermark },
       status: 'idle',
       errorMessage: null,
       preInsertModalDraft: null,
@@ -702,6 +710,26 @@ export function App() {
     applyAppStateChange((currentState) => ({
       ...currentState,
       sceneEffectStack: createDefaultSceneEffectStack(),
+    }));
+  }
+
+  function updateSceneWatermark(
+    updates: Partial<SceneWatermark>,
+    historyMode: HistoryMode = 'immediate',
+  ) {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneWatermark: normalizeSceneWatermark({
+        ...currentState.sceneWatermark,
+        ...updates,
+      }),
+    }), historyMode);
+  }
+
+  function resetSceneWatermark() {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneWatermark: createDefaultSceneWatermark(),
     }));
   }
 
@@ -1419,6 +1447,7 @@ export function App() {
                 layers={appState.layers}
                 sceneImageAdjustments={appState.sceneImageAdjustments}
                 sceneEffectStack={appState.sceneEffectStack}
+                sceneWatermark={appState.sceneWatermark}
                 previewPan={previewPan}
                 previewZoomFactor={appState.previewZoomFactor}
                 isSceneCropMode={appState.activeSceneBoundsMode === 'crop'}
@@ -1462,6 +1491,7 @@ export function App() {
           sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
           sceneImageAdjustments={appState.sceneImageAdjustments}
           sceneEffectStack={appState.sceneEffectStack}
+          sceneWatermark={appState.sceneWatermark}
           sceneExpandDraft={appState.sceneBoundsDraft.expand}
           onOpenAdvancedImportClipboard={(opener) => {
             void handleAdvancedImportClipboardClick(opener);
@@ -1503,6 +1533,8 @@ export function App() {
           onSceneEffectValueChange={updateSceneEffectValue}
           onReorderSceneEffects={reorderSceneEffectStack}
           onResetSceneEffectStack={resetSceneEffectStack}
+          onSceneWatermarkChange={updateSceneWatermark}
+          onResetSceneWatermark={resetSceneWatermark}
           onSceneBoundsPreset={applySceneBoundsPreset}
           onSceneImageStackTransform={applySceneImageTransform}
           onSceneExpandDraftChange={updateSceneExpandDraft}
@@ -1934,6 +1966,14 @@ function historySnapshotsEqual(a: EditorHistorySnapshot, b: EditorHistorySnapsho
     a.sceneImageAdjustments.includeText !== b.sceneImageAdjustments.includeText ||
     a.sceneImageAdjustments.sepia !== b.sceneImageAdjustments.sepia ||
     a.sceneImageAdjustments.invert !== b.sceneImageAdjustments.invert ||
+    a.sceneWatermark.enabled !== b.sceneWatermark.enabled ||
+    a.sceneWatermark.text !== b.sceneWatermark.text ||
+    a.sceneWatermark.mode !== b.sceneWatermark.mode ||
+    a.sceneWatermark.corner !== b.sceneWatermark.corner ||
+    a.sceneWatermark.opacity !== b.sceneWatermark.opacity ||
+    a.sceneWatermark.size !== b.sceneWatermark.size ||
+    a.sceneWatermark.color !== b.sceneWatermark.color ||
+    a.sceneWatermark.rotation !== b.sceneWatermark.rotation ||
     a.sceneEffectStack.length !== b.sceneEffectStack.length ||
     a.layers.length !== b.layers.length
   ) {
