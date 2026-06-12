@@ -19,6 +19,9 @@ Current repo state:
 - scene crop with draggable crop box and resize handles
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
 - expansion presets for equal margin, top caption space, bottom caption space, and square canvas
+- split image controls with fixed-order `Adjustments` and reorderable `Effects`
+- scene-wide `Adjustments` for brightness, contrast, saturation, hue, grayscale, sepia, and invert, with `Apply to text` scope toggle
+- reorderable `Effects` stack for blur, sharpen, threshold, pixelate, noise, grain, posterize, and JPEG degrade
 - text layer editing, reorder, move, resize, and rotate
 - inline canvas text editing with multiline entry and live box-fit recovery after line removal
 - image layer insert, reorder, move, resize, rotate, and remove
@@ -26,6 +29,11 @@ Current repo state:
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
+
+Known alpha behavior:
+- when `Apply to text` is disabled, scene effects apply only to non-text content and text stays above the filtered image stack
+- when `Apply to text` is enabled, text joins the filtered scene pass and can render behind imported image layers; this is currently accepted for alpha and the default remains `off`
+- effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
 
 Current source documents:
 - [design.md](/D:/PETS/meme-elf/design.md)

@@ -20,7 +20,7 @@ export const SCENE_BOUNDS_FILL_MODE_OPTIONS = [
   'sampled-edge',
   'average-border',
 ] as const;
-export const SCENE_IMAGE_EFFECT_OPTIONS = [
+export const SCENE_IMAGE_ADJUSTMENT_OPTIONS = [
   'brightness',
   'contrast',
   'saturation',
@@ -28,6 +28,16 @@ export const SCENE_IMAGE_EFFECT_OPTIONS = [
   'grayscale',
   'sepia',
   'invert',
+] as const;
+export const SCENE_EFFECT_STACK_KIND_OPTIONS = [
+  'blur',
+  'sharpen',
+  'threshold',
+  'pixelate',
+  'noise',
+  'grain',
+  'posterize',
+  'jpeg',
 ] as const;
 
 export type LayerId = string;
@@ -40,7 +50,8 @@ export type AdvancedImportPlacementMode =
   (typeof ADVANCED_IMPORT_PLACEMENT_MODE_OPTIONS)[number];
 export type SceneBoundsFillMode = (typeof SCENE_BOUNDS_FILL_MODE_OPTIONS)[number];
 export type PreviewRotationQuarterTurns = 0 | 1 | 2 | 3;
-export type SceneImageEffectKind = (typeof SCENE_IMAGE_EFFECT_OPTIONS)[number];
+export type SceneImageAdjustmentKind = (typeof SCENE_IMAGE_ADJUSTMENT_OPTIONS)[number];
+export type SceneEffectStackKind = (typeof SCENE_EFFECT_STACK_KIND_OPTIONS)[number];
 
 export type TextBox = {
   x: number;
@@ -83,14 +94,21 @@ export type SceneBoundsDraft = {
   fillColor: string;
 };
 
-export type SceneImageEffects = {
+export type SceneImageAdjustments = {
   brightness: number;
   contrast: number;
   saturation: number;
   hue: number;
   grayscale: boolean;
+  includeText: boolean;
   sepia: boolean;
   invert: boolean;
+};
+
+export type SceneEffectStackItem = {
+  id: string;
+  kind: SceneEffectStackKind;
+  value: number;
 };
 
 export type PendingPreparedImageSource = {
@@ -170,7 +188,8 @@ export type AppState = {
   previewZoomFactor: number;
   preInsertModalDraft: PreInsertModalDraft | null;
   preferredAdvancedImportPlacementMode: AdvancedImportPlacementMode;
-  sceneImageEffects: SceneImageEffects;
+  sceneImageAdjustments: SceneImageAdjustments;
+  sceneEffectStack: SceneEffectStackItem[];
   sceneBoundsDraft: SceneBoundsDraft;
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
 };

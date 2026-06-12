@@ -71,15 +71,26 @@ describe('createDefaultAppState', () => {
       previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
       preInsertModalDraft: null,
       preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
-      sceneImageEffects: {
+      sceneImageAdjustments: {
         brightness: 100,
         contrast: 100,
         saturation: 100,
         hue: 0,
         grayscale: false,
+        includeText: false,
         sepia: false,
         invert: false,
       },
+      sceneEffectStack: [
+        { id: 'blur', kind: 'blur', value: 0 },
+        { id: 'sharpen', kind: 'sharpen', value: 0 },
+        { id: 'threshold', kind: 'threshold', value: 0 },
+        { id: 'pixelate', kind: 'pixelate', value: 0 },
+        { id: 'noise', kind: 'noise', value: 0 },
+        { id: 'grain', kind: 'grain', value: 0 },
+        { id: 'posterize', kind: 'posterize', value: 0 },
+        { id: 'jpeg', kind: 'jpeg', value: 0 },
+      ],
       sceneBoundsDraft: DEFAULT_SCENE_BOUNDS_DRAFT,
       activeSceneBoundsMode: 'idle',
     });
@@ -100,7 +111,9 @@ describe('createDefaultAppState', () => {
     firstState.layers[1].fontSize = 99;
     firstState.previewZoomFactor = 3;
     firstState.preferredAdvancedImportPlacementMode = 'outside-left';
-    firstState.sceneImageEffects.brightness = 160;
+    firstState.sceneImageAdjustments.brightness = 160;
+    firstState.sceneImageAdjustments.includeText = true;
+    firstState.sceneEffectStack[0]!.value = 12;
     firstState.sceneBoundsDraft.cropRect = { startX: 0, startY: 0, endX: 10, endY: 10 };
 
     expect(secondState.canvasSize.width).toBe(DEFAULT_CANVAS_SIZE.width);
@@ -111,7 +124,9 @@ describe('createDefaultAppState', () => {
     expect(secondState.preferredAdvancedImportPlacementMode).toBe(
       DEFAULT_ADVANCED_IMPORT_PLACEMENT,
     );
-    expect(secondState.sceneImageEffects.brightness).toBe(100);
+    expect(secondState.sceneImageAdjustments.brightness).toBe(100);
+    expect(secondState.sceneImageAdjustments.includeText).toBe(false);
+    expect(secondState.sceneEffectStack[0]?.value).toBe(0);
     expect(secondState.sceneBoundsDraft).toEqual(DEFAULT_SCENE_BOUNDS_DRAFT);
     expect(secondState.activeSceneBoundsMode).toBe('idle');
   });

@@ -8,7 +8,10 @@ import type {
   TextLayer,
   VerticalAlign,
 } from './types';
-import { createDefaultSceneImageEffects } from '../features/image/image-effects';
+import {
+  createDefaultSceneEffectStack,
+  createDefaultSceneImageAdjustments,
+} from '../features/image/image-effects';
 
 export const DEFAULT_CANVAS_SIZE = {
   width: 800,
@@ -101,7 +104,8 @@ export function createDefaultAppState(): AppState {
     previewZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR,
     preInsertModalDraft: null,
     preferredAdvancedImportPlacementMode: DEFAULT_ADVANCED_IMPORT_PLACEMENT,
-    sceneImageEffects: createDefaultSceneImageEffects(),
+    sceneImageAdjustments: createDefaultSceneImageAdjustments(),
+    sceneEffectStack: createDefaultSceneEffectStack(),
     sceneBoundsDraft: {
       cropRect: null,
       expand: { ...DEFAULT_SCENE_BOUNDS_DRAFT.expand },

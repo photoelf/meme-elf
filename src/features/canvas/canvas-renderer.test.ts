@@ -3,11 +3,19 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import type { AppState, TextLayer } from '../../app/types';
-import { getContainedCanvasSize, renderPreview } from './canvas-renderer';
+import {
+  getContainedCanvasSize,
+  renderPreview,
+  resetPreviewRenderSurfacesForTests,
+} from './canvas-renderer';
 import { PreviewCanvas } from '../preview/preview-canvas';
-import { createDefaultSceneImageEffects } from '../image/image-effects';
+import {
+  createDefaultSceneEffectStack,
+  createDefaultSceneImageAdjustments,
+} from '../image/image-effects';
 
 afterEach(() => {
+  resetPreviewRenderSurfacesForTests();
   vi.restoreAllMocks();
 });
 
@@ -586,7 +594,44 @@ describe('renderPreview', () => {
     expect(context.drawImage).toHaveBeenCalledWith(imageLayerImage, -120, -90, 240, 180);
   });
 
-  it('renders the full scene through an offscreen filter pass when scene effects are active', () => {
+  it('renders the full scene through an offscreen effect pass when scene effects are active', () => {
+    const context = createContextStub();
+    const sourceSurface = document.createElement('canvas');
+    const filteredSurface = document.createElement('canvas');
+    const filteredContext = createContextStub();
+    vi.spyOn(filteredSurface, 'getContext').mockReturnValue(filteredContext);
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, 'createElement');
+    let canvasCallCount = 0;
+    createElementSpy.mockImplementation((tagName: string) => {
+      if (tagName === 'canvas') {
+        canvasCallCount += 1;
+        return canvasCallCount === 1 ? sourceSurface : filteredSurface;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    renderPreview(
+      context,
+      {} as CanvasImageSource,
+      { width: 800, height: 450 },
+      [],
+      {
+        ...createDefaultSceneImageAdjustments(),
+        brightness: 125,
+      },
+      [{ id: 'blur', kind: 'blur', value: 4 }],
+    );
+
+    expect(filteredSurface.width).toBe(800);
+    expect(filteredSurface.height).toBe(450);
+    expect(filteredContext.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 800, 450);
+    expect(filteredContext.filter).toBe('blur(4px)');
+    expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
+  });
+
+  it('filters only non-text content by default and draws text above the filtered pass', () => {
     const context = createContextStub();
     const filteredSurface = document.createElement('canvas');
     const filteredContext = createContextStub();
@@ -601,23 +646,77 @@ describe('renderPreview', () => {
       return originalCreateElement(tagName);
     });
 
+    const layers = [
+      {
+        kind: 'text',
+        id: 'top',
+        name: 'Top text',
+        text: 'CAPTION',
+        box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+        fontFamily: 'Impact',
+        fontSize: 90,
+        fillStyle: '#ffffff',
+        strokeStyle: '#000000',
+        outlineWidth: 5,
+        opacity: 1,
+        textAlign: 'center',
+        verticalAlign: 'top',
+        effect: 'outline',
+        allCaps: true,
+        bold: false,
+        italic: false,
+      },
+    ] satisfies AppState['layers'];
+
+    renderPreview(
+      context,
+      {} as CanvasImageSource,
+      { width: 800, height: 450 },
+      layers,
+      {
+        ...createDefaultSceneImageAdjustments(),
+        brightness: 125,
+      },
+      createDefaultSceneEffectStack(),
+    );
+
+    expect(filteredContext.fillText).not.toHaveBeenCalled();
+    expect(vi.mocked(context.drawImage).mock.calls[0]?.[0]).toBeInstanceOf(HTMLCanvasElement);
+    expect(vi.mocked(context.drawImage).mock.calls[0]?.slice(1)).toEqual([0, 0, 800, 450]);
+    expect(context.fillText).toHaveBeenCalledWith('CAPTION', 0, -43);
+  });
+
+  it('runs the raster effect pass on the offscreen scene before drawing it back to the preview', () => {
+    const context = createContextStub();
+    const sourceSurface = document.createElement('canvas');
+    const filteredSurface = document.createElement('canvas');
+    const filteredContext = createContextStub();
+    vi.spyOn(filteredSurface, 'getContext').mockReturnValue(filteredContext);
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, 'createElement');
+    let canvasCallCount = 0;
+    createElementSpy.mockImplementation((tagName: string) => {
+      if (tagName === 'canvas') {
+        canvasCallCount += 1;
+        return canvasCallCount === 1 ? sourceSurface : filteredSurface;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
     renderPreview(
       context,
       {} as CanvasImageSource,
       { width: 800, height: 450 },
       [],
       {
-        ...createDefaultSceneImageEffects(),
-        brightness: 125,
+        ...createDefaultSceneImageAdjustments(),
       },
+      [{ id: 'sharpen', kind: 'sharpen', value: 40 }],
     );
 
-    expect(filteredSurface.width).toBe(800);
-    expect(filteredSurface.height).toBe(450);
-    expect(filteredContext.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 800, 450);
-    expect(context.filter).toBe(
-      'brightness(125%) contrast(100%) saturate(100%) hue-rotate(0deg) grayscale(0%) sepia(0%) invert(0%)',
-    );
+    expect(filteredContext.getImageData).toHaveBeenCalledWith(0, 0, 800, 450);
+    expect(filteredContext.putImageData).toHaveBeenCalledTimes(1);
     expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
   });
 });
@@ -687,6 +786,12 @@ function createContextStub(measureWidth?: (value: string) => number) {
     measureText: vi.fn((value: string) => ({
       width: measureWidth ? measureWidth(value) : value.length * 10,
     })),
+    getImageData: vi.fn((x: number, y: number, width: number, height: number) => ({
+      data: new Uint8ClampedArray(Math.max(1, width * height) * 4),
+      height,
+      width,
+    })),
+    putImageData: vi.fn(),
     font: '',
     textAlign: 'start',
     textBaseline: 'alphabetic',

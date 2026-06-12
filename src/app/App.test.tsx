@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { vi } from 'vitest';
 import { App } from './App';
 import { getCanvasPoint } from '../features/preview/preview-canvas';
+import { resetPreviewRenderSurfacesForTests } from '../features/canvas/canvas-renderer';
 
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
@@ -40,6 +41,7 @@ function createImageElement(width = 1200, height = 800) {
 
 describe('App', () => {
   beforeEach(() => {
+    resetPreviewRenderSurfacesForTests();
     vi.clearAllMocks();
     document.documentElement.dataset.theme = '';
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
@@ -428,6 +430,214 @@ describe('App', () => {
     expect(
       screen.getByRole('button', { name: /advanced import from clipboard/i }),
     ).toBeInTheDocument();
+  });
+
+  it('shows image effect controls in the image rail and applies color adjustments to the preview', async () => {
+    const file = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(file, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    expect(screen.getByRole('heading', { name: /adjustments/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /brightness/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /contrast/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /saturation/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /hue/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /blur/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /sharpen/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /threshold/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /pixelate/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /noise/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /grain/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /posterize/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /jpeg degrade/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /grayscale/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /sepia/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /invert/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /apply to text/i })).not.toBeChecked();
+
+    fireEvent.change(screen.getByRole('slider', { name: /brightness/i }), {
+      target: { value: '125' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /contrast/i }), {
+      target: { value: '90' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /saturation/i }), {
+      target: { value: '140' },
+    });
+    fireEvent.change(screen.getByRole('slider', { name: /hue/i }), {
+      target: { value: '-30' },
+    });
+
+    await waitFor(() => {
+      expect(context.filter).toBe(
+        'brightness(125%) contrast(90%) saturate(140%) hue-rotate(-30deg) grayscale(0%) sepia(0%) invert(0%)',
+      );
+    });
+
+    fireEvent.change(screen.getByRole('slider', { name: /blur/i }), {
+      target: { value: '4' },
+    });
+
+    await waitFor(() => {
+      expect(context.filter).toBe('blur(4px)');
+    });
+  });
+
+  it('resets adjustments and effects independently', async () => {
+    const file = new File(['base-image'], 'base.png', { type: 'image/png' });
+    const context = createCanvasContextStub();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(file, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    const brightness = screen.getByRole('slider', { name: /brightness/i });
+    const contrast = screen.getByRole('slider', { name: /contrast/i });
+    const saturation = screen.getByRole('slider', { name: /saturation/i });
+    const hue = screen.getByRole('slider', { name: /hue/i });
+    const blur = screen.getByRole('slider', { name: /blur/i });
+    const sharpen = screen.getByRole('slider', { name: /sharpen/i });
+    const threshold = screen.getByRole('slider', { name: /threshold/i });
+    const pixelate = screen.getByRole('slider', { name: /pixelate/i });
+    const noise = screen.getByRole('slider', { name: /noise/i });
+    const grain = screen.getByRole('slider', { name: /grain/i });
+    const posterize = screen.getByRole('slider', { name: /posterize/i });
+    const jpegDegrade = screen.getByRole('slider', { name: /jpeg degrade/i });
+    const grayscale = screen.getByRole('checkbox', { name: /grayscale/i });
+    const sepia = screen.getByRole('checkbox', { name: /sepia/i });
+    const invert = screen.getByRole('checkbox', { name: /invert/i });
+    const includeText = screen.getByRole('checkbox', { name: /apply to text/i });
+
+    fireEvent.change(brightness, { target: { value: '145' } });
+    fireEvent.change(contrast, { target: { value: '115' } });
+    fireEvent.change(saturation, { target: { value: '60' } });
+    fireEvent.change(hue, { target: { value: '45' } });
+    fireEvent.change(blur, { target: { value: '6' } });
+    fireEvent.change(sharpen, { target: { value: '30' } });
+    fireEvent.change(threshold, { target: { value: '55' } });
+    fireEvent.change(pixelate, { target: { value: '7' } });
+    fireEvent.change(noise, { target: { value: '12' } });
+    fireEvent.change(grain, { target: { value: '16' } });
+    fireEvent.change(posterize, { target: { value: '24' } });
+    fireEvent.change(jpegDegrade, { target: { value: '40' } });
+    fireEvent.click(grayscale);
+    fireEvent.click(sepia);
+    fireEvent.click(invert);
+    fireEvent.click(includeText);
+
+    await waitFor(() => {
+      expect(context.filter).toBe('blur(6px)');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /reset adjustments/i }));
+
+    await waitFor(() => {
+      expect(brightness).toHaveValue('100');
+      expect(contrast).toHaveValue('100');
+      expect(saturation).toHaveValue('100');
+      expect(hue).toHaveValue('0');
+      expect(grayscale).not.toBeChecked();
+      expect(sepia).not.toBeChecked();
+      expect(invert).not.toBeChecked();
+      expect(includeText).not.toBeChecked();
+      expect(blur).toHaveValue('6');
+      expect(sharpen).toHaveValue('30');
+      expect(threshold).toHaveValue('55');
+      expect(pixelate).toHaveValue('7');
+      expect(noise).toHaveValue('12');
+      expect(grain).toHaveValue('16');
+      expect(posterize).toHaveValue('24');
+      expect(jpegDegrade).toHaveValue('40');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /reset effects/i }));
+
+    await waitFor(() => {
+      expect(blur).toHaveValue('0');
+      expect(sharpen).toHaveValue('0');
+      expect(threshold).toHaveValue('0');
+      expect(pixelate).toHaveValue('0');
+      expect(noise).toHaveValue('0');
+      expect(grain).toHaveValue('0');
+      expect(posterize).toHaveValue('0');
+      expect(jpegDegrade).toHaveValue('0');
+    });
+  });
+
+  it('reorders scene effects in the image rail by drag and drop', async () => {
+    const file = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    const { container } = render(<App />);
+    await uploadBaseImage(file, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /image tool/i }));
+
+    const getEffectOrder = () =>
+      Array.from(container.querySelectorAll('.effect-card-title')).map((node) => node.textContent);
+
+    expect(getEffectOrder()).toEqual([
+      'Blur',
+      'Sharpen',
+      'Threshold',
+      'Pixelate',
+      'Noise',
+      'Grain',
+      'Posterize',
+      'JPEG degrade',
+    ]);
+
+    const dataTransfer = {
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? '';
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value);
+      },
+    };
+    const posterizeCard = screen.getByText('Posterize').closest('.effect-card') as HTMLDivElement;
+    vi.spyOn(posterizeCard, 'getBoundingClientRect').mockReturnValue({
+      bottom: 140,
+      height: 40,
+      left: 0,
+      right: 320,
+      top: 100,
+      width: 320,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(screen.getByRole('button', { name: /reorder noise effect/i }), {
+      dataTransfer,
+    });
+    fireEvent.dragOver(posterizeCard, { clientY: 110 });
+    fireEvent.drop(posterizeCard, { clientY: 110, dataTransfer });
+    fireEvent.dragEnd(screen.getByRole('button', { name: /reorder noise effect/i }), {
+      dataTransfer,
+    });
+
+    expect(getEffectOrder()).toEqual([
+      'Blur',
+      'Sharpen',
+      'Threshold',
+      'Pixelate',
+      'Grain',
+      'Posterize',
+      'Noise',
+      'JPEG degrade',
+    ]);
   });
 
   it('removes image layers without reusing ids or disturbing remaining layer order', async () => {
@@ -1541,7 +1751,10 @@ function createCanvasContextStub() {
     fillText: vi.fn(),
     getImageData: vi.fn((x: number, y: number, width: number, height: number) => ({
       data: new Uint8ClampedArray(Math.max(1, width * height) * 4),
+      height,
+      width,
     })),
+    putImageData: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: text.length * 10 })),
     restore: vi.fn(),
     rotate: vi.fn(),
@@ -1553,6 +1766,7 @@ function createCanvasContextStub() {
     fillStyle: '#000000',
     font: '10px sans-serif',
     globalAlpha: 1,
+    filter: '',
     lineJoin: 'round',
     lineWidth: 1,
     shadowBlur: 0,

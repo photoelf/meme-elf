@@ -2,15 +2,21 @@ import { isImageLayer } from '../../app/types';
 import type {
   EditorLayer,
   ImageLayer,
-  SceneImageEffects,
+  SceneEffectStackItem,
+  SceneImageAdjustments,
   TextAlign,
   TextLayer,
   VerticalAlign,
 } from '../../app/types';
 import {
-  buildCanvasFilter,
-  createDefaultSceneImageEffects,
-  hasActiveSceneImageEffects,
+  applySceneEffectToImageData,
+  buildAdjustmentCanvasFilter,
+  createDefaultSceneEffectStack,
+  createDefaultSceneImageAdjustments,
+  hasActiveSceneEffectStack,
+  hasActiveSceneImageAdjustments,
+  isRasterSceneEffectKind,
+  normalizeSceneEffectStack,
 } from '../image/image-effects';
 
 const BOX_PADDING_X = 18;
@@ -20,6 +26,19 @@ const MIN_RENDER_FONT_SIZE = 8;
 let measurementContext: CanvasRenderingContext2D | null = null;
 let filteredPreviewSurface: HTMLCanvasElement | null = null;
 let filteredPreviewContext: CanvasRenderingContext2D | null = null;
+let sourcePreviewSurface: HTMLCanvasElement | null = null;
+let sourcePreviewContext: CanvasRenderingContext2D | null = null;
+let effectScratchSurface: HTMLCanvasElement | null = null;
+let effectScratchContext: CanvasRenderingContext2D | null = null;
+
+export function resetPreviewRenderSurfacesForTests() {
+  filteredPreviewSurface = null;
+  filteredPreviewContext = null;
+  sourcePreviewSurface = null;
+  sourcePreviewContext = null;
+  effectScratchSurface = null;
+  effectScratchContext = null;
+}
 
 export function getContainedCanvasSize(width: number, height: number, maxWidth: number) {
   if (width <= maxWidth) {
@@ -39,20 +58,50 @@ export function renderPreview(
   image: CanvasImageSource | null,
   size: { width: number; height: number },
   layers: EditorLayer[],
-  sceneImageEffects: SceneImageEffects = createDefaultSceneImageEffects(),
+  sceneImageAdjustments: SceneImageAdjustments = createDefaultSceneImageAdjustments(),
+  sceneEffectStack: SceneEffectStackItem[] = createDefaultSceneEffectStack(),
 ) {
   context.clearRect(0, 0, size.width, size.height);
 
-  if (hasActiveSceneImageEffects(sceneImageEffects)) {
+  if (
+    hasActiveSceneImageAdjustments(sceneImageAdjustments) ||
+    hasActiveSceneEffectStack(sceneEffectStack)
+  ) {
+    const sourceSurface = getSourcePreviewSurface(size);
     const filteredSurface = getFilteredPreviewSurface(size);
 
-    if (filteredSurface) {
+    if (sourceSurface && filteredSurface) {
+      sourceSurface.context.clearRect(0, 0, size.width, size.height);
       filteredSurface.context.clearRect(0, 0, size.width, size.height);
-      renderSceneContent(filteredSurface.context, image, size, layers);
-      context.save();
-      context.filter = buildCanvasFilter(sceneImageEffects);
+      if (sceneImageAdjustments.includeText) {
+        renderSceneContent(sourceSurface.context, image, size, layers);
+        drawSceneEffectsPass(
+          filteredSurface.context,
+          sourceSurface.canvas,
+          size,
+          sceneImageAdjustments,
+          sceneEffectStack,
+        );
+        context.drawImage(filteredSurface.canvas, 0, 0, size.width, size.height);
+        return;
+      }
+
+      renderSceneLayers(sourceSurface.context, image, size, layers, {
+        includeNonText: true,
+        includeText: false,
+      });
+      drawSceneEffectsPass(
+        filteredSurface.context,
+        sourceSurface.canvas,
+        size,
+        sceneImageAdjustments,
+        sceneEffectStack,
+      );
       context.drawImage(filteredSurface.canvas, 0, 0, size.width, size.height);
-      context.restore();
+      renderSceneLayers(context, null, size, layers, {
+        includeNonText: false,
+        includeText: true,
+      });
       return;
     }
   }
@@ -67,48 +116,162 @@ function renderSceneContent(
   layers: EditorLayer[],
 ) {
   context.clearRect(0, 0, size.width, size.height);
+  renderSceneLayers(context, image, size, layers, {
+    includeNonText: true,
+    includeText: true,
+  });
+}
 
-  if (image) {
+function renderSceneLayers(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource | null,
+  size: { width: number; height: number },
+  layers: EditorLayer[],
+  options: {
+    includeNonText: boolean;
+    includeText: boolean;
+  },
+) {
+  if (options.includeNonText && image) {
     context.drawImage(image, 0, 0, size.width, size.height);
   }
 
   for (const layer of [...layers].reverse()) {
     if (isImageLayer(layer)) {
-      renderImageLayer(context, layer);
+      if (options.includeNonText) {
+        renderImageLayer(context, layer);
+      }
       continue;
     }
 
-    renderTextLayer(context, layer);
+    if (options.includeText) {
+      renderTextLayer(context, layer);
+    }
   }
 }
 
 function getFilteredPreviewSurface(size: { width: number; height: number }) {
-  if (!filteredPreviewSurface) {
+  return getPreviewSurface('filtered', size);
+}
+
+function getSourcePreviewSurface(size: { width: number; height: number }) {
+  return getPreviewSurface('source', size);
+}
+
+function getPreviewSurface(kind: 'filtered' | 'source', size: { width: number; height: number }) {
+  if (kind === 'filtered' && !filteredPreviewSurface) {
     filteredPreviewSurface = document.createElement('canvas');
     filteredPreviewContext = filteredPreviewSurface.getContext('2d');
   }
 
-  if (!filteredPreviewSurface || !filteredPreviewContext) {
+  if (kind === 'source' && !sourcePreviewSurface) {
+    sourcePreviewSurface = document.createElement('canvas');
+    sourcePreviewContext = sourcePreviewSurface.getContext('2d');
+  }
+
+  const canvas = kind === 'filtered' ? filteredPreviewSurface : sourcePreviewSurface;
+  let context = kind === 'filtered' ? filteredPreviewContext : sourcePreviewContext;
+
+  if (!canvas || !context) {
     return null;
   }
 
-  if (
-    filteredPreviewSurface.width !== size.width ||
-    filteredPreviewSurface.height !== size.height
-  ) {
-    filteredPreviewSurface.width = size.width;
-    filteredPreviewSurface.height = size.height;
-    filteredPreviewContext = filteredPreviewSurface.getContext('2d');
+  if (canvas.width !== size.width || canvas.height !== size.height) {
+    canvas.width = size.width;
+    canvas.height = size.height;
+    context = canvas.getContext('2d');
+    if (kind === 'filtered') {
+      filteredPreviewContext = context;
+    } else {
+      sourcePreviewContext = context;
+    }
   }
 
-  if (!filteredPreviewContext) {
+  if (!context) {
     return null;
   }
 
   return {
-    canvas: filteredPreviewSurface,
-    context: filteredPreviewContext,
+    canvas,
+    context,
   };
+}
+
+function getEffectScratchSurface(size: { width: number; height: number }) {
+  if (!effectScratchSurface) {
+    effectScratchSurface = document.createElement('canvas');
+    effectScratchContext = effectScratchSurface.getContext('2d');
+  }
+
+  if (!effectScratchSurface || !effectScratchContext) {
+    return null;
+  }
+
+  if (effectScratchSurface.width !== size.width || effectScratchSurface.height !== size.height) {
+    effectScratchSurface.width = size.width;
+    effectScratchSurface.height = size.height;
+    effectScratchContext = effectScratchSurface.getContext('2d');
+  }
+
+  if (!effectScratchContext) {
+    return null;
+  }
+
+  return {
+    canvas: effectScratchSurface,
+    context: effectScratchContext,
+  };
+}
+
+function drawSceneEffectsPass(
+  context: CanvasRenderingContext2D,
+  sourceCanvas: HTMLCanvasElement,
+  size: { width: number; height: number },
+  sceneImageAdjustments: SceneImageAdjustments,
+  sceneEffectStack: SceneEffectStackItem[],
+) {
+  context.clearRect(0, 0, size.width, size.height);
+  context.save();
+  context.filter = buildAdjustmentCanvasFilter(sceneImageAdjustments);
+  context.drawImage(sourceCanvas, 0, 0, size.width, size.height);
+  context.restore();
+
+  for (const effect of normalizeSceneEffectStack(sceneEffectStack)) {
+    if (effect.value <= 0) {
+      continue;
+    }
+
+    if (effect.kind === 'blur') {
+      applyCanvasFilterEffectInPlace(context, size, `blur(${effect.value}px)`);
+      continue;
+    }
+
+    if (isRasterSceneEffectKind(effect.kind)) {
+      const imageData = context.getImageData(0, 0, size.width, size.height);
+      applySceneEffectToImageData(imageData, effect);
+      context.putImageData(imageData, 0, 0);
+    }
+  }
+}
+
+function applyCanvasFilterEffectInPlace(
+  context: CanvasRenderingContext2D,
+  size: { width: number; height: number },
+  filter: string,
+) {
+  const scratch = getEffectScratchSurface(size);
+
+  if (!scratch) {
+    return;
+  }
+
+  scratch.context.clearRect(0, 0, size.width, size.height);
+  scratch.context.save();
+  scratch.context.filter = filter;
+  scratch.context.drawImage(context.canvas, 0, 0, size.width, size.height);
+  scratch.context.restore();
+  context.clearRect(0, 0, size.width, size.height);
+  context.drawImage(scratch.canvas, 0, 0, size.width, size.height);
 }
 
 function renderImageLayer(context: CanvasRenderingContext2D, layer: ImageLayer) {

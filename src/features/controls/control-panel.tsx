@@ -6,6 +6,8 @@ import type {
   LayerId,
   SceneCropDraftRect,
   SceneBoundsFillMode,
+  SceneEffectStackItem,
+  SceneImageAdjustments,
   SceneExpandDraft,
   TextEffect,
   TextLayer,
@@ -25,6 +27,8 @@ type ControlPanelProps = {
   sceneCropDraft: SceneCropDraftRect | null;
   sceneBoundsFillColor: string;
   sceneBoundsFillMode: SceneBoundsFillMode;
+  sceneImageAdjustments: SceneImageAdjustments;
+  sceneEffectStack: SceneEffectStackItem[];
   sceneExpandDraft: SceneExpandDraft;
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
@@ -38,6 +42,15 @@ type ControlPanelProps = {
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
   onSceneBoundsFillColorChange: (value: string) => void;
   onSceneBoundsFillModeChange: (value: SceneBoundsFillMode) => void;
+  onSceneImageAdjustmentsChange: (updates: Partial<SceneImageAdjustments>) => void;
+  onResetSceneImageAdjustments: () => void;
+  onSceneEffectValueChange: (effectId: string, value: number) => void;
+  onReorderSceneEffects: (
+    sourceEffectId: string,
+    targetEffectId: string,
+    placement: 'before' | 'after',
+  ) => void;
+  onResetSceneEffectStack: () => void;
   onSceneBoundsPreset: (
     preset: 'equal-margin' | 'top-caption' | 'bottom-caption' | 'square-canvas',
   ) => void;
@@ -73,6 +86,8 @@ export function ControlPanel({
   sceneCropDraft,
   sceneBoundsFillColor,
   sceneBoundsFillMode,
+  sceneImageAdjustments,
+  sceneEffectStack,
   sceneExpandDraft,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
@@ -86,6 +101,11 @@ export function ControlPanel({
   onApplySettingsToAllLayers,
   onSceneBoundsFillColorChange,
   onSceneBoundsFillModeChange,
+  onSceneImageAdjustmentsChange,
+  onResetSceneImageAdjustments,
+  onSceneEffectValueChange,
+  onReorderSceneEffects,
+  onResetSceneEffectStack,
   onSceneBoundsPreset,
   onTextEditSessionEnd,
   onTextEditSessionStart,
@@ -102,6 +122,11 @@ export function ControlPanel({
   const [draggingLayerId, setDraggingLayerId] = useState<LayerId | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{
     layerId: LayerId;
+    placement: 'before' | 'after';
+  } | null>(null);
+  const [draggingEffectId, setDraggingEffectId] = useState<string | null>(null);
+  const [effectDropIndicator, setEffectDropIndicator] = useState<{
+    effectId: string;
     placement: 'before' | 'after';
   } | null>(null);
 
@@ -148,6 +173,194 @@ export function ControlPanel({
                 onClick={(event) => onOpenAdvancedImportClipboard(event.currentTarget)}
               >
                 Advanced import from clipboard
+              </button>
+            </div>
+          </div>
+
+          <div className="inspector-section">
+            <div className="section-heading">
+              <h2 className="section-title">ADJUSTMENTS</h2>
+              <p className="section-copy">Scene-wide tone and color</p>
+            </div>
+            <div className="effect-stack">
+              <RangeField
+                id="scene-adjustment-brightness"
+                label="Brightness"
+                max={200}
+                min={0}
+                step={1}
+                unit="%"
+                value={sceneImageAdjustments.brightness}
+                onChange={(value) => onSceneImageAdjustmentsChange({ brightness: value })}
+              />
+              <RangeField
+                id="scene-adjustment-contrast"
+                label="Contrast"
+                max={200}
+                min={0}
+                step={1}
+                unit="%"
+                value={sceneImageAdjustments.contrast}
+                onChange={(value) => onSceneImageAdjustmentsChange({ contrast: value })}
+              />
+              <RangeField
+                id="scene-adjustment-saturation"
+                label="Saturation"
+                max={200}
+                min={0}
+                step={1}
+                unit="%"
+                value={sceneImageAdjustments.saturation}
+                onChange={(value) => onSceneImageAdjustmentsChange({ saturation: value })}
+              />
+              <RangeField
+                id="scene-adjustment-hue"
+                label="Hue"
+                max={180}
+                min={-180}
+                step={1}
+                unit="deg"
+                value={sceneImageAdjustments.hue}
+                onChange={(value) => onSceneImageAdjustmentsChange({ hue: value })}
+              />
+            </div>
+            <div className="toggle-row">
+              <CheckToggle
+                checked={sceneImageAdjustments.grayscale}
+                label="Grayscale"
+                onChange={(checked) => onSceneImageAdjustmentsChange({ grayscale: checked })}
+              />
+              <CheckToggle
+                checked={sceneImageAdjustments.includeText}
+                label="Apply to text"
+                onChange={(checked) => onSceneImageAdjustmentsChange({ includeText: checked })}
+              />
+              <CheckToggle
+                checked={sceneImageAdjustments.sepia}
+                label="Sepia"
+                onChange={(checked) => onSceneImageAdjustmentsChange({ sepia: checked })}
+              />
+              <CheckToggle
+                checked={sceneImageAdjustments.invert}
+                label="Invert"
+                onChange={(checked) => onSceneImageAdjustmentsChange({ invert: checked })}
+              />
+            </div>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={onResetSceneImageAdjustments}
+              >
+                Reset adjustments
+              </button>
+            </div>
+          </div>
+
+          <div className="inspector-section">
+            <div className="section-heading">
+              <h2 className="section-title">EFFECTS</h2>
+              <p className="section-copy">Drag to change processing order</p>
+            </div>
+            <div className="effect-card-stack">
+              {sceneEffectStack.map((effect) => (
+                <div
+                  key={effect.id}
+                  className={`effect-card${
+                    draggingEffectId === effect.id ? ' layer-card-dragging' : ''
+                  }${
+                    effectDropIndicator?.effectId === effect.id
+                      ? effectDropIndicator.placement === 'before'
+                        ? ' layer-card-drop-before'
+                        : ' layer-card-drop-after'
+                      : ''
+                  }`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    const placement =
+                      event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+                    setEffectDropIndicator({ effectId: effect.id, placement });
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    const placement =
+                      event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+                    const draggedEffectId =
+                      draggingEffectId ??
+                      event.dataTransfer.getData('application/x-meme-elf-effect-id');
+
+                    if (!draggedEffectId || draggedEffectId === effect.id) {
+                      setEffectDropIndicator(null);
+                      return;
+                    }
+
+                    onReorderSceneEffects(draggedEffectId, effect.id, placement);
+                    setDraggingEffectId(null);
+                    setEffectDropIndicator(null);
+                  }}
+                  onDragLeave={(event) => {
+                    const nextTarget = event.relatedTarget;
+
+                    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+                      return;
+                    }
+
+                    setEffectDropIndicator((currentIndicator) =>
+                      currentIndicator?.effectId === effect.id ? null : currentIndicator,
+                    );
+                  }}
+                >
+                  <div className="effect-card-head">
+                    <div className="effect-card-title-group">
+                      <span className="effect-card-title">{getSceneEffectLabel(effect.kind)}</span>
+                      <span className="effect-value">
+                        {effect.value}
+                        {getSceneEffectUnit(effect.kind)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="layer-order-handle"
+                      draggable
+                      aria-label={`Reorder ${getSceneEffectLabel(effect.kind)} effect`}
+                      onDragStart={(event) => {
+                        setDraggingEffectId(effect.id);
+                        setEffectDropIndicator(null);
+                        event.dataTransfer.setData('application/x-meme-elf-effect-id', effect.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingEffectId(null);
+                        setEffectDropIndicator(null);
+                      }}
+                    >
+                      ⋮⋮
+                    </button>
+                  </div>
+                  <input
+                    id={`scene-effect-${effect.id}`}
+                    className="range-input"
+                    type="range"
+                    min={0}
+                    max={effect.kind === 'blur' ? 24 : 100}
+                    step={1}
+                    value={effect.value}
+                    aria-label={getSceneEffectLabel(effect.kind)}
+                    onChange={(event) =>
+                      onSceneEffectValueChange(effect.id, Number(event.target.value))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="mini-action-button"
+                onClick={onResetSceneEffectStack}
+              >
+                Reset effects
               </button>
             </div>
           </div>
@@ -859,4 +1072,64 @@ function EffectOption({ checked, label, name, onChange, value }: EffectOptionPro
       <span>{label}</span>
     </label>
   );
+}
+
+type RangeFieldProps = {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  value: number;
+  onChange: (value: number) => void;
+};
+
+function RangeField({ id, label, max, min, onChange, step, unit, value }: RangeFieldProps) {
+  return (
+    <div className="field-stack effect-field">
+      <label className="field-label effect-label" htmlFor={id}>
+        <span>{label}</span>
+        <span className="effect-value">
+          {value}
+          {unit}
+        </span>
+      </label>
+      <input
+        id={id}
+        className="range-input"
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </div>
+  );
+}
+
+function getSceneEffectLabel(effectKind: SceneEffectStackItem['kind']) {
+  switch (effectKind) {
+    case 'blur':
+      return 'Blur';
+    case 'sharpen':
+      return 'Sharpen';
+    case 'threshold':
+      return 'Threshold';
+    case 'pixelate':
+      return 'Pixelate';
+    case 'noise':
+      return 'Noise';
+    case 'grain':
+      return 'Grain';
+    case 'posterize':
+      return 'Posterize';
+    case 'jpeg':
+      return 'JPEG degrade';
+  }
+}
+
+function getSceneEffectUnit(effectKind: SceneEffectStackItem['kind']) {
+  return effectKind === 'blur' || effectKind === 'pixelate' ? 'px' : '%';
 }

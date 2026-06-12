@@ -5,14 +5,18 @@ import {
   getTextLayers,
   resizeImageLayerBox,
 } from '../image/image-layer-utils';
-import { createDefaultSceneImageEffects } from '../image/image-effects';
+import {
+  createDefaultSceneEffectStack,
+  createDefaultSceneImageAdjustments,
+} from '../image/image-effects';
 import { normalizeSceneCropRect } from '../bounds/crop-overlay';
 import { isImageLayer, isTextLayer } from '../../app/types';
 import type {
   EditorLayer,
   LayerId,
   SceneCropDraftRect,
-  SceneImageEffects,
+  SceneEffectStackItem,
+  SceneImageAdjustments,
   TextLayer,
   TextBox,
 } from '../../app/types';
@@ -28,7 +32,8 @@ type PreviewCanvasProps = {
   layers: EditorLayer[];
   previewPan?: Point;
   previewZoomFactor?: number;
-  sceneImageEffects?: SceneImageEffects;
+  sceneImageAdjustments?: SceneImageAdjustments;
+  sceneEffectStack?: SceneEffectStackItem[];
   isSceneCropMode?: boolean;
   sceneCropDraft?: SceneCropDraftRect | null;
   onDocumentInteractionEnd?: () => void;
@@ -104,7 +109,8 @@ export function PreviewCanvas({
   layers,
   previewPan = { x: 0, y: 0 },
   previewZoomFactor = 1,
-  sceneImageEffects = createDefaultSceneImageEffects(),
+  sceneImageAdjustments = createDefaultSceneImageAdjustments(),
+  sceneEffectStack = createDefaultSceneEffectStack(),
   isSceneCropMode = false,
   sceneCropDraft = null,
   onDocumentInteractionEnd,
@@ -227,9 +233,19 @@ export function PreviewCanvas({
       editingLayerId
         ? layers.filter((layer) => !isTextLayer(layer) || layer.id !== editingLayerId)
         : layers,
-      sceneImageEffects,
+      sceneImageAdjustments,
+      sceneEffectStack,
     );
-  }, [editingLayerId, height, image, layers, resolvedCanvasRef, sceneImageEffects, width]);
+  }, [
+    editingLayerId,
+    height,
+    image,
+    layers,
+    resolvedCanvasRef,
+    sceneEffectStack,
+    sceneImageAdjustments,
+    width,
+  ]);
 
   useEffect(() => {
     if (!editingLayerId || textLayers.some((layer) => layer.id === editingLayerId)) {

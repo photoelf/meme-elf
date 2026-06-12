@@ -19,6 +19,12 @@ import {
   revokeLoadedImageObjectUrl,
 } from '../features/image/image-loader';
 import {
+  createDefaultSceneEffectStack,
+  createDefaultSceneImageAdjustments,
+  normalizeSceneEffectStack,
+  normalizeSceneImageAdjustments,
+} from '../features/image/image-effects';
+import {
   createDefaultImageLayer,
   flipImageLayerHorizontal,
   flipImageLayerVertical,
@@ -26,10 +32,7 @@ import {
   reorderLayerStack,
   rotateImageLayer90,
 } from '../features/image/image-layer-utils';
-import {
-  normalizeCropDraftBox,
-  resolvePreparedOutputDimensions,
-} from '../features/image/image-crop-utils';
+import { normalizeCropDraftBox, resolvePreparedOutputDimensions } from '../features/image/image-crop-utils';
 import { applySceneCrop, applySceneExpand } from '../features/bounds/scene-bounds';
 import { normalizeSceneCropRect } from '../features/bounds/crop-overlay';
 import { resolveBoundsFill } from '../features/bounds/fill-modes';
@@ -41,7 +44,13 @@ import {
 } from '../features/image/pre-insert-state';
 import { PreInsertModal } from '../features/image/pre-insert-modal';
 import { isImageLayer, isTextLayer } from './types';
-import type { EditorLayer, LayerId, TextLayer } from './types';
+import type {
+  EditorLayer,
+  LayerId,
+  SceneEffectStackItem,
+  SceneImageAdjustments,
+  TextLayer,
+} from './types';
 
 const MAX_PREVIEW_WIDTH = 960;
 const DEFAULT_INSPECTOR_WIDTH = 24;
@@ -74,6 +83,8 @@ type EditorHistorySnapshot = {
   };
   layers: EditorLayer[];
   activeLayerId: LayerId | null;
+  sceneImageAdjustments: SceneImageAdjustments;
+  sceneEffectStack: SceneEffectStackItem[];
 };
 
 const MAX_HISTORY_STEPS = 10;
@@ -240,6 +251,8 @@ export function App() {
       canvasSize: { ...state.canvasSize },
       layers: cloneLayers(state.layers),
       activeLayerId: state.activeLayerId,
+      sceneImageAdjustments: { ...state.sceneImageAdjustments },
+      sceneEffectStack: state.sceneEffectStack.map((effect) => ({ ...effect })),
     };
   }
 
@@ -298,6 +311,8 @@ export function App() {
       canvasSize: { ...snapshot.canvasSize },
       layers: cloneLayers(snapshot.layers),
       activeLayerId: snapshot.activeLayerId,
+      sceneImageAdjustments: { ...snapshot.sceneImageAdjustments },
+      sceneEffectStack: snapshot.sceneEffectStack.map((effect) => ({ ...effect })),
       status: 'idle',
       errorMessage: null,
       preInsertModalDraft: null,
@@ -614,6 +629,83 @@ export function App() {
         };
       }),
     }), historyMode);
+  }
+
+  function updateSceneImageAdjustments(
+    updates: Partial<typeof appState.sceneImageAdjustments>,
+    historyMode: HistoryMode = 'immediate',
+  ) {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneImageAdjustments: normalizeSceneImageAdjustments({
+        ...currentState.sceneImageAdjustments,
+        ...updates,
+      }),
+    }), historyMode);
+  }
+
+  function resetSceneImageAdjustments() {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneImageAdjustments: createDefaultSceneImageAdjustments(),
+    }));
+  }
+
+  function updateSceneEffectValue(effectId: string, value: number, historyMode: HistoryMode = 'immediate') {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneEffectStack: normalizeSceneEffectStack(
+        currentState.sceneEffectStack.map((effect) =>
+          effect.id === effectId ? { ...effect, value } : effect,
+        ),
+      ),
+    }), historyMode);
+  }
+
+  function resetSceneEffectStack() {
+    applyAppStateChange((currentState) => ({
+      ...currentState,
+      sceneEffectStack: createDefaultSceneEffectStack(),
+    }));
+  }
+
+  function reorderSceneEffectStack(
+    sourceEffectId: string,
+    targetEffectId: string,
+    placement: 'before' | 'after',
+  ) {
+    applyAppStateChange((currentState) => {
+      const sourceIndex = currentState.sceneEffectStack.findIndex(
+        (effect) => effect.id === sourceEffectId,
+      );
+      const targetIndex = currentState.sceneEffectStack.findIndex(
+        (effect) => effect.id === targetEffectId,
+      );
+
+      if (
+        sourceIndex < 0 ||
+        targetIndex < 0 ||
+        sourceEffectId === targetEffectId
+      ) {
+        return currentState;
+      }
+
+      const reordered = [...currentState.sceneEffectStack];
+      const [moved] = reordered.splice(sourceIndex, 1);
+
+      if (!moved) {
+        return currentState;
+      }
+
+      const nextTargetIndex = reordered.findIndex((effect) => effect.id === targetEffectId);
+      const insertIndex = placement === 'before' ? nextTargetIndex : nextTargetIndex + 1;
+      reordered.splice(insertIndex, 0, moved);
+
+      return {
+        ...currentState,
+        sceneEffectStack: reordered,
+      };
+    });
   }
 
   function transformImageLayer(
@@ -1340,7 +1432,8 @@ export function App() {
                 width={appState.canvasSize.width}
                 height={appState.canvasSize.height}
                 layers={appState.layers}
-                sceneImageEffects={appState.sceneImageEffects}
+                sceneImageAdjustments={appState.sceneImageAdjustments}
+                sceneEffectStack={appState.sceneEffectStack}
                 previewPan={previewPan}
                 previewZoomFactor={appState.previewZoomFactor}
                 isSceneCropMode={appState.activeSceneBoundsMode === 'crop'}
@@ -1382,6 +1475,8 @@ export function App() {
           sceneCropDraft={appState.sceneBoundsDraft.cropRect}
           sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
           sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
+          sceneImageAdjustments={appState.sceneImageAdjustments}
+          sceneEffectStack={appState.sceneEffectStack}
           sceneExpandDraft={appState.sceneBoundsDraft.expand}
           onOpenAdvancedImportClipboard={(opener) => {
             void handleAdvancedImportClipboardClick(opener);
@@ -1417,6 +1512,11 @@ export function App() {
               },
             }))
           }
+          onSceneImageAdjustmentsChange={(updates) => updateSceneImageAdjustments(updates)}
+          onResetSceneImageAdjustments={resetSceneImageAdjustments}
+          onSceneEffectValueChange={updateSceneEffectValue}
+          onReorderSceneEffects={reorderSceneEffectStack}
+          onResetSceneEffectStack={resetSceneEffectStack}
           onSceneBoundsPreset={applySceneBoundsPreset}
           onSceneExpandDraftChange={updateSceneExpandDraft}
           onStartSceneCrop={() =>
@@ -1740,7 +1840,30 @@ function historySnapshotsEqual(a: EditorHistorySnapshot, b: EditorHistorySnapsho
   if (
     a.canvasSize.width !== b.canvasSize.width ||
     a.canvasSize.height !== b.canvasSize.height ||
+    a.sceneImageAdjustments.brightness !== b.sceneImageAdjustments.brightness ||
+    a.sceneImageAdjustments.contrast !== b.sceneImageAdjustments.contrast ||
+    a.sceneImageAdjustments.saturation !== b.sceneImageAdjustments.saturation ||
+    a.sceneImageAdjustments.hue !== b.sceneImageAdjustments.hue ||
+    a.sceneImageAdjustments.grayscale !== b.sceneImageAdjustments.grayscale ||
+    a.sceneImageAdjustments.includeText !== b.sceneImageAdjustments.includeText ||
+    a.sceneImageAdjustments.sepia !== b.sceneImageAdjustments.sepia ||
+    a.sceneImageAdjustments.invert !== b.sceneImageAdjustments.invert ||
+    a.sceneEffectStack.length !== b.sceneEffectStack.length ||
     a.layers.length !== b.layers.length
+  ) {
+    return false;
+  }
+
+  if (
+    !a.sceneEffectStack.every((effect, index) => {
+      const candidate = b.sceneEffectStack[index];
+      return (
+        Boolean(candidate) &&
+        effect.id === candidate.id &&
+        effect.kind === candidate.kind &&
+        effect.value === candidate.value
+      );
+    })
   ) {
     return false;
   }
