@@ -1,7 +1,7 @@
 export const TEXT_ALIGN_OPTIONS = ['left', 'center', 'right'] as const;
 export const VERTICAL_ALIGN_OPTIONS = ['top', 'middle', 'bottom'] as const;
 export const TEXT_EFFECT_OPTIONS = ['outline', 'shadow', 'none'] as const;
-export const LAYER_KIND_OPTIONS = ['text', 'image'] as const;
+export const LAYER_KIND_OPTIONS = ['text', 'image', 'draw'] as const;
 export const MODAL_SOURCE_KIND_OPTIONS = [
   'upload-image',
   'advanced-import-file',
@@ -188,7 +188,42 @@ export type ImageLayer = BaseLayer & {
   skew: ImageSkew;
 };
 
-export type EditorLayer = TextLayer | ImageLayer;
+export type RasterSurface = {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray<ArrayBuffer>;
+};
+
+export type DrawPoint = {
+  x: number;
+  y: number;
+};
+
+export type DrawLayer = BaseLayer & {
+  kind: 'draw';
+  raster: RasterSurface;
+  sourceSize: {
+    width: number;
+    height: number;
+  };
+};
+
+export type RetouchState = {
+  mode: 'idle' | 'draw' | 'eyedropper';
+  activeDrawLayerId: LayerId | null;
+  draftStroke: {
+    points: DrawPoint[];
+    targetLayerId: LayerId | null;
+  } | null;
+  brush: {
+    color: string;
+    size: number;
+    opacity: number;
+    softEdge: boolean;
+  };
+};
+
+export type EditorLayer = TextLayer | ImageLayer | DrawLayer;
 
 export function isTextLayer(layer: EditorLayer): layer is TextLayer {
   return layer.kind === 'text';
@@ -196,6 +231,10 @@ export function isTextLayer(layer: EditorLayer): layer is TextLayer {
 
 export function isImageLayer(layer: EditorLayer): layer is ImageLayer {
   return layer.kind === 'image';
+}
+
+export function isDrawLayer(layer: EditorLayer): layer is DrawLayer {
+  return layer.kind === 'draw';
 }
 
 export type AppStatus = 'idle' | 'loadingImage' | 'copying' | 'error';
@@ -218,4 +257,5 @@ export type AppState = {
   sceneWatermark: SceneWatermark;
   sceneBoundsDraft: SceneBoundsDraft;
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
+  retouch: RetouchState;
 };

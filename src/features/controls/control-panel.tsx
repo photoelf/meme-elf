@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 
-import { isImageLayer, isTextLayer } from '../../app/types';
+import { isDrawLayer, isImageLayer, isTextLayer } from '../../app/types';
 import type {
   EditorLayer,
   LayerId,
@@ -23,11 +23,18 @@ import type { SceneImageStackTransform } from '../image/scene-image-stack-utils'
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
-  activeTab: 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark';
+  activeTab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
   layers: EditorLayer[];
+  retouchMode: 'idle' | 'draw' | 'eyedropper';
+  retouchBrush: {
+    color: string;
+    size: number;
+    opacity: number;
+    softEdge: boolean;
+  };
   sceneCropDraft: SceneCropDraftRect | null;
   sceneBoundsFillColor: string;
   sceneBoundsFillMode: SceneBoundsFillMode;
@@ -41,10 +48,11 @@ type ControlPanelProps = {
   onApplySceneCrop: () => void;
   onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark') => void;
+  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark') => void;
   onCancelSceneBounds: () => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
+  onCreateDrawLayer: () => void;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
   onSceneBoundsFillColorChange: (value: string) => void;
   onSceneBoundsFillModeChange: (value: SceneBoundsFillMode) => void;
@@ -76,6 +84,13 @@ type ControlPanelProps = {
     historyMode?: 'immediate' | 'defer',
   ) => void;
   onRotateImageLayer: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
+  onRetouchModeChange: (mode: 'idle' | 'draw' | 'eyedropper') => void;
+  onRetouchBrushChange: (updates: {
+    color?: string;
+    size?: number;
+    opacity?: number;
+    softEdge?: boolean;
+  }) => void;
   onFlipImageLayerHorizontal: (layerId: LayerId) => void;
   onFlipImageLayerVertical: (layerId: LayerId) => void;
   onReorderLayers: (
@@ -92,6 +107,8 @@ export function ControlPanel({
   activeLayerId,
   isImportModalOpen,
   layers,
+  retouchMode,
+  retouchBrush,
   sceneCropDraft,
   sceneBoundsFillColor,
   sceneBoundsFillMode,
@@ -109,6 +126,7 @@ export function ControlPanel({
   onCancelSceneBounds,
   onClearActiveLayer,
   onAddLayer,
+  onCreateDrawLayer,
   onApplySettingsToAllLayers,
   onSceneBoundsFillColorChange,
   onSceneBoundsFillModeChange,
@@ -127,6 +145,8 @@ export function ControlPanel({
   onStartSceneCrop,
   onTextLayerChange,
   onRotateImageLayer,
+  onRetouchModeChange,
+  onRetouchBrushChange,
   onFlipImageLayerHorizontal,
   onFlipImageLayerVertical,
   onReorderLayers,
@@ -148,11 +168,17 @@ export function ControlPanel({
     () => openSettingsLayerIds.filter((layerId) => layers.some((layer) => layer.id === layerId)),
     [layers, openSettingsLayerIds],
   );
+  const clearRetouchMode = () => {
+    if (retouchMode !== 'idle') {
+      onRetouchModeChange('idle');
+    }
+  };
   const hasPendingSceneExpand =
     sceneExpandDraft.left !== 0 ||
     sceneExpandDraft.right !== 0 ||
     sceneExpandDraft.top !== 0 ||
     sceneExpandDraft.bottom !== 0;
+  const drawLayers = layers.filter(isDrawLayer);
 
   return (
     <aside
@@ -160,17 +186,34 @@ export function ControlPanel({
       aria-label="Controls"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
+          clearRetouchMode();
           onBackgroundPointerDown();
         }
       }}
     >
       <div className="tool-rail inspector-rail">
-        <div className="tool-rail-tabs tool-rail-tabs-five" role="tablist" aria-label="Control sections">
-          <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => onActiveTabChange('layers')} />
-          <InspectorTabButton icon={<CropIcon />} isActive={activeTab === 'crop'} label="Crop" onClick={() => onActiveTabChange('crop')} />
-          <InspectorTabButton icon={<AdjustmentsIcon />} isActive={activeTab === 'adjustments'} label="Adjustments" onClick={() => onActiveTabChange('adjustments')} />
-          <InspectorTabButton icon={<EffectsIcon />} isActive={activeTab === 'effects'} label="Effects" onClick={() => onActiveTabChange('effects')} />
-          <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => onActiveTabChange('watermark')} />
+        <div className="tool-rail-tabs tool-rail-tabs-six" role="tablist" aria-label="Control sections">
+          <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('layers');
+          }} />
+          <InspectorTabButton icon={<CropIcon />} isActive={activeTab === 'crop'} label="Crop" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('crop');
+          }} />
+          <InspectorTabButton icon={<AdjustmentsIcon />} isActive={activeTab === 'adjustments'} label="Adjustments" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('adjustments');
+          }} />
+          <InspectorTabButton icon={<DrawIcon />} isActive={activeTab === 'draw'} label="Draw" onClick={() => onActiveTabChange('draw')} />
+          <InspectorTabButton icon={<EffectsIcon />} isActive={activeTab === 'effects'} label="Effects" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('effects');
+          }} />
+          <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('watermark');
+          }} />
         </div>
       </div>
 
@@ -180,7 +223,7 @@ export function ControlPanel({
             <div className="section-heading section-heading-stack">
               <div>
                 <h2 className="section-title">LAYERS</h2>
-                <p className="section-copy">Text and image stack</p>
+                <p className="section-copy">Text, image, and draw layers</p>
               </div>
               <div className="section-action-row">
                 <button
@@ -188,7 +231,10 @@ export function ControlPanel({
                   className="mini-action-button mini-action-button-icon icon-button-with-tooltip"
                   aria-label="Add text"
                   data-tooltip="Add text"
-                  onClick={onAddLayer}
+                  onClick={() => {
+                    clearRetouchMode();
+                    onAddLayer();
+                  }}
                 >
                   <LayerAddIcon />
                 </button>
@@ -198,7 +244,10 @@ export function ControlPanel({
                   aria-label="Advanced import from file"
                   data-tooltip="Advanced import from file"
                   disabled={isImportModalOpen}
-                  onClick={(event) => onOpenAdvancedImportFile(event.currentTarget)}
+                  onClick={(event) => {
+                    clearRetouchMode();
+                    onOpenAdvancedImportFile(event.currentTarget);
+                  }}
                 >
                   <UploadImageIcon />
                 </button>
@@ -208,7 +257,10 @@ export function ControlPanel({
                   aria-label="Advanced import from clipboard"
                   data-tooltip="Advanced import from clipboard"
                   disabled={isImportModalOpen}
-                  onClick={(event) => onOpenAdvancedImportClipboard(event.currentTarget)}
+                  onClick={(event) => {
+                    clearRetouchMode();
+                    onOpenAdvancedImportClipboard(event.currentTarget);
+                  }}
                 >
                   <PasteImageIcon />
                 </button>
@@ -294,10 +346,12 @@ export function ControlPanel({
                               return;
                             }
 
+                            clearRetouchMode();
                             setDraggingLayerId(layer.id);
                             setDropIndicator(null);
                           }}
                           onSettingsClick={() => {
+                            clearRetouchMode();
                             onActiveLayerChange(layer.id);
                             setOpenSettingsLayerIds((currentLayerIds) =>
                               currentLayerIds.includes(layer.id)
@@ -326,14 +380,17 @@ export function ControlPanel({
                           />
                         </LayerRowActions>
                       </div>
-                    ) : (
+                    ) : isImageLayer(layer) ? (
                       <div className="layer-row layer-row-image">
                         <button
                           type="button"
                           className="image-layer-button"
                           aria-label={`${layer.name} layer`}
                           aria-pressed={layer.id === activeLayerId}
-                          onClick={() => onActiveLayerChange(layer.id)}
+                          onClick={() => {
+                            clearRetouchMode();
+                            onActiveLayerChange(layer.id);
+                          }}
                         >
                           <span className="image-layer-thumb" aria-hidden="true">
                             PNG
@@ -355,10 +412,59 @@ export function ControlPanel({
                               return;
                             }
 
+                            clearRetouchMode();
                             setDraggingLayerId(layer.id);
                             setDropIndicator(null);
                           }}
                           onSettingsClick={() => {
+                            clearRetouchMode();
+                            onActiveLayerChange(layer.id);
+                            setOpenSettingsLayerIds((currentLayerIds) =>
+                              currentLayerIds.includes(layer.id)
+                                ? currentLayerIds.filter((currentLayerId) => currentLayerId !== layer.id)
+                                : [...currentLayerIds, layer.id],
+                            );
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="layer-row layer-row-image">
+                        <button
+                          type="button"
+                          className="image-layer-button"
+                          aria-label={`${layer.name} layer`}
+                          aria-pressed={layer.id === activeLayerId}
+                          onClick={() => {
+                            clearRetouchMode();
+                            onActiveLayerChange(layer.id);
+                          }}
+                        >
+                          <span className="image-layer-thumb" aria-hidden="true">
+                            DRAW
+                          </span>
+                          <span className="image-layer-copy">
+                            <span className="image-layer-name">{layer.name}</span>
+                            <span className="image-layer-meta">
+                              {isDrawLayer(layer) ? `${layer.sourceSize.width} x ${layer.sourceSize.height}` : ''}
+                            </span>
+                          </span>
+                        </button>
+                        <LayerRowActions
+                          isSettingsOpen={isSettingsOpen}
+                          layer={layer}
+                          onDragStateChange={(isDragging) => {
+                            if (!isDragging) {
+                              setDraggingLayerId(null);
+                              setDropIndicator(null);
+                              return;
+                            }
+
+                            clearRetouchMode();
+                            setDraggingLayerId(layer.id);
+                            setDropIndicator(null);
+                          }}
+                          onSettingsClick={() => {
+                            clearRetouchMode();
                             onActiveLayerChange(layer.id);
                             setOpenSettingsLayerIds((currentLayerIds) =>
                               currentLayerIds.includes(layer.id)
@@ -380,7 +486,7 @@ export function ControlPanel({
                             onTextLayerChange={onTextLayerChange}
                             onRemoveLayer={onRemoveLayer}
                           />
-                        ) : (
+                        ) : isImageLayer(layer) ? (
                           <ImageLayerSettings
                             layer={layer}
                             layerCount={layers.length}
@@ -389,12 +495,146 @@ export function ControlPanel({
                             onRemoveLayer={onRemoveLayer}
                             onRotate={onRotateImageLayer}
                           />
+                        ) : (
+                          <DrawLayerSettings
+                            layer={layer}
+                            layerCount={layers.length}
+                            onRemoveLayer={onRemoveLayer}
+                          />
                         )}
                       </div>
                     ) : null}
                   </div>
                 );
               })}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === 'draw' ? (
+          <div className="inspector-section">
+            <div className="section-heading">
+              <div>
+                <h2 className="section-title">DRAW</h2>
+                <p className="section-copy">Brush controls and draw-layer targeting</p>
+              </div>
+            </div>
+            <div className="settings-actions bounds-actions">
+              <button
+                type="button"
+                className={`mini-action-button${retouchMode === 'draw' ? ' settings-button-active' : ''}`}
+                onClick={() => onRetouchModeChange(retouchMode === 'draw' ? 'idle' : 'draw')}
+              >
+                Draw
+              </button>
+              <button
+                type="button"
+                className={`mini-action-button${retouchMode === 'eyedropper' ? ' settings-button-active' : ''}`}
+                onClick={() => onRetouchModeChange(retouchMode === 'eyedropper' ? 'draw' : 'eyedropper')}
+              >
+                Eyedropper
+              </button>
+              <button type="button" className="mini-action-button" onClick={onCreateDrawLayer}>
+                New draw layer
+              </button>
+            </div>
+            <div className="control-grid control-grid-compact">
+              <div className="field-stack">
+                <label className="field-label" htmlFor="retouch-brush-color">
+                  Brush color
+                </label>
+                <input
+                  id="retouch-brush-color"
+                  className="color-input"
+                  type="color"
+                  value={retouchBrush.color}
+                  onChange={(event) => onRetouchBrushChange({ color: event.target.value })}
+                />
+              </div>
+              <RangeField
+                id="retouch-brush-size"
+                label="Brush size"
+                max={128}
+                min={1}
+                step={1}
+                unit="px"
+                value={retouchBrush.size}
+                onChange={(value) => onRetouchBrushChange({ size: value })}
+              />
+            </div>
+            <div className="control-grid control-grid-compact">
+              <RangeField
+                id="retouch-brush-opacity"
+                label="Brush opacity"
+                max={100}
+                min={1}
+                step={1}
+                unit="%"
+                value={Math.round(retouchBrush.opacity * 100)}
+                onChange={(value) => onRetouchBrushChange({ opacity: value / 100 })}
+              />
+            </div>
+            <div className="toggle-row">
+              <CheckToggle
+                checked={retouchBrush.softEdge}
+                label="Soft edge"
+                onChange={(checked) => onRetouchBrushChange({ softEdge: checked })}
+              />
+            </div>
+            <div className="layer-stack">
+              {drawLayers.length > 0 ? (
+                drawLayers.map((layer) => {
+                  const isSettingsOpen = resolvedOpenLayerIds.includes(layer.id);
+
+                  return (
+                    <div key={layer.id} className={`layer-card${layer.id === activeLayerId ? ' layer-card-active' : ''}`}>
+                      <div className="layer-row layer-row-image">
+                        <button
+                          type="button"
+                          className="image-layer-button"
+                          aria-label={`${layer.name} layer`}
+                          aria-pressed={layer.id === activeLayerId}
+                          onClick={() => onActiveLayerChange(layer.id)}
+                        >
+                          <span className="image-layer-thumb" aria-hidden="true">
+                            DRAW
+                          </span>
+                          <span className="image-layer-copy">
+                            <span className="image-layer-name">{layer.name}</span>
+                            <span className="image-layer-meta">
+                              {layer.sourceSize.width} x {layer.sourceSize.height}
+                            </span>
+                          </span>
+                        </button>
+                        <LayerRowActions
+                          isSettingsOpen={isSettingsOpen}
+                          layer={layer}
+                          onDragStateChange={() => {}}
+                          onSettingsClick={() => {
+                            onActiveLayerChange(layer.id);
+                            setOpenSettingsLayerIds((currentLayerIds) =>
+                              currentLayerIds.includes(layer.id)
+                                ? currentLayerIds.filter((currentLayerId) => currentLayerId !== layer.id)
+                                : [...currentLayerIds, layer.id],
+                            );
+                          }}
+                        />
+                      </div>
+                      {isSettingsOpen ? (
+                        <div className="settings-popover">
+                          <DrawLayerSettings
+                            layer={layer}
+                            layerCount={layers.length}
+                            onRemoveLayer={onRemoveLayer}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="section-copy">No draw layers yet. Start drawing on the canvas or create one explicitly.</p>
+              )}
             </div>
           </div>
         ) : null}
@@ -811,6 +1051,15 @@ function AdjustmentsIcon() {
   );
 }
 
+function DrawIcon() {
+  return (
+    <RailIconBase>
+      <path d="M5 14.5 13.8 5.7a1.6 1.6 0 0 1 2.2 0l.3.3a1.6 1.6 0 0 1 0 2.2L7.5 17H5v-2.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M11.5 8l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </RailIconBase>
+  );
+}
+
 function EffectsIcon() {
   return (
     <RailIconBase>
@@ -1143,6 +1392,36 @@ function ImageLayerSettings({
         <button type="button" className="apply-all-button" onClick={() => onFlipVertical(layer.id)}>
           Flip vertical
         </button>
+        <button
+          type="button"
+          className="apply-all-button remove-layer-button"
+          disabled={layerCount <= 1}
+          onClick={() => onRemoveLayer(layer.id)}
+        >
+          Remove layer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DrawLayerSettings({
+  layer,
+  layerCount,
+  onRemoveLayer,
+}: {
+  layer: EditorLayer;
+  layerCount: number;
+  onRemoveLayer: (layerId: LayerId) => void;
+}) {
+  if (!isDrawLayer(layer)) {
+    return null;
+  }
+
+  return (
+    <div className="image-layer-settings">
+      <p className="section-copy">This draw layer stays in the scene stack and receives new strokes while it is the active brush target.</p>
+      <div className="settings-actions">
         <button
           type="button"
           className="apply-all-button remove-layer-button"

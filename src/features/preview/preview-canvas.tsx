@@ -13,6 +13,7 @@ import { createDefaultSceneWatermark } from '../image/watermark-utils';
 import { normalizeSceneCropRect } from '../bounds/crop-overlay';
 import { isImageLayer, isTextLayer } from '../../app/types';
 import type {
+  DrawPoint,
   EditorLayer,
   LayerId,
   SceneCropDraftRect,
@@ -41,6 +42,9 @@ type PreviewCanvasProps = {
   sceneCropDraft?: SceneCropDraftRect | null;
   onDocumentInteractionEnd?: () => void;
   onDocumentInteractionStart?: () => void;
+  onDraftStrokeChange?: (draft: { points: DrawPoint[]; targetLayerId: LayerId | null } | null) => void;
+  onDraftStrokeCommit?: () => void;
+  onRetouchBrushSample?: (sample: { color: string; opacity: number }) => void;
   onInlineTextEditEnd?: () => void;
   onInlineTextEditStart?: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
@@ -50,6 +54,13 @@ type PreviewCanvasProps = {
     historyMode?: 'immediate' | 'defer',
   ) => void;
   onSceneCropDraftChange?: (draft: SceneCropDraftRect | null) => void;
+  draftStroke?: { points: DrawPoint[]; targetLayerId: LayerId | null } | null;
+  retouchMode?: 'idle' | 'draw' | 'eyedropper';
+  retouchBrush?: {
+    color: string;
+    size: number;
+    opacity: number;
+  };
 };
 
 type InteractionMode =
@@ -119,17 +130,28 @@ export function PreviewCanvas({
   sceneCropDraft = null,
   onDocumentInteractionEnd,
   onDocumentInteractionStart,
+  onDraftStrokeChange,
+  onDraftStrokeCommit,
+  onRetouchBrushSample,
   onInlineTextEditEnd,
   onInlineTextEditStart,
   onActiveLayerChange,
   onLayerChange,
   onSceneCropDraftChange,
+  draftStroke = null,
+  retouchMode = 'idle',
+  retouchBrush = {
+    color: '#ff0000',
+    size: 8,
+    opacity: 1,
+  },
 }: PreviewCanvasProps) {
   const internalCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionMode>(null);
   const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
+  const drawInteractionRef = useRef(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resolvedCanvasRef = canvasRef ?? internalCanvasRef;
   const [isInteracting, setIsInteracting] = useState(false);
@@ -329,6 +351,55 @@ export function PreviewCanvas({
   }, [height, isSceneCropMode, onSceneCropDraftChange, width]);
 
   useEffect(() => {
+    function handleDrawPointerMove(event: PointerEvent) {
+      if (!drawInteractionRef.current || retouchMode !== 'draw') {
+        return;
+      }
+
+      const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+      if (!point) {
+        return;
+      }
+
+      onDraftStrokeChange?.({
+        points: [...(draftStroke?.points ?? []), point],
+        targetLayerId: draftStroke?.targetLayerId ?? null,
+      });
+    }
+
+    function handleDrawPointerUp() {
+      if (!drawInteractionRef.current || retouchMode !== 'draw') {
+        return;
+      }
+
+      drawInteractionRef.current = false;
+      setIsInteracting(false);
+      onDraftStrokeCommit?.();
+      window.setTimeout(() => {
+        onDocumentInteractionEnd?.();
+      }, 0);
+    }
+
+    window.addEventListener('pointermove', handleDrawPointerMove);
+    window.addEventListener('pointerup', handleDrawPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleDrawPointerMove);
+      window.removeEventListener('pointerup', handleDrawPointerUp);
+    };
+  }, [
+    draftStroke?.points,
+    draftStroke?.targetLayerId,
+    height,
+    onDocumentInteractionEnd,
+    onDraftStrokeChange,
+    onDraftStrokeCommit,
+    retouchMode,
+    width,
+  ]);
+
+  useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       if (!interactionRef.current || !shellRef.current) {
         return;
@@ -429,7 +500,7 @@ export function PreviewCanvas({
     isSceneCropMode && sceneCropDraft
       ? normalizeSceneCropRect(sceneCropDraft, { width, height })
       : null;
-  const showLayerOverlay = !isSceneCropMode && isOverlayVisible;
+  const showLayerOverlay = !isSceneCropMode && retouchMode === 'idle' && isOverlayVisible;
 
   return (
     <div className="preview-viewport">
@@ -468,6 +539,44 @@ export function PreviewCanvas({
           onPointerEnter={() => setIsPreviewSurfaceHovered(true)}
           onPointerLeave={() => setIsPreviewSurfaceHovered(false)}
           onPointerDown={(event) => {
+            if (retouchMode === 'eyedropper' && event.button !== 1 && event.button !== 2) {
+              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+              if (!point) {
+                return;
+              }
+
+              event.preventDefault();
+              setEditingLayerId(null);
+              const sample = sampleCanvasPixel(resolvedCanvasRef.current, width, height, point);
+
+              if (!sample) {
+                return;
+              }
+
+              onRetouchBrushSample?.(sample);
+              return;
+            }
+
+            if (retouchMode === 'draw' && event.button !== 1 && event.button !== 2) {
+              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+              if (!point) {
+                return;
+              }
+
+              event.preventDefault();
+              drawInteractionRef.current = true;
+              setEditingLayerId(null);
+              setIsInteracting(true);
+              onDocumentInteractionStart?.();
+              onDraftStrokeChange?.({
+                points: [point],
+                targetLayerId: activeLayerId,
+              });
+              return;
+            }
+
             if ((event.button === 1 || event.button === 2) || event.target !== event.currentTarget) {
               return;
             }
@@ -495,6 +604,31 @@ export function PreviewCanvas({
             aria-label="Meme preview canvas"
             className="preview-canvas"
           />
+          {draftStroke && draftStroke.points.length > 0 ? (
+            <svg
+              className="draw-stroke-preview"
+              aria-hidden="true"
+              viewBox={`0 0 ${width} ${height}`}
+              preserveAspectRatio="none"
+              style={{
+                position: 'absolute',
+                inset: '0px',
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+              }}
+            >
+              <polyline
+                fill="none"
+                points={draftStroke.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                stroke={retouchBrush.color}
+                strokeOpacity={retouchBrush.opacity}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={retouchBrush.size}
+              />
+            </svg>
+          ) : null}
           {normalizedSceneCropRect ? (
             <div
               className="scene-crop-overlay"
@@ -561,7 +695,7 @@ export function PreviewCanvas({
             </div>
           ) : null}
           <div className="preview-overlay" aria-hidden="true">
-            {!isSceneCropMode ? [...layers].reverse().map((layer) => {
+            {!isSceneCropMode && (retouchMode === 'idle' || editingLayerId !== null) ? [...layers].reverse().map((layer) => {
               const isActive = layer.id === activeLayerId;
               const boxStyle = getOverlayBoxStyle(layer.box, width, height);
               const isEditing = isTextLayer(layer) && editingLayerId === layer.id;
@@ -1058,4 +1192,42 @@ function moveCaretToEnd(element: HTMLDivElement) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function sampleCanvasPixel(
+  canvas: HTMLCanvasElement | null,
+  width: number,
+  height: number,
+  point: Point,
+) {
+  if (!canvas) {
+    return null;
+  }
+
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return null;
+  }
+
+  const x = clamp(Math.round(point.x), 0, Math.max(0, width - 1));
+  const y = clamp(Math.round(point.y), 0, Math.max(0, height - 1));
+  const data = context.getImageData(x, y, 1, 1).data;
+  const red = data[0] ?? 0;
+  const green = data[1] ?? 0;
+  const blue = data[2] ?? 0;
+  const alpha = data[3] ?? 255;
+
+  return {
+    color: rgbToHex(red, green, blue),
+    opacity: Number((alpha / 255).toFixed(2)),
+  };
+}
+
+function rgbToHex(red: number, green: number, blue: number) {
+  return `#${toHexChannel(red)}${toHexChannel(green)}${toHexChannel(blue)}`;
+}
+
+function toHexChannel(value: number) {
+  return clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0');
 }

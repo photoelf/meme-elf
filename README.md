@@ -16,7 +16,7 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
 - top action bar with compact icon-only actions and delayed tooltips
-- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Effects`, and `Watermark`
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, and `Watermark`
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
@@ -28,6 +28,9 @@ Current repo state:
 - text layer editing, reorder, move, resize, and rotate
 - inline canvas text editing with multiline entry and live box-fit recovery after line removal
 - image layer insert, reorder, move, resize, rotate, and remove
+- draw layers with committed raster strokes in preview, clipboard copy, and PNG export
+- draw mode with draft stroke preview, auto-targeted draw-layer commits, and stroke undo
+- draw inspector controls for `Draw`, `New draw layer`, brush color, size, opacity, soft edge, and eyedropper color sampling
 - preview zoom and middle-mouse pan for desktop editing
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
@@ -44,7 +47,7 @@ Current desktop layout conventions:
 - global actions live in the top bar as icon-only buttons with delayed tooltips
 - preview-local undo/redo and zoom controls stay with the preview header
 - advanced editing lives in the right inspector rather than a left tool rail
-- inspector navigation uses full-width icon tabs, including a dedicated `Watermark` section
+- inspector navigation uses one dedicated full-width icon tab per tool, including `Draw` and `Watermark`
 - scene-level rotate / flip actions in `Crop` affect only the image stack; text layers stay in place
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 
@@ -122,6 +125,7 @@ Included:
 - basic text styling
 - image layers and pre-insert preparation for UI imports
 - scene crop and canvas bounds expansion
+- draw layers and desktop brush painting
 - desktop mouse interactions
 - copy/export as PNG
 
@@ -130,3 +134,4 @@ Excluded:
 - meme history
 - GIF/video editing
 - AI features
+- erase-on-draw-layer flow is not closed yet

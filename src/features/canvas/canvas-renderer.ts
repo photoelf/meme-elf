@@ -1,7 +1,9 @@
-import { isImageLayer } from '../../app/types';
+import { isDrawLayer, isImageLayer } from '../../app/types';
 import type {
+  DrawLayer,
   EditorLayer,
   ImageLayer,
+  RasterSurface,
   SceneEffectStackItem,
   SceneImageAdjustments,
   SceneWatermark,
@@ -36,6 +38,8 @@ let sourcePreviewSurface: HTMLCanvasElement | null = null;
 let sourcePreviewContext: CanvasRenderingContext2D | null = null;
 let effectScratchSurface: HTMLCanvasElement | null = null;
 let effectScratchContext: CanvasRenderingContext2D | null = null;
+let drawLayerSurface: HTMLCanvasElement | null = null;
+let drawLayerContext: CanvasRenderingContext2D | null = null;
 
 export function resetPreviewRenderSurfacesForTests() {
   filteredPreviewSurface = null;
@@ -44,6 +48,8 @@ export function resetPreviewRenderSurfacesForTests() {
   sourcePreviewContext = null;
   effectScratchSurface = null;
   effectScratchContext = null;
+  drawLayerSurface = null;
+  drawLayerContext = null;
 }
 
 export function getContainedCanvasSize(width: number, height: number, maxWidth: number) {
@@ -150,6 +156,13 @@ function renderSceneLayers(
     if (isImageLayer(layer)) {
       if (options.includeNonText) {
         renderImageLayer(context, layer);
+      }
+      continue;
+    }
+
+    if (isDrawLayer(layer)) {
+      if (options.includeNonText) {
+        renderDrawLayer(context, layer);
       }
       continue;
     }
@@ -305,6 +318,69 @@ function renderImageLayer(context: CanvasRenderingContext2D, layer: ImageLayer) 
     layer.box.height,
   );
   context.restore();
+}
+
+function renderDrawLayer(context: CanvasRenderingContext2D, layer: DrawLayer) {
+  const surface = getDrawLayerSurface(layer.raster);
+
+  if (!surface) {
+    return;
+  }
+
+  context.save();
+  context.translate(layer.box.x + layer.box.width / 2, layer.box.y + layer.box.height / 2);
+  context.rotate(layer.box.rotation);
+  context.globalAlpha = layer.opacity;
+  context.drawImage(
+    surface.canvas,
+    -layer.box.width / 2,
+    -layer.box.height / 2,
+    layer.box.width,
+    layer.box.height,
+  );
+  context.restore();
+}
+
+function getDrawLayerSurface(raster: RasterSurface) {
+  if (!drawLayerSurface) {
+    drawLayerSurface = document.createElement('canvas');
+    drawLayerContext = drawLayerSurface.getContext('2d');
+  }
+
+  if (!drawLayerSurface || !drawLayerContext) {
+    return null;
+  }
+
+  if (drawLayerSurface.width !== raster.width || drawLayerSurface.height !== raster.height) {
+    drawLayerSurface.width = raster.width;
+    drawLayerSurface.height = raster.height;
+    drawLayerContext = drawLayerSurface.getContext('2d');
+  }
+
+  if (!drawLayerContext) {
+    return null;
+  }
+
+  drawLayerContext.clearRect(0, 0, raster.width, raster.height);
+  drawLayerContext.putImageData(toImageData(raster), 0, 0);
+
+  return {
+    canvas: drawLayerSurface,
+    context: drawLayerContext,
+  };
+}
+
+function toImageData(raster: RasterSurface): ImageData {
+  if (typeof ImageData === 'function') {
+    return new ImageData(Uint8ClampedArray.from(raster.data), raster.width, raster.height);
+  }
+
+  return {
+    data: Uint8ClampedArray.from(raster.data),
+    height: raster.height,
+    width: raster.width,
+    colorSpace: 'srgb',
+  } as ImageData;
 }
 
 function renderTextLayer(context: CanvasRenderingContext2D, layer: TextLayer) {

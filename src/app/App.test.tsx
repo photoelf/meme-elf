@@ -64,6 +64,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: /layers/i })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: /crop/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /adjustments/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /draw/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /effects/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /watermark/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
@@ -80,6 +81,14 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
     expect(screen.getByRole('heading', { name: /effects/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    expect(screen.getByRole('heading', { name: /draw/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^draw$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /new draw layer/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /eyedropper/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
     expect(screen.getByRole('heading', { name: /watermark/i })).toBeInTheDocument();
@@ -1855,6 +1864,141 @@ describe('App', () => {
     await waitFor(() => {
       expect(write).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('enters draw mode, auto-creates a draw layer on first stroke, and undoes the committed stroke', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 60, clientY: 60 });
+    fireEvent.pointerMove(window, { clientX: 180, clientY: 120 });
+
+    expect(document.querySelector('.draw-stroke-preview')).toBeInTheDocument();
+
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /brush 1 layer/i })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /undo/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /undo/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /brush 1 layer/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('opens draw-layer settings and exposes remove layer action', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /brush 1 layer/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /settings for brush 1/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /remove layer/i })).toBeInTheDocument();
+    });
+  });
+
+  it('samples brush color from the preview canvas with the eyedropper', async () => {
+    const context = createCanvasContextStub();
+    context.getImageData = vi.fn(() => ({
+      data: new Uint8ClampedArray([18, 52, 86, 255]),
+      width: 1,
+      height: 1,
+    }));
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /eyedropper/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 60, clientY: 60 });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/brush color/i)).toHaveValue('#123456');
+    });
+  });
+
+  it('disables draw mode when switching away from the draw tab', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    expect(screen.getByRole('button', { name: /^draw$/i })).toHaveClass('settings-button-active');
+
+    fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+
+    expect(screen.getByRole('button', { name: /^draw$/i })).not.toHaveClass('settings-button-active');
+  });
+
+  it('disables draw mode when layer reordering starts', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+    expect(screen.getByRole('button', { name: /^draw$/i })).toHaveClass('settings-button-active');
+
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+
+    const dataTransfer = {
+      data: new Map<string, string>(),
+      getData(type: string) {
+        return this.data.get(type) ?? '';
+      },
+      setData(type: string, value: string) {
+        this.data.set(type, value);
+      },
+      setDragImage: vi.fn(),
+    };
+
+    fireEvent.dragStart(screen.getByRole('button', { name: /reorder top text/i }), {
+      dataTransfer,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+
+    expect(screen.getByRole('button', { name: /^draw$/i })).not.toHaveClass('settings-button-active');
   });
 });
 

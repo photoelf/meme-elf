@@ -518,6 +518,10 @@ button {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.tool-rail-tabs-six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .inspector-card {
   display: grid;
   gap: 10px;

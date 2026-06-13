@@ -54,6 +54,7 @@ import { normalizeCropDraftBox, resolvePreparedOutputDimensions } from '../featu
 import { applySceneCrop, applySceneExpand } from '../features/bounds/scene-bounds';
 import { normalizeSceneCropRect } from '../features/bounds/crop-overlay';
 import { resolveBoundsFill } from '../features/bounds/fill-modes';
+import { commitDrawStroke, createDrawLayer } from '../features/draw/draw-layer-utils';
 import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
@@ -61,8 +62,9 @@ import {
   toggleDraftFlipVertical,
 } from '../features/image/pre-insert-state';
 import { PreInsertModal } from '../features/image/pre-insert-modal';
-import { isImageLayer, isTextLayer } from './types';
+import { isDrawLayer, isImageLayer, isTextLayer } from './types';
 import type {
+  DrawPoint,
   EditorLayer,
   LayerId,
   SceneEffectStackItem,
@@ -79,7 +81,7 @@ const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
-type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'effects' | 'watermark';
+type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark';
 type ImageInsertionMode =
   | 'inside-canvas'
   | 'outside-left'
@@ -212,6 +214,7 @@ export function App() {
   const isDraggingSplitRef = useRef(false);
   const nextLayerSequenceRef = useRef(appState.layers.length + 1);
   const nextImageLayerSequenceRef = useRef(1);
+  const nextDrawLayerSequenceRef = useRef(1);
   const lastShortcutCopyAtRef = useRef(0);
   const latestExplicitClipboardRequestTokenRef = useRef(0);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
@@ -666,6 +669,14 @@ export function App() {
           };
         }
 
+        if (isDrawLayer(layer)) {
+          return {
+            ...layer,
+            ...updates,
+            kind: 'draw',
+          };
+        }
+
         return {
           ...layer,
           ...updates,
@@ -673,6 +684,121 @@ export function App() {
         };
       }),
     }), historyMode);
+  }
+
+  function handleCreateDrawLayer() {
+    applyAppStateChange((currentState) => {
+      const nextSequence = nextDrawLayerSequenceRef.current;
+      nextDrawLayerSequenceRef.current += 1;
+      const nextLayerId = `draw-${nextSequence}`;
+      const nextLayer = createDrawLayer({
+        id: nextLayerId,
+        name: `Brush ${nextSequence}`,
+        width: currentState.canvasSize.width,
+        height: currentState.canvasSize.height,
+      });
+
+      return {
+        ...currentState,
+        activeLayerId: nextLayerId,
+        layers: insertDrawLayer(currentState.layers, nextLayer),
+        retouch: {
+          ...currentState.retouch,
+          activeDrawLayerId: nextLayerId,
+        },
+      };
+    }, 'defer');
+  }
+
+  function handleDraftStrokeChange(
+    draftStroke: { points: DrawPoint[]; targetLayerId: LayerId | null } | null,
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      retouch: {
+        ...currentState.retouch,
+        draftStroke,
+      },
+    }));
+  }
+
+  function handleDraftStrokeCommit() {
+    const currentDraft = appStateRef.current.retouch.draftStroke;
+
+    if (!currentDraft || currentDraft.points.length === 0) {
+      return;
+    }
+
+    applyAppStateChange((currentState) => {
+      let targetLayerId = resolveDrawLayerTargetId(currentState);
+      let nextLayers = cloneLayers(currentState.layers);
+
+      if (!targetLayerId) {
+        const nextSequence = nextDrawLayerSequenceRef.current;
+        nextDrawLayerSequenceRef.current += 1;
+        targetLayerId = `draw-${nextSequence}`;
+        nextLayers = insertDrawLayer(
+          nextLayers,
+          createDrawLayer({
+            id: targetLayerId,
+            name: `Brush ${nextSequence}`,
+            width: currentState.canvasSize.width,
+            height: currentState.canvasSize.height,
+          }),
+        );
+      }
+
+      nextLayers = nextLayers.map((layer) =>
+        layer.id === targetLayerId && isDrawLayer(layer)
+          ? commitDrawStroke(layer, {
+              points: currentDraft.points,
+              brush: currentState.retouch.brush,
+            })
+          : layer,
+      );
+
+      return {
+        ...currentState,
+        activeLayerId: targetLayerId,
+        layers: nextLayers,
+        retouch: {
+          ...currentState.retouch,
+          activeDrawLayerId: targetLayerId,
+          draftStroke: null,
+        },
+      };
+    });
+  }
+
+  function updateRetouchBrush(
+    updates: Partial<typeof appState.retouch.brush>,
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      retouch: {
+        ...currentState.retouch,
+        brush: {
+          ...currentState.retouch.brush,
+          ...updates,
+        },
+      },
+    }));
+  }
+
+  function handleRetouchBrushSample(sample: { color: string; opacity: number }) {
+    setAppState((currentState) => ({
+      ...currentState,
+      retouch: {
+        ...currentState.retouch,
+        mode: 'draw',
+        brush: {
+          ...currentState.retouch.brush,
+          color: sample.color,
+          opacity: sample.opacity,
+        },
+      },
+    }));
+    setStatusMessage('Brush color sampled from canvas.');
   }
 
   function updateSceneImageAdjustments(
@@ -961,6 +1087,17 @@ export function App() {
         ...currentState,
         activeLayerId: nextActiveLayerId,
         layers: nextLayers,
+        retouch: {
+          ...currentState.retouch,
+          activeDrawLayerId:
+            currentState.retouch.activeDrawLayerId === layerId
+              ? null
+              : currentState.retouch.activeDrawLayerId,
+          draftStroke:
+            currentState.retouch.draftStroke?.targetLayerId === layerId
+              ? null
+              : currentState.retouch.draftStroke,
+        },
       };
     });
   }
@@ -1441,7 +1578,10 @@ export function App() {
               <PreviewCanvas
                 canvasRef={canvasRef}
                 activeLayerId={appState.activeLayerId}
+                draftStroke={appState.retouch.draftStroke}
                 image={appState.image}
+                retouchBrush={appState.retouch.brush}
+                retouchMode={appState.retouch.mode}
                 width={appState.canvasSize.width}
                 height={appState.canvasSize.height}
                 layers={appState.layers}
@@ -1457,6 +1597,9 @@ export function App() {
                 onDocumentInteractionEnd={commitHistoryTransaction}
                 onInlineTextEditStart={beginHistoryTransaction}
                 onInlineTextEditEnd={commitHistoryTransaction}
+                onDraftStrokeChange={handleDraftStrokeChange}
+                onDraftStrokeCommit={handleDraftStrokeCommit}
+                onRetouchBrushSample={handleRetouchBrushSample}
                 onActiveLayerChange={(layerId) =>
                   setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
                 }
@@ -1486,6 +1629,8 @@ export function App() {
           activeLayerId={appState.activeLayerId}
           isImportModalOpen={preInsertDraft !== null}
           layers={appState.layers}
+          retouchMode={appState.retouch.mode}
+          retouchBrush={appState.retouch.brush}
           sceneCropDraft={appState.sceneBoundsDraft.cropRect}
           sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
           sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
@@ -1509,6 +1654,7 @@ export function App() {
             setAppState((currentState) => ({ ...currentState, activeLayerId: null }))
           }
           onAddLayer={addLayer}
+          onCreateDrawLayer={handleCreateDrawLayer}
           onApplySettingsToAllLayers={applyLayerSettingsToAllLayers}
           onSceneBoundsFillColorChange={(fillColor) =>
             setAppState((currentState) => ({
@@ -1553,6 +1699,17 @@ export function App() {
           onRotateImageLayer={(layerId, direction) =>
             transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
           }
+          onRetouchModeChange={(mode) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              retouch: {
+                ...currentState.retouch,
+                draftStroke: mode === 'draw' ? currentState.retouch.draftStroke : null,
+                mode,
+              },
+            }))
+          }
+          onRetouchBrushChange={updateRetouchBrush}
           onFlipImageLayerHorizontal={(layerId) =>
             transformImageLayer(layerId, (layer) => flipImageLayerHorizontal(layer))
           }
@@ -1941,6 +2098,22 @@ function cloneLayers(layers: EditorLayer[]) {
       };
     }
 
+    if (isDrawLayer(layer)) {
+      const rasterData = new Uint8ClampedArray(new ArrayBuffer(layer.raster.data.length));
+      rasterData.set(layer.raster.data);
+
+      return {
+        ...layer,
+        box: { ...layer.box },
+        sourceSize: { ...layer.sourceSize },
+        raster: {
+          width: layer.raster.width,
+          height: layer.raster.height,
+          data: rasterData,
+        },
+      };
+    }
+
     return {
       ...layer,
       box: { ...layer.box },
@@ -2040,8 +2213,66 @@ function historySnapshotsEqual(a: EditorHistorySnapshot, b: EditorHistorySnapsho
       );
     }
 
+    if (isDrawLayer(layer) && isDrawLayer(candidate)) {
+      return (
+        layer.sourceSize.width === candidate.sourceSize.width &&
+        layer.sourceSize.height === candidate.sourceSize.height &&
+        layer.raster.width === candidate.raster.width &&
+        layer.raster.height === candidate.raster.height &&
+        uint8ArraysEqual(layer.raster.data, candidate.raster.data)
+      );
+    }
+
     return false;
   });
+}
+
+function uint8ArraysEqual(a: Uint8ClampedArray, b: Uint8ClampedArray) {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function insertDrawLayer(layers: EditorLayer[], nextLayer: Extract<EditorLayer, { kind: 'draw' }>) {
+  const firstNonTextIndex = layers.findIndex((layer) => !isTextLayer(layer));
+
+  if (firstNonTextIndex === -1) {
+    return [...layers, nextLayer];
+  }
+
+  return [
+    ...layers.slice(0, firstNonTextIndex),
+    nextLayer,
+    ...layers.slice(firstNonTextIndex),
+  ];
+}
+
+function resolveDrawLayerTargetId(
+  state: ReturnType<typeof createDefaultAppState>,
+) {
+  if (
+    state.retouch.activeDrawLayerId &&
+    state.layers.some((layer) => layer.id === state.retouch.activeDrawLayerId && isDrawLayer(layer))
+  ) {
+    return state.retouch.activeDrawLayerId;
+  }
+
+  if (
+    state.activeLayerId &&
+    state.layers.some((layer) => layer.id === state.activeLayerId && isDrawLayer(layer))
+  ) {
+    return state.activeLayerId;
+  }
+
+  return null;
 }
 
 function resolveSceneExpandPreset(

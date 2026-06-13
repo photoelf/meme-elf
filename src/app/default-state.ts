@@ -27,6 +27,12 @@ export const DEFAULT_STROKE = '#000000';
 export const DEFAULT_OUTLINE_WIDTH = 5;
 export const DEFAULT_PREVIEW_ZOOM_FACTOR = 1;
 export const DEFAULT_ADVANCED_IMPORT_PLACEMENT: AdvancedImportPlacementMode = 'inside-canvas';
+export const DEFAULT_RETOUCH_BRUSH = {
+  color: '#ff0000',
+  size: 24,
+  opacity: 1,
+  softEdge: false,
+} as const;
 export const DEFAULT_SCENE_BOUNDS_DRAFT: SceneBoundsDraft = {
   cropRect: null,
   expand: {
@@ -115,5 +121,11 @@ export function createDefaultAppState(): AppState {
       fillColor: DEFAULT_SCENE_BOUNDS_DRAFT.fillColor,
     },
     activeSceneBoundsMode: 'idle',
+    retouch: {
+      mode: 'idle',
+      activeDrawLayerId: null,
+      draftStroke: null,
+      brush: { ...DEFAULT_RETOUCH_BRUSH },
+    },
   };
 }

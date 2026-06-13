@@ -150,6 +150,50 @@ describe('renderPreview', () => {
     expect(context.fillText).toHaveBeenCalledWith('CAPTION', 0, -43);
   });
 
+  it('renders draw layers in the shared layer order without breaking text-layer drawing', () => {
+    const context = createContextStub();
+    const layers = [
+      {
+        id: 'text-1',
+        kind: 'text',
+        name: 'Caption',
+        text: 'DRAWN OVER',
+        box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+        fontFamily: 'Impact',
+        fontSize: 90,
+        fillStyle: '#ffffff',
+        strokeStyle: '#000000',
+        outlineWidth: 5,
+        opacity: 1,
+        textAlign: 'center',
+        verticalAlign: 'top',
+        effect: 'outline',
+        allCaps: true,
+        bold: false,
+        italic: false,
+      },
+      {
+        id: 'draw-1',
+        kind: 'draw',
+        name: 'Brush layer',
+        box: { x: 0, y: 0, width: 800, height: 450, rotation: 0 },
+        opacity: 1,
+        sourceSize: { width: 800, height: 450 },
+        raster: {
+          width: 800,
+          height: 450,
+          data: new Uint8ClampedArray(800 * 450 * 4),
+        },
+      },
+    ] satisfies AppState['layers'];
+
+    renderPreview(context, null, { width: 800, height: 450 }, layers);
+
+    expect(context.translate).toHaveBeenCalledWith(400, 225);
+    expect(context.drawImage).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), -400, -225, 800, 450);
+    expect(context.fillText).toHaveBeenCalledWith('DRAWN OVER', 0, -43);
+  });
+
   it('draws higher layer-list entries above lower ones by rendering them later', () => {
     const events: string[] = [];
     const topImage = {} as CanvasImageSource;
