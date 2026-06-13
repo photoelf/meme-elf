@@ -16,7 +16,7 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
 - top action bar with compact icon-only actions and delayed tooltips
-- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, and `Effects`, plus localhost-only `Watermark` and `Experimental` tabs in the current workspace build
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, and `Watermark`, plus a localhost-only `Experimental` tab in the current workspace build
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill

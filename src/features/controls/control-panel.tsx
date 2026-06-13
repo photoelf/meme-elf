@@ -234,12 +234,10 @@ export function ControlPanel({
             clearRetouchMode();
             onActiveTabChange('effects');
           }} />
-          {showLocalOnlyTabs ? (
-            <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => {
-              clearRetouchMode();
-              onActiveTabChange('watermark');
-            }} />
-          ) : null}
+          <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('watermark');
+          }} />
           {showLocalOnlyTabs ? (
             <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'experimental'} label="Experimental" onClick={() => onActiveTabChange('experimental')} />
           ) : null}
@@ -950,7 +948,7 @@ export function ControlPanel({
           </div>
         ) : null}
 
-        {showLocalOnlyTabs && activeTab === 'watermark' ? (
+        {activeTab === 'watermark' ? (
           <div className="inspector-section">
             <div className="section-heading">
               <h2 className="section-title">WATERMARK</h2>

@@ -438,10 +438,7 @@ export function App() {
   }, [appState]);
 
   useEffect(() => {
-    if (
-      !showLocalOnlyTabs &&
-      (activeInspectorTab === 'watermark' || activeInspectorTab === 'experimental')
-    ) {
+    if (!showLocalOnlyTabs && activeInspectorTab === 'experimental') {
       setActiveInspectorTab('layers');
     }
   }, [activeInspectorTab, showLocalOnlyTabs]);

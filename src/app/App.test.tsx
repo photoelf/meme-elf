@@ -85,12 +85,12 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
   });
 
-  it('hides watermark and experimental tabs outside localhost hosts', () => {
+  it('keeps watermark visible but hides experimental tab outside localhost hosts', () => {
     mockHostname('example.com');
 
     render(<App />);
 
-    expect(screen.queryByRole('tab', { name: /watermark/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /watermark/i })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /experimental/i })).not.toBeInTheDocument();
   });
 
