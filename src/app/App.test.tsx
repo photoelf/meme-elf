@@ -1846,7 +1846,7 @@ describe('App', () => {
     });
 
     render(<App />);
-    fireEvent.keyDown(document, { ctrlKey: true, key: 'c' });
+    fireEvent.keyDown(document, { ctrlKey: true, code: 'KeyC', key: 'c' });
 
     await waitFor(() => {
       expect(write).toHaveBeenCalledTimes(1);
@@ -2153,8 +2153,88 @@ describe('App', () => {
     fireEvent.pointerMove(window, { clientX: 190, clientY: 150 });
     fireEvent.pointerUp(window);
 
-    fireEvent.keyDown(document, { ctrlKey: true, key: 'c' });
-    fireEvent.keyDown(document, { ctrlKey: true, key: 'v' });
+    fireEvent.keyDown(document, { ctrlKey: true, code: 'KeyC', key: 'c' });
+    expect(screen.queryByRole('button', { name: /copy selection to new layer/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { ctrlKey: true, code: 'KeyV', key: 'v' });
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toBeInTheDocument();
+    });
+  });
+
+  it('deactivates select mode after committing a selection and does not render a preview hud', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 180, clientY: 140 });
+    fireEvent.pointerUp(window);
+
+    const selectButton = screen.getByRole('button', { name: /select area/i });
+    fireEvent.click(selectButton);
+    expect(selectButton).toHaveClass('settings-button-active');
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 70, clientY: 70 });
+    fireEvent.pointerMove(window, { clientX: 190, clientY: 150 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(selectButton).not.toHaveClass('settings-button-active');
+    });
+
+    expect(document.querySelector('.selection-overlay')).toBeInTheDocument();
+    expect(document.querySelector('.preview-status-hud')).not.toBeInTheDocument();
+  });
+
+  it('cuts and pastes a selection with layout-independent shortcuts', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 90, clientY: 90 });
+    fireEvent.pointerMove(window, { clientX: 190, clientY: 160 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 200, clientY: 170 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.keyDown(document, { ctrlKey: true, code: 'KeyX', key: 'ч' });
+    expect(screen.queryByRole('button', { name: /cut selection to new layer/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { ctrlKey: true, code: 'KeyV', key: 'м' });
     fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
 
     await waitFor(() => {
@@ -2169,10 +2249,153 @@ describe('App', () => {
     render(<App />);
     await uploadBaseImage(baseFile, 900);
 
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
     fireEvent.click(screen.getByRole('textbox', { name: /top text/i }));
     fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { clientX: 240, clientY: 220 });
+    fireEvent.pointerUp(window);
 
-    expect(screen.getByText(/target: base image/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy selection to new layer/i })).toBeInTheDocument();
+  });
+
+  it('shows clone-stamp controls in the experimental tab and asks for alt-click before stamping', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+
+    expect(screen.getByRole('button', { name: /clone stamp/i })).toBeInTheDocument();
+    expect(screen.getByText(/alt\+click to set source/i)).toBeInTheDocument();
+    expect(screen.getByText(/no source selected/i)).toBeInTheDocument();
+  });
+
+  it('does not create a draw layer when clone stamp drag starts without a source', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clone stamp/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 90, clientY: 90 });
+    fireEvent.pointerMove(window, { clientX: 180, clientY: 150 });
+    fireEvent.pointerUp(window);
+
+    expect(screen.queryByRole('button', { name: /brush 1 layer/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no source selected/i)).toBeInTheDocument();
+  });
+
+  it('sets a clone-stamp source with alt-click and clears it when the active raster target changes', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /brush 1 layer/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clone stamp/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.keyDown(window, { key: 'Alt' });
+    fireEvent.pointerDown(previewSurface, {
+      button: 0,
+      clientX: 120,
+      clientY: 120,
+    });
+    fireEvent.keyUp(window, { key: 'Alt' });
+
+    expect(screen.getByText(/source set/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+    fireEvent.click(screen.getByRole('button', { name: /settings for top text/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/no source selected/i)).toBeInTheDocument();
+    });
+  });
+
+  it('commits a clone-stamp stroke on the active draw layer and records an undo step', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 120, clientY: 80 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /undo/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clone stamp/i }));
+
+    fireEvent.keyDown(window, { key: 'Alt' });
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.keyUp(window, { key: 'Alt' });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 180, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 220, clientY: 80 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByText(/clone stamp applied/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /undo/i })).toBeEnabled();
   });
 });
 

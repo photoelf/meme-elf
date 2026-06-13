@@ -125,6 +125,10 @@ export function createDefaultAppState(): AppState {
       mode: 'idle',
       activeDrawLayerId: null,
       draftStroke: null,
+      cloneStamp: {
+        sourcePoint: null,
+        sourceTargetId: null,
+      },
       selection: {
         targetId: null,
         draftRect: null,

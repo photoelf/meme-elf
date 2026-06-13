@@ -63,6 +63,7 @@ import {
   normalizeSelectionRect,
   selectionRectIsEmpty,
 } from '../features/selection/selection-utils';
+import { applyCloneStampStroke } from '../features/selection/clone-stamp-prototype';
 import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
@@ -92,7 +93,7 @@ const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
-type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark';
+type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
 type ImageInsertionMode =
   | 'inside-canvas'
   | 'outside-left'
@@ -272,15 +273,6 @@ export function App() {
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
-  const selectionStatusTarget = appState.retouch.selection.targetId
-    ? `Target: ${appState.retouch.selection.targetId === 'base-image' ? 'Base image' : appState.retouch.selection.targetId}`
-    : 'Target: choose a raster layer or base image';
-  const selectionStatusRect = appState.retouch.selection.rect
-    ? `Selection: ${appState.retouch.selection.rect.width} x ${appState.retouch.selection.rect.height}px`
-    : appState.retouch.selection.draftRect
-      ? `Draft: ${normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize).width} x ${normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize).height}px`
-      : 'No selection';
-
   function syncHistoryState() {
     setHistoryState({
       canUndo: historyPastRef.current.length > 0,
@@ -773,6 +765,44 @@ export function App() {
       return;
     }
 
+    if (appStateRef.current.retouch.mode === 'clone-stamp') {
+      applyAppStateChange((currentState) => {
+        const cloneSource = currentState.retouch.cloneStamp;
+        const targetId = cloneSource.sourceTargetId;
+
+        if (!cloneSource.sourcePoint || !targetId) {
+          return {
+            ...currentState,
+            retouch: {
+              ...currentState.retouch,
+              draftStroke: null,
+            },
+          };
+        }
+
+        const nextState = commitCloneStampToTarget(currentState, {
+          points: currentDraft.points,
+          sourcePoint: cloneSource.sourcePoint,
+          targetId,
+        });
+
+        if (!nextState) {
+          return {
+            ...currentState,
+            retouch: {
+              ...currentState.retouch,
+              draftStroke: null,
+            },
+          };
+        }
+
+        return nextState;
+      });
+
+      setStatusMessage('Clone stamp applied.');
+      return;
+    }
+
     applyAppStateChange((currentState) => {
       let targetLayerId = resolveDrawLayerTargetId(currentState);
       let nextLayers = cloneLayers(currentState.layers);
@@ -848,6 +878,37 @@ export function App() {
     setStatusMessage('Brush color sampled from canvas.');
   }
 
+  function handleCloneStampSourceSet(point: DrawPoint) {
+    setAppState((currentState) => {
+      const targetId = resolveSelectionTargetId(currentState);
+      const targetBox = targetId ? resolveSelectionTargetBox(currentState, targetId) : null;
+
+      if (!targetId || !targetBox) {
+        return currentState;
+      }
+
+      if (
+        point.x < targetBox.x ||
+        point.x > targetBox.x + targetBox.width ||
+        point.y < targetBox.y ||
+        point.y > targetBox.y + targetBox.height
+      ) {
+        return currentState;
+      }
+
+      return {
+        ...currentState,
+        retouch: {
+          ...currentState.retouch,
+          cloneStamp: {
+            sourcePoint: point,
+            sourceTargetId: targetId,
+          },
+        },
+      };
+    });
+  }
+
   function handleSelectionDraftChange(draftRect: SelectionDraftRect | null) {
     setAppState((currentState) => ({
       ...currentState,
@@ -879,6 +940,7 @@ export function App() {
           ...currentState,
           retouch: {
             ...currentState.retouch,
+            mode: 'idle',
             selection: {
               ...currentState.retouch.selection,
               draftRect: null,
@@ -892,6 +954,7 @@ export function App() {
         ...currentState,
         retouch: {
           ...currentState.retouch,
+          mode: 'idle',
           selection: {
             ...currentState.retouch.selection,
             draftRect: null,
@@ -911,6 +974,7 @@ export function App() {
       ...currentState,
       retouch: {
         ...currentState.retouch,
+        mode: 'idle',
         selection: {
           ...currentState.retouch.selection,
           draftRect: null,
@@ -946,19 +1010,19 @@ export function App() {
         },
       };
 
-      return mode === 'cut'
-        ? {
-            ...extraction.nextState,
-            retouch: {
-              ...extraction.nextState.retouch,
-              selection: {
-                targetId,
-                draftRect: null,
-                rect: null,
-              },
-            },
-          }
-        : currentState;
+      const nextState = mode === 'cut' ? extraction.nextState : currentState;
+
+      return {
+        ...nextState,
+        retouch: {
+          ...nextState.retouch,
+          selection: {
+            targetId,
+            draftRect: null,
+            rect: null,
+          },
+        },
+      };
     });
 
     setStatusMessage(nextStatus);
@@ -1699,7 +1763,7 @@ export function App() {
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
         !event.shiftKey &&
-        event.key.toLowerCase() === 'c';
+        event.code === 'KeyC';
 
       if (!isCopyShortcut || event.defaultPrevented) {
         return;
@@ -1731,7 +1795,7 @@ export function App() {
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
         !event.shiftKey &&
-        event.key.toLowerCase() === 'x';
+        event.code === 'KeyX';
 
       if (
         !isCutShortcut ||
@@ -1752,7 +1816,7 @@ export function App() {
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
         !event.shiftKey &&
-        event.key.toLowerCase() === 'v';
+        event.code === 'KeyV';
 
       if (
         !isPasteShortcut ||
@@ -2035,6 +2099,7 @@ export function App() {
                 onInlineTextEditEnd={commitHistoryTransaction}
                 onDraftStrokeChange={handleDraftStrokeChange}
                 onDraftStrokeCommit={handleDraftStrokeCommit}
+                onCloneStampSourceSet={handleCloneStampSourceSet}
                 onRetouchBrushSample={handleRetouchBrushSample}
                 onSelectionDraftChange={handleSelectionDraftChange}
                 onSelectionDraftCommit={commitSelectionDraft}
@@ -2052,10 +2117,6 @@ export function App() {
                   }))
                 }
               />
-              <div className="preview-status-hud" aria-live="polite">
-                <span>{selectionStatusTarget}</span>
-                <span>{selectionStatusRect}</span>
-              </div>
             </div>
           </div>
           <div className="status-strip" aria-label="Editor status">
@@ -2073,6 +2134,8 @@ export function App() {
           layers={appState.layers}
           retouchMode={appState.retouch.mode}
           retouchBrush={appState.retouch.brush}
+          cloneStampSourcePoint={appState.retouch.cloneStamp.sourcePoint}
+          cloneStampSourceTargetId={appState.retouch.cloneStamp.sourceTargetId}
           selectionTargetId={appState.retouch.selection.targetId}
           selectionRect={appState.retouch.selection.rect}
           selectionDraftRect={
@@ -2975,6 +3038,34 @@ function createCanvasImageFromRasterSurface(raster: ReturnType<typeof extractRas
   return canvas;
 }
 
+function rasterSurfaceFromCanvasImage(
+  image: CanvasImageSource | null,
+  sourceSize: { width: number; height: number },
+) {
+  if (!image) {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sourceSize.width;
+  canvas.height = sourceSize.height;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return null;
+  }
+
+  context.clearRect(0, 0, sourceSize.width, sourceSize.height);
+  context.drawImage(image, 0, 0, sourceSize.width, sourceSize.height);
+  const imageData = context.getImageData(0, 0, sourceSize.width, sourceSize.height);
+
+  return {
+    width: sourceSize.width,
+    height: sourceSize.height,
+    data: Uint8ClampedArray.from(imageData.data),
+  };
+}
+
 function extractCanvasImageRegion(
   image: CanvasImageSource | null,
   sourceSize: { width: number; height: number },
@@ -3043,13 +3134,160 @@ function clearCanvasImageRegion(
   return nextCanvas as unknown as HTMLImageElement;
 }
 
+function mapScenePointToSourcePoint(
+  point: DrawPoint,
+  targetBox: { x: number; y: number; width: number; height: number },
+  sourceSize: { width: number; height: number },
+  skew: { x: number; y: number } = { x: 1, y: 1 },
+): DrawPoint {
+  const clampedX = Math.min(targetBox.x + targetBox.width, Math.max(targetBox.x, point.x));
+  const clampedY = Math.min(targetBox.y + targetBox.height, Math.max(targetBox.y, point.y));
+  const relativeX = (clampedX - targetBox.x) / Math.max(targetBox.width, 1);
+  const relativeY = (clampedY - targetBox.y) / Math.max(targetBox.height, 1);
+  const unflippedX = relativeX * sourceSize.width;
+  const unflippedY = relativeY * sourceSize.height;
+
+  return {
+    x: skew.x < 0 ? sourceSize.width - unflippedX : unflippedX,
+    y: skew.y < 0 ? sourceSize.height - unflippedY : unflippedY,
+  };
+}
+
+function commitCloneStampToTarget(
+  state: ReturnType<typeof createDefaultAppState>,
+  input: {
+    points: DrawPoint[];
+    sourcePoint: DrawPoint;
+    targetId: RasterSelectionTargetId;
+  },
+) {
+  if (input.targetId === 'base-image') {
+    const target = rasterSurfaceFromCanvasImage(state.image, state.canvasSize);
+
+    if (!target) {
+      return null;
+    }
+
+    const stamped = applyCloneStampStroke({
+      brushSize: state.retouch.brush.size,
+      destinationStart: input.points[0]!,
+      opacity: state.retouch.brush.opacity,
+      points: input.points,
+      softEdge: state.retouch.brush.softEdge,
+      sourcePoint: input.sourcePoint,
+      target,
+    });
+
+    return {
+      ...state,
+      image: createCanvasImageFromRasterSurface(stamped.surface) as unknown as HTMLImageElement,
+      retouch: {
+        ...state.retouch,
+        draftStroke: null,
+      },
+    };
+  }
+
+  const targetLayer = state.layers.find((layer) => layer.id === input.targetId);
+
+  if (!targetLayer || (!isImageLayer(targetLayer) && !isDrawLayer(targetLayer))) {
+    return null;
+  }
+
+  const mappedSourcePoint = mapScenePointToSourcePoint(
+    input.sourcePoint,
+    targetLayer.box,
+    targetLayer.sourceSize,
+    isImageLayer(targetLayer) ? targetLayer.skew : { x: 1, y: 1 },
+  );
+  const mappedPoints = input.points.map((point) =>
+    mapScenePointToSourcePoint(
+      point,
+      targetLayer.box,
+      targetLayer.sourceSize,
+      isImageLayer(targetLayer) ? targetLayer.skew : { x: 1, y: 1 },
+    ),
+  );
+
+  if (isDrawLayer(targetLayer)) {
+    const stamped = applyCloneStampStroke({
+      brushSize: state.retouch.brush.size,
+      destinationStart: mappedPoints[0]!,
+      opacity: state.retouch.brush.opacity,
+      points: mappedPoints,
+      softEdge: state.retouch.brush.softEdge,
+      sourcePoint: mappedSourcePoint,
+      target: targetLayer.raster,
+    });
+
+    return {
+      ...state,
+      layers: state.layers.map((layer) =>
+        layer.id === targetLayer.id && isDrawLayer(layer)
+          ? {
+              ...layer,
+              raster: stamped.surface,
+            }
+          : layer,
+      ),
+      retouch: {
+        ...state.retouch,
+        draftStroke: null,
+      },
+    };
+  }
+
+  const targetRaster = rasterSurfaceFromCanvasImage(targetLayer.image, targetLayer.sourceSize);
+
+  if (!targetRaster) {
+    return null;
+  }
+
+  const stamped = applyCloneStampStroke({
+    brushSize: state.retouch.brush.size,
+    destinationStart: mappedPoints[0]!,
+    opacity: state.retouch.brush.opacity,
+    points: mappedPoints,
+    softEdge: state.retouch.brush.softEdge,
+    sourcePoint: mappedSourcePoint,
+    target: targetRaster,
+  });
+
+  return {
+    ...state,
+    layers: state.layers.map((layer) =>
+      layer.id === targetLayer.id && isImageLayer(layer)
+        ? {
+            ...layer,
+            image: createCanvasImageFromRasterSurface(stamped.surface),
+          }
+        : layer,
+    ),
+    retouch: {
+      ...state.retouch,
+      draftStroke: null,
+    },
+  };
+}
+
 function applyLayerActivation(
   state: ReturnType<typeof createDefaultAppState>,
   layerId: LayerId,
 ) {
+  const nextCloneStamp =
+    state.retouch.cloneStamp.sourceTargetId === layerId
+      ? state.retouch.cloneStamp
+      : {
+          sourcePoint: null,
+          sourceTargetId: null,
+        };
   const nextState = {
     ...state,
     activeLayerId: layerId,
+    retouch: {
+      ...state.retouch,
+      cloneStamp: nextCloneStamp,
+    },
   };
 
   if (state.retouch.mode !== 'select') {

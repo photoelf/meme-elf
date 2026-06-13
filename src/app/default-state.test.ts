@@ -108,6 +108,10 @@ describe('createDefaultAppState', () => {
         mode: 'idle',
         activeDrawLayerId: null,
         draftStroke: null,
+        cloneStamp: {
+          sourcePoint: null,
+          sourceTargetId: null,
+        },
         selection: {
           targetId: null,
           draftRect: null,
@@ -159,6 +163,10 @@ describe('createDefaultAppState', () => {
       mode: 'idle',
       activeDrawLayerId: null,
       draftStroke: null,
+      cloneStamp: {
+        sourcePoint: null,
+        sourceTargetId: null,
+      },
       selection: {
         targetId: null,
         draftRect: null,

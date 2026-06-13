@@ -32,7 +32,8 @@ Current repo state:
 - draw and erase modes with draft stroke preview, draw-layer-only erase commits, stroke undo, and pointer-cancel cleanup
 - draw inspector controls for `Draw`, `Erase`, `New draw layer`, brush color, size, opacity, soft edge, and eyedropper color sampling
 - rectangular marquee selection scoped to one raster target at a time
-- explicit selection apply/cancel flow with `Copy to new layer` and `Cut to new layer`
+- immediate rectangular selection commit with `Copy to new layer` and `Cut to new layer`
+- keyboard `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` extraction flow for selection copy, cut, and paste
 - extraction from the base image, image layers, and draw layers into normal image layers
 - internal clone-stamp prototype helper for custom-stack research, not exposed in the alpha UI
 - preview zoom and middle-mouse pan for desktop editing
@@ -51,7 +52,7 @@ Current desktop layout conventions:
 - global actions live in the top bar as icon-only buttons with delayed tooltips
 - preview-local undo/redo and zoom controls stay with the preview header
 - advanced editing lives in the right inspector rather than a left tool rail
-- inspector navigation uses one dedicated full-width icon tab per tool, while selection/extraction actions stay embedded in `Layers`
+- inspector navigation uses one dedicated full-width icon tab per tool, while selection starts from the preview toolbar and extraction actions stay adjacent to that canvas-local control
 - scene-level rotate / flip actions in `Crop` affect only the image stack; text layers stay in place
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 

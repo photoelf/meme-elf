@@ -25,18 +25,20 @@ import type { SceneImageStackTransform } from '../image/scene-image-stack-utils'
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
-  activeTab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark';
+  activeTab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
   layers: EditorLayer[];
-  retouchMode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
+  retouchMode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select' | 'clone-stamp';
   retouchBrush: {
     color: string;
     size: number;
     opacity: number;
     softEdge: boolean;
   };
+  cloneStampSourcePoint: { x: number; y: number } | null;
+  cloneStampSourceTargetId: RasterSelectionTargetId | null;
   selectionTargetId: RasterSelectionTargetId | null;
   selectionRect: SelectionRect | null;
   selectionDraftRect: SelectionRect | null;
@@ -53,7 +55,7 @@ type ControlPanelProps = {
   onApplySceneCrop: () => void;
   onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark') => void;
+  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental') => void;
   onCancelSceneBounds: () => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
@@ -89,7 +91,7 @@ type ControlPanelProps = {
     historyMode?: 'immediate' | 'defer',
   ) => void;
   onRotateImageLayer: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
-  onRetouchModeChange: (mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select') => void;
+  onRetouchModeChange: (mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select' | 'clone-stamp') => void;
   onRetouchBrushChange: (updates: {
     color?: string;
     size?: number;
@@ -119,6 +121,8 @@ export function ControlPanel({
   layers,
   retouchMode,
   retouchBrush,
+  cloneStampSourcePoint,
+  cloneStampSourceTargetId,
   selectionTargetId,
   selectionRect,
   selectionDraftRect,
@@ -232,6 +236,7 @@ export function ControlPanel({
             clearRetouchMode();
             onActiveTabChange('watermark');
           }} />
+          <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'experimental'} label="Experimental" onClick={() => onActiveTabChange('experimental')} />
         </div>
       </div>
 
@@ -760,6 +765,61 @@ export function ControlPanel({
           </div>
         ) : null}
 
+        {activeTab === 'experimental' ? (
+          <div className="inspector-section">
+            <div className="section-heading">
+              <div>
+                <h2 className="section-title">EXPERIMENTAL</h2>
+                <p className="section-copy">Narrow retouch tools outside the default meme path</p>
+              </div>
+            </div>
+            <div className="settings-actions bounds-actions">
+              <button
+                type="button"
+                className={`mini-action-button${retouchMode === 'clone-stamp' ? ' settings-button-active' : ''}`}
+                onClick={() => onRetouchModeChange(retouchMode === 'clone-stamp' ? 'idle' : 'clone-stamp')}
+              >
+                Clone Stamp
+              </button>
+            </div>
+            <div className="control-grid control-grid-compact">
+              <RangeField
+                id="clone-stamp-brush-size"
+                label="Brush size"
+                max={128}
+                min={1}
+                step={1}
+                unit="px"
+                value={retouchBrush.size}
+                onChange={(value) => onRetouchBrushChange({ size: value })}
+              />
+              <RangeField
+                id="clone-stamp-brush-opacity"
+                label="Brush opacity"
+                max={100}
+                min={1}
+                step={1}
+                unit="%"
+                value={Math.round(retouchBrush.opacity * 100)}
+                onChange={(value) => onRetouchBrushChange({ opacity: value / 100 })}
+              />
+            </div>
+            <div className="toggle-row">
+              <CheckToggle
+                checked={retouchBrush.softEdge}
+                label="Soft edge"
+                onChange={(checked) => onRetouchBrushChange({ softEdge: checked })}
+              />
+            </div>
+            <p className="section-copy">Alt+click to set source</p>
+            <p className="section-copy">
+              {cloneStampSourcePoint && cloneStampSourceTargetId
+                ? `Source set`
+                : 'No source selected'}
+            </p>
+          </div>
+        ) : null}
+
         {activeTab === 'adjustments' ? (
           <div className="inspector-section">
             <div className="section-heading">
@@ -1102,6 +1162,14 @@ function WatermarkIcon() {
     <RailIconBase>
       <path d="M4.5 14.5 8 5.5l2 5 2-3 3.5 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M6 14.5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </RailIconBase>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <RailIconBase>
+      <path d="M10 3.5 11.7 7l3.8 1-3 2.4.6 4.1-3.1-1.7-3.1 1.7.6-4.1-3-2.4 3.8-1L10 3.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </RailIconBase>
   );
 }

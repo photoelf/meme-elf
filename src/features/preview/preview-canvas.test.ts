@@ -230,7 +230,7 @@ describe('preview-canvas helpers', () => {
     });
   });
 
-  it('shows the marquee overlay only while selection mode is active', () => {
+  it('keeps the committed marquee overlay visible after selection mode exits', () => {
     const context = {
       clearRect: vi.fn(),
       drawImage: vi.fn(),
@@ -279,6 +279,71 @@ describe('preview-canvas helpers', () => {
       }),
     );
 
-    expect(idleResult.container.querySelector('.selection-overlay')).not.toBeInTheDocument();
+    expect(idleResult.container.querySelector('.selection-overlay')).toBeInTheDocument();
+  });
+
+  it('sets a clone source on alt-click without starting a draft stroke', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onDraftStrokeChange = vi.fn();
+    const onCloneStampSourceSet = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'draw-1',
+        height: 450,
+        image: null,
+        isStageHovered: true,
+        layers: [],
+        onActiveLayerChange: vi.fn(),
+        onCloneStampSourceSet,
+        onDraftStrokeChange,
+        onLayerChange: vi.fn(),
+        retouchMode: 'clone-stamp',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.keyDown(window, { key: 'Alt' });
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      clientX: 140,
+      clientY: 110,
+    });
+    fireEvent.keyUp(window, { key: 'Alt' });
+
+    expect(onCloneStampSourceSet).toHaveBeenCalledTimes(1);
+    expect(onCloneStampSourceSet.mock.calls[0]?.[0]).toMatchObject({
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    expect(onDraftStrokeChange).not.toHaveBeenCalled();
   });
 });

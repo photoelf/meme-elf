@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from 'react';
 
 import {
   getAxisLockedMoveDelta,
@@ -46,6 +52,7 @@ type PreviewCanvasProps = {
   onDocumentInteractionStart?: () => void;
   onDraftStrokeChange?: (draft: { points: DrawPoint[]; targetLayerId: LayerId | null } | null) => void;
   onDraftStrokeCommit?: () => void;
+  onCloneStampSourceSet?: (point: DrawPoint) => void;
   onRetouchBrushSample?: (sample: { color: string; opacity: number }) => void;
   onInlineTextEditEnd?: () => void;
   onInlineTextEditStart?: () => void;
@@ -57,7 +64,7 @@ type PreviewCanvasProps = {
   ) => void;
   onSceneCropDraftChange?: (draft: SceneCropDraftRect | null) => void;
   draftStroke?: { points: DrawPoint[]; targetLayerId: LayerId | null } | null;
-  retouchMode?: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
+  retouchMode?: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select' | 'clone-stamp';
   retouchBrush?: {
     color: string;
     size: number;
@@ -139,6 +146,7 @@ export function PreviewCanvas({
   onDocumentInteractionStart,
   onDraftStrokeChange,
   onDraftStrokeCommit,
+  onCloneStampSourceSet,
   onRetouchBrushSample,
   onInlineTextEditEnd,
   onInlineTextEditStart,
@@ -165,6 +173,7 @@ export function PreviewCanvas({
   const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
   const drawInteractionRef = useRef(false);
   const selectionInteractionRef = useRef(false);
+  const altKeyPressedRef = useRef(false);
   const latestSelectionDraftRef = useRef<SelectionDraftRect | null>(selectionDraft);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resolvedCanvasRef = canvasRef ?? internalCanvasRef;
@@ -172,6 +181,32 @@ export function PreviewCanvas({
   const [editingLayerId, setEditingLayerId] = useState<LayerId | null>(null);
   const [isPreviewSurfaceHovered, setIsPreviewSurfaceHovered] = useState(false);
   const textLayers = getTextLayers(layers);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') {
+        altKeyPressedRef.current = true;
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') {
+        altKeyPressedRef.current = false;
+      }
+    };
+    const handleBlur = () => {
+      altKeyPressedRef.current = false;
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
   function startSceneCrop(clientX: number, clientY: number) {
     const point = getCanvasPoint(shellRef.current, width, height, clientX, clientY);
@@ -424,7 +459,10 @@ export function PreviewCanvas({
 
   useEffect(() => {
     function handleDrawPointerMove(event: PointerEvent) {
-      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
+      if (
+        !drawInteractionRef.current ||
+        (retouchMode !== 'draw' && retouchMode !== 'erase' && retouchMode !== 'clone-stamp')
+      ) {
         return;
       }
 
@@ -441,7 +479,10 @@ export function PreviewCanvas({
     }
 
     function handleDrawPointerUp() {
-      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
+      if (
+        !drawInteractionRef.current ||
+        (retouchMode !== 'draw' && retouchMode !== 'erase' && retouchMode !== 'clone-stamp')
+      ) {
         return;
       }
 
@@ -454,7 +495,10 @@ export function PreviewCanvas({
     }
 
     function handleDrawPointerCancel() {
-      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
+      if (
+        !drawInteractionRef.current ||
+        (retouchMode !== 'draw' && retouchMode !== 'erase' && retouchMode !== 'clone-stamp')
+      ) {
         return;
       }
 
@@ -592,11 +636,9 @@ export function PreviewCanvas({
     ? normalizeSceneCropRect(selectionDraft, { width, height })
     : null;
   const visibleSelectionRect =
-    retouchMode === 'select'
-      ? normalizedSelectionDraft && normalizedSelectionDraft.width > 0 && normalizedSelectionDraft.height > 0
-        ? normalizedSelectionDraft
-        : selectionRect
-      : null;
+    normalizedSelectionDraft && normalizedSelectionDraft.width > 0 && normalizedSelectionDraft.height > 0
+      ? normalizedSelectionDraft
+      : selectionRect;
 
   return (
     <div className="preview-viewport">
@@ -675,7 +717,35 @@ export function PreviewCanvas({
               return;
             }
 
-            if ((retouchMode === 'draw' || retouchMode === 'erase') && event.button !== 1 && event.button !== 2) {
+            const isCloneSourceSample =
+              retouchMode === 'clone-stamp' &&
+              event.button !== 1 &&
+              event.button !== 2 &&
+              (
+                event.altKey ||
+                event.nativeEvent.altKey ||
+                event.getModifierState?.('Alt') ||
+                altKeyPressedRef.current
+              );
+
+            if (isCloneSourceSample) {
+              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+              if (!point) {
+                return;
+              }
+
+              event.preventDefault();
+              setEditingLayerId(null);
+              onCloneStampSourceSet?.(point);
+              return;
+            }
+
+            if (
+              (retouchMode === 'draw' || retouchMode === 'erase' || retouchMode === 'clone-stamp') &&
+              event.button !== 1 &&
+              event.button !== 2
+            ) {
               const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
 
               if (!point) {
@@ -891,7 +961,7 @@ export function PreviewCanvas({
                           ),
                         }, 'defer')
                       }
-                      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
                         if (event.key === 'Escape') {
                           event.preventDefault();
                           onLayerChange(layer.id, {

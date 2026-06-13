@@ -225,12 +225,16 @@ export type DrawLayer = BaseLayer & {
 };
 
 export type RetouchState = {
-  mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
+  mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select' | 'clone-stamp';
   activeDrawLayerId: LayerId | null;
   draftStroke: {
     points: DrawPoint[];
     targetLayerId: LayerId | null;
   } | null;
+  cloneStamp: {
+    sourcePoint: DrawPoint | null;
+    sourceTargetId: RasterSelectionTargetId | null;
+  };
   selection: {
     targetId: RasterSelectionTargetId | null;
     draftRect: SelectionDraftRect | null;
