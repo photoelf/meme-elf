@@ -46,7 +46,7 @@ Known alpha behavior:
 - when `Apply to text` is enabled, text joins the filtered scene pass and can render behind imported image layers; this is currently accepted for alpha and the default remains `off`
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
 - watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
-- watermark defaults now start from `создано в программе meme-elf` in gray `Arial` at `50%` opacity with no outline, using the lower-left corner preset
+- watermark defaults now start enabled with `создано в программе meme-elf` in gray `Arial` at `50%` opacity and `12px`, using the lower-left corner preset
 - healing, seamless patch, and content-aware repair remain deferred research outcomes rather than shipped editor tools
 
 Current desktop layout conventions:

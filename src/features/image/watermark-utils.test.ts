@@ -5,14 +5,14 @@ import {
 } from './watermark-utils';
 
 describe('watermark utils', () => {
-  it('returns the default disabled watermark state', () => {
+  it('returns the default enabled watermark state', () => {
     expect(createDefaultSceneWatermark()).toEqual({
-      enabled: false,
+      enabled: true,
       text: 'создано в программе meme-elf',
       mode: 'corner',
       corner: 'bottom-left',
       opacity: 50,
-      size: 16,
+      size: 12,
       color: '#808080',
       rotation: 0,
     });

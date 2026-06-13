@@ -639,7 +639,7 @@ describe('App', () => {
     await uploadBaseImage(file, 900);
 
     openWatermarkTab();
-    fireEvent.click(screen.getByRole('checkbox', { name: /enable watermark/i }));
+    expect(screen.getByRole('checkbox', { name: /enable watermark/i })).toBeChecked();
     fireEvent.change(screen.getByRole('textbox', { name: /watermark text/i }), {
       target: { value: '' },
     });
@@ -674,12 +674,12 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /reset watermark/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: /enable watermark/i })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /enable watermark/i })).toBeChecked();
       expect(screen.getByRole('textbox', { name: /watermark text/i })).toHaveValue('создано в программе meme-elf');
       expect(screen.getByRole('combobox', { name: /watermark mode/i })).toHaveValue('corner');
       expect(screen.getByRole('combobox', { name: /watermark corner/i })).toHaveValue('bottom-left');
       expect(screen.getByRole('slider', { name: /watermark opacity/i })).toHaveValue('50');
-      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('16');
+      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('12');
       expect(screen.getByRole('slider', { name: /tile rotation/i })).toHaveValue('0');
       expect(screen.getByLabelText(/watermark color/i)).toHaveValue('#808080');
     });
@@ -706,7 +706,7 @@ describe('App', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('16');
+      expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('12');
     });
   });
 

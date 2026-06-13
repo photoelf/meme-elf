@@ -17,12 +17,12 @@ export type WatermarkLayoutItem = {
 
 export function createDefaultSceneWatermark(): SceneWatermark {
   return {
-    enabled: false,
+    enabled: true,
     text: 'создано в программе meme-elf',
     mode: 'corner',
     corner: 'bottom-left',
     opacity: 50,
-    size: 16,
+    size: 12,
     color: '#808080',
     rotation: 0,
   };
@@ -39,7 +39,7 @@ export function normalizeSceneWatermark(
     mode: normalizeMode(input.mode ?? defaults.mode),
     corner: normalizeCorner(input.corner ?? defaults.corner),
     opacity: clampRounded(input.opacity ?? defaults.opacity, 0, 100),
-    size: clampRounded(input.size ?? defaults.size, 16, 240),
+    size: clampRounded(input.size ?? defaults.size, 12, 240),
     color: normalizeColor(input.color ?? defaults.color),
     rotation: clampRounded(input.rotation ?? defaults.rotation, 0, 180),
   };

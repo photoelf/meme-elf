@@ -990,7 +990,7 @@ export function ControlPanel({
                       nextMode === 'center'
                         ? { mode: nextMode, size: 240 }
                         : nextMode === 'corner'
-                          ? { mode: nextMode, corner: 'bottom-left', size: 16 }
+                          ? { mode: nextMode, corner: 'bottom-left', size: 12 }
                           : { mode: nextMode },
                     );
                   }}
@@ -1049,7 +1049,7 @@ export function ControlPanel({
                 id="scene-watermark-size"
                 label="Watermark size"
                 max={240}
-                min={16}
+                min={12}
                 step={1}
                 unit="px"
                 value={sceneWatermark.size}
