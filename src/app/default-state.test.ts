@@ -94,7 +94,7 @@ describe('createDefaultAppState', () => {
       ],
       sceneWatermark: {
         enabled: false,
-        text: 'meme-elf',
+        text: 'создано в программе meme-elf',
         mode: 'corner',
         corner: 'bottom-left',
         opacity: 50,
@@ -156,7 +156,7 @@ describe('createDefaultAppState', () => {
     expect(secondState.sceneImageAdjustments.brightness).toBe(100);
     expect(secondState.sceneImageAdjustments.includeText).toBe(false);
     expect(secondState.sceneEffectStack[0]?.value).toBe(0);
-    expect(secondState.sceneWatermark.text).toBe('meme-elf');
+    expect(secondState.sceneWatermark.text).toBe('создано в программе meme-elf');
     expect(secondState.sceneBoundsDraft).toEqual(DEFAULT_SCENE_BOUNDS_DRAFT);
     expect(secondState.activeSceneBoundsMode).toBe('idle');
     expect(secondState.retouch).toEqual({

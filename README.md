@@ -30,13 +30,13 @@ Current repo state:
 - image layer insert, reorder, move, resize, rotate, and remove
 - draw layers with committed raster strokes in preview, clipboard copy, and PNG export
 - draw and erase modes with draft stroke preview, draw-layer-only erase commits, stroke undo, and pointer-cancel cleanup
-- draw inspector controls for `Draw`, `Erase`, `New draw layer`, brush color, size, opacity, soft edge, and eyedropper color sampling
+- draw inspector controls for `Draw`, `New draw layer`, conditional `Erase`, and brush color, size, opacity, and soft edge
 - rectangular marquee selection scoped to one raster target at a time
 - immediate rectangular selection commit with `Copy to new layer` and `Cut to new layer`
 - keyboard `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` extraction flow for selection copy, cut, and paste
 - extraction from the base image, image layers, and draw layers into normal image layers
 - local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool using `Alt+click` source sampling, layer-scoped stamping, undoable stroke commits, and no healing or seamless-patch automation
-- preview zoom and middle-mouse pan for desktop editing
+- preview zoom with `1:1`, `Fit`, mouse-wheel zoom, and middle-mouse pan for desktop editing
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
@@ -46,7 +46,7 @@ Known alpha behavior:
 - when `Apply to text` is enabled, text joins the filtered scene pass and can render behind imported image layers; this is currently accepted for alpha and the default remains `off`
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
 - watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
-- watermark defaults now start from `meme-elf` in gray `Arial` at `50%` opacity with no outline, using the lower-left corner preset
+- watermark defaults now start from `создано в программе meme-elf` in gray `Arial` at `50%` opacity with no outline, using the lower-left corner preset
 - healing, seamless patch, and content-aware repair remain deferred research outcomes rather than shipped editor tools
 
 Current desktop layout conventions:

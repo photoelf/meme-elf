@@ -186,6 +186,34 @@ function clampPreviewZoom(nextZoom: number) {
   return Math.min(MAX_PREVIEW_ZOOM_FACTOR, Math.max(MIN_PREVIEW_ZOOM_FACTOR, nextZoom));
 }
 
+function resolveFitToWindowZoomFactor(
+  canvasSize: { width: number; height: number },
+  previewFrame: HTMLDivElement | null,
+) {
+  if (!previewFrame) {
+    return DEFAULT_PREVIEW_ZOOM_FACTOR;
+  }
+
+  const bounds = previewFrame.getBoundingClientRect();
+  const widthScale = bounds.width / canvasSize.width;
+  const heightScale = bounds.height / canvasSize.height;
+  const nextZoom = Math.min(widthScale, heightScale);
+
+  if (!Number.isFinite(nextZoom) || nextZoom <= 0) {
+    return DEFAULT_PREVIEW_ZOOM_FACTOR;
+  }
+
+  return clampPreviewZoom(nextZoom);
+}
+
+function shouldShowLocalOnlyTabs() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -232,6 +260,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadButtonRef = useRef<HTMLButtonElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
   const isDraggingSplitRef = useRef(false);
   const nextLayerSequenceRef = useRef(appState.layers.length + 1);
   const nextImageLayerSequenceRef = useRef(1);
@@ -261,6 +290,7 @@ export function App() {
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
+  const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
   const previewPanSessionRef = useRef<{
     startClientX: number;
     startClientY: number;
@@ -407,6 +437,15 @@ export function App() {
     appStateRef.current = appState;
   }, [appState]);
 
+  useEffect(() => {
+    if (
+      !showLocalOnlyTabs &&
+      (activeInspectorTab === 'watermark' || activeInspectorTab === 'experimental')
+    ) {
+      setActiveInspectorTab('layers');
+    }
+  }, [activeInspectorTab, showLocalOnlyTabs]);
+
   function createImportRequestContext(
     target: ImportTarget,
     restoreFocusTo: HTMLElement | null,
@@ -434,6 +473,7 @@ export function App() {
         sourceSize.height,
         MAX_PREVIEW_WIDTH,
       );
+      const fitZoomFactor = resolveFitToWindowZoomFactor(canvasSize, previewFrameRef.current);
 
       return {
         ...currentState,
@@ -441,9 +481,11 @@ export function App() {
         errorMessage: null,
         image,
         layers: createLayersForCanvas(currentState.layers, currentState.canvasSize, canvasSize),
+        previewZoomFactor: fitZoomFactor,
         status: 'idle',
       };
     });
+    setPreviewPan({ x: 0, y: 0 });
     setStatusMessage(nextStatus);
   }
 
@@ -1885,6 +1927,17 @@ export function App() {
     }));
   }
 
+  function fitPreviewToWindow() {
+    setAppState((currentState) => ({
+      ...currentState,
+      previewZoomFactor: resolveFitToWindowZoomFactor(
+        currentState.canvasSize,
+        previewFrameRef.current,
+      ),
+    }));
+    setPreviewPan({ x: 0, y: 0 });
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1990,11 +2043,23 @@ export function App() {
               <button
                 type="button"
                 className="mini-action-button preview-toolbar-button"
-                onClick={() => updatePreviewZoom(() => DEFAULT_PREVIEW_ZOOM_FACTOR)}
-                aria-label="Reset zoom"
-                title="Reset zoom"
+                onClick={() => {
+                  updatePreviewZoom(() => DEFAULT_PREVIEW_ZOOM_FACTOR);
+                  setPreviewPan({ x: 0, y: 0 });
+                }}
+                aria-label="Actual size"
+                title="Actual size"
               >
                 1:1
+              </button>
+              <button
+                type="button"
+                className="mini-action-button preview-toolbar-button preview-toolbar-button-fit"
+                onClick={fitPreviewToWindow}
+                aria-label="Fit to window"
+                title="Fit to window"
+              >
+                Fit
               </button>
               <button
                 type="button"
@@ -2071,7 +2136,7 @@ export function App() {
               );
             }}
           >
-            <div className="preview-frame">
+            <div ref={previewFrameRef} className="preview-frame">
               <PreviewCanvas
                 canvasRef={canvasRef}
                 activeLayerId={appState.activeLayerId}
@@ -2121,8 +2186,6 @@ export function App() {
           </div>
           <div className="status-strip" aria-label="Editor status">
             <span>{activeStatusLabel}</span>
-            <span>Local-only alpha</span>
-            <span>Theme: {theme}</span>
           </div>
         </section>
 
@@ -2132,6 +2195,7 @@ export function App() {
           activeLayerId={appState.activeLayerId}
           isImportModalOpen={preInsertDraft !== null}
           layers={appState.layers}
+          showLocalOnlyTabs={showLocalOnlyTabs}
           retouchMode={appState.retouch.mode}
           retouchBrush={appState.retouch.brush}
           cloneStampSourcePoint={appState.retouch.cloneStamp.sourcePoint}

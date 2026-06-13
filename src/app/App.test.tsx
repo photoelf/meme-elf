@@ -39,11 +39,22 @@ function createImageElement(width = 1200, height = 800) {
   return image as HTMLImageElement;
 }
 
+function mockHostname(hostname: string) {
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: {
+      ...window.location,
+      hostname,
+    },
+  });
+}
+
 describe('App', () => {
   beforeEach(() => {
     resetPreviewRenderSurfacesForTests();
     vi.clearAllMocks();
     document.documentElement.dataset.theme = '';
+    mockHostname('localhost');
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
     mocks.readImageFromClipboardResult.mockImplementation(async () => {
       const image = await mocks.readImageFromClipboard();
@@ -60,7 +71,9 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /copy image/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /download png/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
-    expect(screen.getByRole('tablist', { name: /control sections/i })).toBeInTheDocument();
+    const tablist = screen.getByRole('tablist', { name: /control sections/i });
+    expect(tablist).toBeInTheDocument();
+    expect(tablist).not.toHaveClass('tool-rail-tabs-six');
     expect(screen.getByRole('tab', { name: /layers/i })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: /crop/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /adjustments/i })).toBeInTheDocument();
@@ -70,6 +83,15 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+  });
+
+  it('hides watermark and experimental tabs outside localhost hosts', () => {
+    mockHostname('example.com');
+
+    render(<App />);
+
+    expect(screen.queryByRole('tab', { name: /watermark/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /experimental/i })).not.toBeInTheDocument();
   });
 
   it('switches right-side control tabs instead of pointer or image tools', async () => {
@@ -85,11 +107,14 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
     expect(screen.getByRole('heading', { name: /draw/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^draw$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^erase$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new draw layer/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /eyedropper/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^erase$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /eyedropper/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    expect(screen.getByRole('button', { name: /^erase$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
     expect(screen.getByRole('heading', { name: /^layers$/i })).toBeInTheDocument();
@@ -104,7 +129,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: /watermark/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
-    expect(screen.getByRole('heading', { name: /crop/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^crop$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /crop scene/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /image tool/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /pointer tool/i })).not.toBeInTheDocument();
@@ -650,7 +675,7 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('checkbox', { name: /enable watermark/i })).not.toBeChecked();
-      expect(screen.getByRole('textbox', { name: /watermark text/i })).toHaveValue('meme-elf');
+      expect(screen.getByRole('textbox', { name: /watermark text/i })).toHaveValue('создано в программе meme-elf');
       expect(screen.getByRole('combobox', { name: /watermark mode/i })).toHaveValue('corner');
       expect(screen.getByRole('combobox', { name: /watermark corner/i })).toHaveValue('bottom-left');
       expect(screen.getByRole('slider', { name: /watermark opacity/i })).toHaveValue('50');
@@ -847,8 +872,20 @@ describe('App', () => {
     expect(screen.queryByText(/preview zoom/i)).not.toBeInTheDocument();
 
     const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
     const previewViewport = container.querySelector('.preview-viewport') as HTMLDivElement;
     const previewCanvas = screen.getByLabelText(/meme preview canvas/i);
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
     const initialWidthStyle = previewSurface.style.width;
     const initialHeightStyle = previewSurface.style.height;
     const initialWidth = previewCanvas.getAttribute('width');
@@ -870,8 +907,68 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
     expect(previewSurface.style.width).not.toBe(initialWidthStyle);
 
-    fireEvent.click(screen.getByRole('button', { name: /reset zoom/i }));
+    fireEvent.click(screen.getByRole('button', { name: /actual size/i }));
     expect(previewSurface.style.width).toBe(initialWidthStyle);
+
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
+  });
+
+  it('fits a newly loaded large image into the preview frame by default', async () => {
+    const file = new File(['base-image'], 'wide.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(5000, 5000));
+
+    const { container } = render(<App />);
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 240,
+      height: 240,
+      left: 0,
+      right: 360,
+      top: 0,
+      width: 360,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    await uploadBaseImage(file, 960);
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    await waitFor(() => {
+      expect(previewSurface.style.width).toBe('240px');
+      expect(previewSurface.style.height).toBe('240px');
+    });
+  });
+
+  it('removes low-signal helper copy and rearranges the adjusted text-scope toggle', () => {
+    render(<App />);
+
+    expect(screen.queryByText(/text, image, and draw layers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/local-only alpha/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/theme:/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
+    expect(screen.queryByText(/rotate & flip/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^expand$/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    expect(screen.queryByText(/brush controls and draw-layer targeting/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no draw layers yet/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /effects/i }));
+    expect(screen.queryByText(/drag to change processing order/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
+    expect(screen.queryByText(/scene-wide text overlay above the processed image/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /adjustments/i }));
+    const resetButton = screen.getByRole('button', { name: /reset adjustments/i });
+    const applyToTextToggle = screen.getByRole('checkbox', { name: /apply to text/i });
+    expect(
+      resetButton.compareDocumentPosition(applyToTextToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('zooms the canvas with the mouse wheel while the pointer is over the preview stage', () => {
@@ -1936,40 +2033,6 @@ describe('App', () => {
     });
   });
 
-  it('samples brush color from the preview canvas with the eyedropper', async () => {
-    const context = createCanvasContextStub();
-    context.getImageData = vi.fn(() => ({
-      data: new Uint8ClampedArray([18, 52, 86, 255]),
-      width: 1,
-      height: 1,
-    }));
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
-
-    render(<App />);
-
-    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
-    fireEvent.click(screen.getByRole('button', { name: /eyedropper/i }));
-
-    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
-    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
-      bottom: 450,
-      height: 450,
-      left: 0,
-      right: 800,
-      top: 0,
-      width: 800,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-
-    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 60, clientY: 60 });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/brush color/i)).toHaveValue('#123456');
-    });
-  });
-
   it('disables draw mode when switching away from the draw tab', () => {
     render(<App />);
 
@@ -2089,6 +2152,7 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
     fireEvent.click(screen.getByRole('button', { name: /^erase$/i }));
 
     expect(screen.getByRole('button', { name: /^erase$/i })).toHaveClass('settings-button-active');

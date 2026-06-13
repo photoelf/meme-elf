@@ -18,7 +18,7 @@ export type WatermarkLayoutItem = {
 export function createDefaultSceneWatermark(): SceneWatermark {
   return {
     enabled: false,
-    text: 'meme-elf',
+    text: 'создано в программе meme-elf',
     mode: 'corner',
     corner: 'bottom-left',
     opacity: 50,

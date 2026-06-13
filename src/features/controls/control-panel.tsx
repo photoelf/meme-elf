@@ -30,6 +30,7 @@ type ControlPanelProps = {
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
   layers: EditorLayer[];
+  showLocalOnlyTabs: boolean;
   retouchMode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select' | 'clone-stamp';
   retouchBrush: {
     color: string;
@@ -119,6 +120,7 @@ export function ControlPanel({
   activeLayerId,
   isImportModalOpen,
   layers,
+  showLocalOnlyTabs,
   retouchMode,
   retouchBrush,
   cloneStampSourcePoint,
@@ -214,7 +216,7 @@ export function ControlPanel({
       }}
     >
         <div className="tool-rail inspector-rail">
-        <div className="tool-rail-tabs tool-rail-tabs-six" role="tablist" aria-label="Control sections">
+        <div className="tool-rail-tabs" role="tablist" aria-label="Control sections">
           <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => {
             clearRetouchMode();
             onActiveTabChange('layers');
@@ -232,11 +234,15 @@ export function ControlPanel({
             clearRetouchMode();
             onActiveTabChange('effects');
           }} />
-          <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => {
-            clearRetouchMode();
-            onActiveTabChange('watermark');
-          }} />
-          <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'experimental'} label="Experimental" onClick={() => onActiveTabChange('experimental')} />
+          {showLocalOnlyTabs ? (
+            <InspectorTabButton icon={<WatermarkIcon />} isActive={activeTab === 'watermark'} label="Watermark" onClick={() => {
+              clearRetouchMode();
+              onActiveTabChange('watermark');
+            }} />
+          ) : null}
+          {showLocalOnlyTabs ? (
+            <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'experimental'} label="Experimental" onClick={() => onActiveTabChange('experimental')} />
+          ) : null}
         </div>
       </div>
 
@@ -246,7 +252,6 @@ export function ControlPanel({
             <div className="section-heading section-heading-stack">
               <div>
                 <h2 className="section-title">LAYERS</h2>
-                <p className="section-copy">Text, image, and draw layers</p>
               </div>
               <div className="section-action-row">
                 <button
@@ -540,10 +545,7 @@ export function ControlPanel({
         {activeTab === 'draw' ? (
           <div className="inspector-section">
             <div className="section-heading">
-              <div>
-                <h2 className="section-title">DRAW</h2>
-                <p className="section-copy">Brush controls and draw-layer targeting</p>
-              </div>
+              <h2 className="section-title">DRAW</h2>
             </div>
             <div className="settings-actions bounds-actions">
               <button
@@ -553,23 +555,18 @@ export function ControlPanel({
               >
                 Draw
               </button>
-              <button
-                type="button"
-                className={`mini-action-button${retouchMode === 'erase' ? ' settings-button-active' : ''}`}
-                onClick={() => onRetouchModeChange(retouchMode === 'erase' ? 'idle' : 'erase')}
-              >
-                Erase
-              </button>
-              <button
-                type="button"
-                className={`mini-action-button${retouchMode === 'eyedropper' ? ' settings-button-active' : ''}`}
-                onClick={() => onRetouchModeChange(retouchMode === 'eyedropper' ? 'draw' : 'eyedropper')}
-              >
-                Eyedropper
-              </button>
               <button type="button" className="mini-action-button" onClick={onCreateDrawLayer}>
                 New draw layer
               </button>
+              {drawLayers.length > 0 ? (
+                <button
+                  type="button"
+                  className={`mini-action-button${retouchMode === 'erase' ? ' settings-button-active' : ''}`}
+                  onClick={() => onRetouchModeChange(retouchMode === 'erase' ? 'idle' : 'erase')}
+                >
+                  Erase
+                </button>
+              ) : null}
             </div>
             <div className="control-grid control-grid-compact">
               <div className="field-stack">
@@ -666,9 +663,7 @@ export function ControlPanel({
                     </div>
                   );
                 })
-              ) : (
-                <p className="section-copy">No draw layers yet. Start drawing on the canvas or create one explicitly.</p>
-              )}
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -677,95 +672,100 @@ export function ControlPanel({
           <div className="inspector-section">
             <div className="section-heading">
               <h2 className="section-title">CROP</h2>
-              <p className="section-copy">Scene crop and expand</p>
             </div>
-            <div className="settings-actions bounds-actions">
-              <button
-                type="button"
-                className={`mini-action-button${activeSceneBoundsMode === 'crop' ? ' settings-button-active' : ''}`}
-                onClick={onStartSceneCrop}
-              >
-                Crop scene
-              </button>
-              {activeSceneBoundsMode === 'crop' ? (
-                <>
-                  <button type="button" className="mini-action-button" disabled={!sceneCropDraft} onClick={onApplySceneCrop}>
-                    Apply crop
+            <div className="section-subgroup section-subgroup-first">
+              <div className="settings-actions bounds-actions">
+                <button
+                  type="button"
+                  className={`mini-action-button${activeSceneBoundsMode === 'crop' ? ' settings-button-active' : ''}`}
+                  onClick={onStartSceneCrop}
+                >
+                  Crop scene
+                </button>
+                {activeSceneBoundsMode === 'crop' ? (
+                  <>
+                    <button type="button" className="mini-action-button" disabled={!sceneCropDraft} onClick={onApplySceneCrop}>
+                      Apply crop
+                    </button>
+                    <button type="button" className="mini-action-button" onClick={onCancelSceneBounds}>
+                      Cancel
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div className="section-subgroup">
+              <div className="settings-actions bounds-actions">
+                <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-clockwise')}>
+                  Rotate 90 clockwise
+                </button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-counter-clockwise')}>
+                  Rotate 90 counter-clockwise
+                </button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-vertical')}>
+                  Flip vertical
+                </button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-horizontal')}>
+                  Flip horizontal
+                </button>
+              </div>
+            </div>
+            <div className="section-subgroup">
+              <div className="control-grid control-grid-compact bounds-grid">
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-expand-left">Expand left</label>
+                  <input id="scene-expand-left" className="number-input" type="number" step={1} value={sceneExpandDraft.left} onChange={(event) => onSceneExpandDraftChange('left', Number(event.target.value))} />
+                </div>
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-expand-right">Expand right</label>
+                  <input id="scene-expand-right" className="number-input" type="number" step={1} value={sceneExpandDraft.right} onChange={(event) => onSceneExpandDraftChange('right', Number(event.target.value))} />
+                </div>
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-expand-top">Expand top</label>
+                  <input id="scene-expand-top" className="number-input" type="number" step={1} value={sceneExpandDraft.top} onChange={(event) => onSceneExpandDraftChange('top', Number(event.target.value))} />
+                </div>
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-expand-bottom">Expand bottom</label>
+                  <input id="scene-expand-bottom" className="number-input" type="number" step={1} value={sceneExpandDraft.bottom} onChange={(event) => onSceneExpandDraftChange('bottom', Number(event.target.value))} />
+                </div>
+              </div>
+              <div className="control-grid control-grid-compact bounds-grid">
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-bounds-fill-mode">Fill mode</label>
+                  <select id="scene-bounds-fill-mode" className="select-input" value={sceneBoundsFillMode} onChange={(event) => onSceneBoundsFillModeChange(event.target.value as SceneBoundsFillMode)}>
+                    {SCENE_BOUNDS_FILL_MODE_OPTIONS.map((fillMode) => (
+                      <option key={fillMode} value={fillMode}>
+                        {fillMode}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-bounds-fill-color">Fill color</label>
+                  <input id="scene-bounds-fill-color" className="layer-swatch bounds-fill-swatch" type="color" value={sceneBoundsFillColor} onChange={(event) => onSceneBoundsFillColorChange(event.target.value)} />
+                </div>
+              </div>
+              <div className="settings-actions bounds-actions">
+                <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('equal-margin')}>Add margin equally</button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('top-caption')}>Add top caption space</button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('bottom-caption')}>Add bottom caption space</button>
+                <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('square-canvas')}>Square canvas</button>
+              </div>
+              {activeSceneBoundsMode === 'expand' ? (
+                <div className="settings-actions bounds-actions">
+                  <button type="button" className="mini-action-button" disabled={!hasPendingSceneExpand} onClick={onApplySceneExpand}>
+                    Apply bounds
                   </button>
                   <button type="button" className="mini-action-button" onClick={onCancelSceneBounds}>
                     Cancel
                   </button>
-                </>
+                </div>
               ) : null}
             </div>
-            <div className="settings-actions bounds-actions">
-              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-clockwise')}>
-                Rotate 90 clockwise
-              </button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-counter-clockwise')}>
-                Rotate 90 counter-clockwise
-              </button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-vertical')}>
-                Flip vertical
-              </button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('flip-horizontal')}>
-                Flip horizontal
-              </button>
-            </div>
-            <div className="control-grid control-grid-compact bounds-grid">
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-expand-left">Expand left</label>
-                <input id="scene-expand-left" className="number-input" type="number" step={1} value={sceneExpandDraft.left} onChange={(event) => onSceneExpandDraftChange('left', Number(event.target.value))} />
-              </div>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-expand-right">Expand right</label>
-                <input id="scene-expand-right" className="number-input" type="number" step={1} value={sceneExpandDraft.right} onChange={(event) => onSceneExpandDraftChange('right', Number(event.target.value))} />
-              </div>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-expand-top">Expand top</label>
-                <input id="scene-expand-top" className="number-input" type="number" step={1} value={sceneExpandDraft.top} onChange={(event) => onSceneExpandDraftChange('top', Number(event.target.value))} />
-              </div>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-expand-bottom">Expand bottom</label>
-                <input id="scene-expand-bottom" className="number-input" type="number" step={1} value={sceneExpandDraft.bottom} onChange={(event) => onSceneExpandDraftChange('bottom', Number(event.target.value))} />
-              </div>
-            </div>
-            <div className="control-grid control-grid-compact bounds-grid">
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-bounds-fill-mode">Fill mode</label>
-                <select id="scene-bounds-fill-mode" className="select-input" value={sceneBoundsFillMode} onChange={(event) => onSceneBoundsFillModeChange(event.target.value as SceneBoundsFillMode)}>
-                  {SCENE_BOUNDS_FILL_MODE_OPTIONS.map((fillMode) => (
-                    <option key={fillMode} value={fillMode}>
-                      {fillMode}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-bounds-fill-color">Fill color</label>
-                <input id="scene-bounds-fill-color" className="layer-swatch bounds-fill-swatch" type="color" value={sceneBoundsFillColor} onChange={(event) => onSceneBoundsFillColorChange(event.target.value)} />
-              </div>
-            </div>
-            <div className="settings-actions bounds-actions">
-              <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('equal-margin')}>Add margin equally</button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('top-caption')}>Add top caption space</button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('bottom-caption')}>Add bottom caption space</button>
-              <button type="button" className="mini-action-button" onClick={() => onSceneBoundsPreset('square-canvas')}>Square canvas</button>
-            </div>
-            {activeSceneBoundsMode === 'expand' ? (
-              <div className="settings-actions bounds-actions">
-                <button type="button" className="mini-action-button" disabled={!hasPendingSceneExpand} onClick={onApplySceneExpand}>
-                  Apply bounds
-                </button>
-                <button type="button" className="mini-action-button" onClick={onCancelSceneBounds}>
-                  Cancel
-                </button>
-              </div>
-            ) : null}
           </div>
         ) : null}
 
-        {activeTab === 'experimental' ? (
+        {showLocalOnlyTabs && activeTab === 'experimental' ? (
           <div className="inspector-section">
             <div className="section-heading">
               <div>
@@ -834,7 +834,6 @@ export function ControlPanel({
             </div>
             <div className="toggle-row">
               <CheckToggle checked={sceneImageAdjustments.grayscale} label="Grayscale" onChange={(checked) => onSceneImageAdjustmentsChange({ grayscale: checked })} />
-              <CheckToggle checked={sceneImageAdjustments.includeText} label="Apply to text" onChange={(checked) => onSceneImageAdjustmentsChange({ includeText: checked })} />
               <CheckToggle checked={sceneImageAdjustments.sepia} label="Sepia" onChange={(checked) => onSceneImageAdjustmentsChange({ sepia: checked })} />
               <CheckToggle checked={sceneImageAdjustments.invert} label="Invert" onChange={(checked) => onSceneImageAdjustmentsChange({ invert: checked })} />
             </div>
@@ -843,6 +842,9 @@ export function ControlPanel({
                 Reset adjustments
               </button>
             </div>
+            <div className="toggle-row">
+              <CheckToggle checked={sceneImageAdjustments.includeText} label="Apply to text" onChange={(checked) => onSceneImageAdjustmentsChange({ includeText: checked })} />
+            </div>
           </div>
         ) : null}
 
@@ -850,7 +852,6 @@ export function ControlPanel({
           <div className="inspector-section">
             <div className="section-heading">
               <h2 className="section-title">EFFECTS</h2>
-              <p className="section-copy">Drag to change processing order</p>
             </div>
             <div className="effect-card-stack">
               {sceneEffectStack.map((effect) => (
@@ -949,13 +950,10 @@ export function ControlPanel({
           </div>
         ) : null}
 
-        {activeTab === 'watermark' ? (
+        {showLocalOnlyTabs && activeTab === 'watermark' ? (
           <div className="inspector-section">
             <div className="section-heading">
-              <div>
-                <h2 className="section-title">WATERMARK</h2>
-                <p className="section-copy">Scene-wide text overlay above the processed image</p>
-              </div>
+              <h2 className="section-title">WATERMARK</h2>
             </div>
             <div className="toggle-row">
               <CheckToggle

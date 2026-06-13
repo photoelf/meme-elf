@@ -8,7 +8,7 @@ describe('watermark utils', () => {
   it('returns the default disabled watermark state', () => {
     expect(createDefaultSceneWatermark()).toEqual({
       enabled: false,
-      text: 'meme-elf',
+      text: 'создано в программе meme-elf',
       mode: 'corner',
       corner: 'bottom-left',
       opacity: 50,
