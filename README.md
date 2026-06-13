@@ -16,7 +16,7 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste and file upload
 - top action bar with compact icon-only actions and delayed tooltips
-- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, and `Watermark`
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, and `Effects`, plus localhost-only `Watermark` and `Experimental` tabs in the current workspace build
 - advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
@@ -35,7 +35,7 @@ Current repo state:
 - immediate rectangular selection commit with `Copy to new layer` and `Cut to new layer`
 - keyboard `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` extraction flow for selection copy, cut, and paste
 - extraction from the base image, image layers, and draw layers into normal image layers
-- internal clone-stamp prototype helper for custom-stack research, not exposed in the alpha UI
+- local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool using `Alt+click` source sampling, layer-scoped stamping, undoable stroke commits, and no healing or seamless-patch automation
 - preview zoom and middle-mouse pan for desktop editing
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
@@ -47,6 +47,7 @@ Known alpha behavior:
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
 - watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
 - watermark defaults now start from `meme-elf` in gray `Arial` at `50%` opacity with no outline, using the lower-left corner preset
+- healing, seamless patch, and content-aware repair remain deferred research outcomes rather than shipped editor tools
 
 Current desktop layout conventions:
 - global actions live in the top bar as icon-only buttons with delayed tooltips
@@ -140,4 +141,4 @@ Excluded:
 - meme history
 - GIF/video editing
 - AI features
-- production clone stamp, healing, or patch tools beyond the current research/prototype scope
+- healing, seamless patch, and content-aware repair beyond the current narrow clone-stamp experiment
