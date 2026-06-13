@@ -284,6 +284,7 @@ button {
 }
 
 .preview-frame {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -319,6 +320,23 @@ button {
 .preview-toolbar-button {
   min-width: 36px;
   padding-inline: 0.65rem;
+}
+
+.preview-status-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 2px;
+  max-width: min(360px, calc(100% - 24px));
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(10, 14, 20, 0.74);
+  color: #f5f7fa;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 .preview-viewport {
@@ -540,6 +558,29 @@ button {
 .layer-stack {
   display: grid;
   gap: 8px;
+}
+
+.layer-tools-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+}
+
+.layer-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.layer-tools-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
 .layer-card {
@@ -811,6 +852,12 @@ button {
   padding: 0.4rem 0.7rem;
   font-size: 0.82rem;
   font-weight: 600;
+}
+
+.mini-action-button-compact {
+  min-height: 28px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.76rem;
 }
 
 .mini-action-button-icon,

@@ -125,6 +125,11 @@ export function createDefaultAppState(): AppState {
       mode: 'idle',
       activeDrawLayerId: null,
       draftStroke: null,
+      selection: {
+        targetId: null,
+        draftRect: null,
+        rect: null,
+      },
       brush: { ...DEFAULT_RETOUCH_BRUSH },
     },
   };

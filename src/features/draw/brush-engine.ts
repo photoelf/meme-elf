@@ -9,6 +9,7 @@ export type BrushStrokeInput = {
   points: BrushPoint[];
   brush: {
     color: string;
+    mode?: 'draw' | 'erase';
     size: number;
     opacity?: number;
     softEdge?: boolean;

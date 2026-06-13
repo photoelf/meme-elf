@@ -85,10 +85,20 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
     expect(screen.getByRole('heading', { name: /draw/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^draw$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^erase$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new draw layer/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /eyedropper/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+    expect(screen.getByRole('heading', { name: /^layers$/i })).toBeInTheDocument();
+    const layersPanel = screen.getByRole('heading', { name: /^layers$/i }).parentElement?.parentElement;
+    expect(layersPanel).not.toBeNull();
+    expect(within(layersPanel as HTMLElement).queryByRole('button', { name: /select area/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply selection/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /copy selection to new layer/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cut selection to new layer/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
     expect(screen.getByRole('heading', { name: /watermark/i })).toBeInTheDocument();
@@ -98,6 +108,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /crop scene/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /image tool/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /pointer tool/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('toolbar', { name: /canvas tools/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /select area/i })).toBeInTheDocument();
   });
 
   it('switches the manual theme from light to dark', () => {
@@ -200,8 +212,8 @@ describe('App', () => {
       target: { files: [replacementFile] },
     });
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
@@ -373,12 +385,12 @@ describe('App', () => {
       target: { files: [firstLayerFile] },
     });
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
+    const firstDialog = await screen.findByRole('dialog', { name: /prepare image/i });
 
-    fireEvent.change(screen.getByRole('combobox', { name: /placement mode/i }), {
+    fireEvent.change(within(firstDialog).getByRole('combobox', { name: /placement mode/i }), {
       target: { value: 'outside-right' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    fireEvent.click(within(firstDialog).getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
@@ -389,9 +401,9 @@ describe('App', () => {
       target: { files: [secondLayerFile] },
     });
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
+    const secondDialog = await screen.findByRole('dialog', { name: /prepare image/i });
 
-    expect(screen.getByRole('combobox', { name: /placement mode/i })).toHaveValue('outside-right');
+    expect(within(secondDialog).getByRole('combobox', { name: /placement mode/i })).toHaveValue('outside-right');
   });
 
   it('confirms advanced import into an image layer without replacing the base image', async () => {
@@ -829,7 +841,7 @@ describe('App', () => {
     const { container } = render(<App />);
 
     const editorToolbar = screen.getByRole('toolbar', { name: /editor actions/i });
-    const zoomToolbar = screen.getByRole('toolbar', { name: /canvas zoom/i });
+    const zoomToolbar = screen.getByRole('toolbar', { name: /canvas tools/i });
     expect(within(editorToolbar).queryByRole('button', { name: /zoom in/i })).not.toBeInTheDocument();
     expect(within(zoomToolbar).getByRole('button', { name: /zoom in/i })).toBeInTheDocument();
     expect(screen.queryByText(/preview zoom/i)).not.toBeInTheDocument();
@@ -1359,8 +1371,8 @@ describe('App', () => {
       target: { files: [file] },
     });
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
@@ -1419,8 +1431,8 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /advanced import from clipboard/i }));
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
@@ -1428,10 +1440,10 @@ describe('App', () => {
 
     pendingReplacement.resolve(createImageElement(1200, 800));
 
-    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    const resumedDialog = await screen.findByRole('dialog', { name: /prepare image/i });
 
-    expect(within(dialog).getByText(/^upload image$/i)).toBeInTheDocument();
-    expect(within(dialog).queryByText(/^advanced import file$/i)).not.toBeInTheDocument();
+    expect(within(resumedDialog).getByText(/^upload image$/i)).toBeInTheDocument();
+    expect(within(resumedDialog).queryByText(/^advanced import file$/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
@@ -1464,8 +1476,8 @@ describe('App', () => {
       target: { files: [layerFile] },
     });
 
-    await screen.findByRole('dialog', { name: /prepare image/i });
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /prepare image/i })).not.toBeInTheDocument();
@@ -1807,7 +1819,7 @@ describe('App', () => {
     expect(screen.getAllByRole('textbox')).toHaveLength(3);
     expect(container.querySelectorAll('.transform-box')).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole('button', { name: /settings for top text/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^settings for top text$/i }));
     fireEvent.click(screen.getByRole('button', { name: /remove layer/i }));
     expect(screen.getAllByRole('textbox')).toHaveLength(2);
     expect(container.querySelectorAll('.transform-box')).toHaveLength(2);
@@ -1972,6 +1984,78 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /^draw$/i })).not.toHaveClass('settings-button-active');
   });
 
+  it('creates a marquee selection on a draw layer and copies it to a new image layer', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 180, clientY: 140 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 70, clientY: 70 });
+    fireEvent.pointerMove(window, { clientX: 190, clientY: 150 });
+    fireEvent.pointerUp(window);
+    fireEvent.click(screen.getByRole('button', { name: /copy selection to new layer/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toBeInTheDocument();
+    });
+  });
+
+  it('cuts an applied selection into a new layer', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 90, clientY: 90 });
+    fireEvent.pointerMove(window, { clientX: 190, clientY: 160 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 200, clientY: 170 });
+    fireEvent.pointerUp(window);
+    fireEvent.click(screen.getByRole('button', { name: /cut selection to new layer/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toBeInTheDocument();
+    });
+  });
+
   it('disables draw mode when layer reordering starts', () => {
     render(<App />);
 
@@ -1999,6 +2083,96 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
 
     expect(screen.getByRole('button', { name: /^draw$/i })).not.toHaveClass('settings-button-active');
+  });
+
+  it('toggles between draw and erase without losing the shared brush controls', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^erase$/i }));
+
+    expect(screen.getByRole('button', { name: /^erase$/i })).toHaveClass('settings-button-active');
+    expect(screen.getByRole('button', { name: /^draw$/i })).not.toHaveClass('settings-button-active');
+    expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    expect(screen.getByRole('button', { name: /^draw$/i })).toHaveClass('settings-button-active');
+    expect(screen.getByRole('button', { name: /^erase$/i })).not.toHaveClass('settings-button-active');
+  });
+
+  it('duplicates a text layer while preserving its text and style', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^settings for top text$/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /top text/i }), {
+      target: { value: 'TOP TEXT' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /font size/i }), {
+      target: { value: '72' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /duplicate top text/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: /top text copy/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('textbox', { name: /top text copy/i })).toHaveValue('TOP TEXT');
+    fireEvent.click(screen.getByRole('button', { name: /^settings for top text$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /settings for top text copy/i }));
+    expect(screen.getByRole('spinbutton', { name: /font size/i })).toHaveValue(72);
+  });
+
+  it('copies a selection with ctrl+c and pastes it as a new layer with ctrl+v', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.pointerMove(window, { clientX: 180, clientY: 140 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, { button: 0, clientX: 70, clientY: 70 });
+    fireEvent.pointerMove(window, { clientX: 190, clientY: 150 });
+    fireEvent.pointerUp(window);
+
+    fireEvent.keyDown(document, { ctrlKey: true, key: 'c' });
+    fireEvent.keyDown(document, { ctrlKey: true, key: 'v' });
+    fireEvent.click(screen.getByRole('tab', { name: /layers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /image 1 layer/i })).toBeInTheDocument();
+    });
+  });
+
+  it('uses the base image as the selection target when a text layer is active', async () => {
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValueOnce(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('textbox', { name: /top text/i }));
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+
+    expect(screen.getByText(/target: base image/i)).toBeInTheDocument();
   });
 });
 

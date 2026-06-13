@@ -108,6 +108,11 @@ describe('createDefaultAppState', () => {
         mode: 'idle',
         activeDrawLayerId: null,
         draftStroke: null,
+        selection: {
+          targetId: null,
+          draftRect: null,
+          rect: null,
+        },
         brush: DEFAULT_RETOUCH_BRUSH,
       },
     });
@@ -154,6 +159,11 @@ describe('createDefaultAppState', () => {
       mode: 'idle',
       activeDrawLayerId: null,
       draftStroke: null,
+      selection: {
+        targetId: null,
+        draftRect: null,
+        rect: null,
+      },
       brush: DEFAULT_RETOUCH_BRUSH,
     });
   });

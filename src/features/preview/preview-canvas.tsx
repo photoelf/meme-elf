@@ -16,6 +16,8 @@ import type {
   DrawPoint,
   EditorLayer,
   LayerId,
+  SelectionDraftRect,
+  SelectionRect,
   SceneCropDraftRect,
   SceneEffectStackItem,
   SceneImageAdjustments,
@@ -55,12 +57,17 @@ type PreviewCanvasProps = {
   ) => void;
   onSceneCropDraftChange?: (draft: SceneCropDraftRect | null) => void;
   draftStroke?: { points: DrawPoint[]; targetLayerId: LayerId | null } | null;
-  retouchMode?: 'idle' | 'draw' | 'eyedropper';
+  retouchMode?: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
   retouchBrush?: {
     color: string;
     size: number;
     opacity: number;
   };
+  selectionDraft?: SelectionDraftRect | null;
+  selectionRect?: SelectionRect | null;
+  onSelectionDraftChange?: (draft: SelectionDraftRect | null) => void;
+  onSelectionDraftCommit?: (draft: SelectionDraftRect) => void;
+  selectionTargetRect?: SelectionRect | null;
 };
 
 type InteractionMode =
@@ -145,6 +152,11 @@ export function PreviewCanvas({
     size: 8,
     opacity: 1,
   },
+  selectionDraft = null,
+  selectionRect = null,
+  onSelectionDraftChange,
+  onSelectionDraftCommit,
+  selectionTargetRect = null,
 }: PreviewCanvasProps) {
   const internalCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -152,6 +164,8 @@ export function PreviewCanvas({
   const interactionRef = useRef<InteractionMode>(null);
   const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
   const drawInteractionRef = useRef(false);
+  const selectionInteractionRef = useRef(false);
+  const latestSelectionDraftRef = useRef<SelectionDraftRect | null>(selectionDraft);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resolvedCanvasRef = canvasRef ?? internalCanvasRef;
   const [isInteracting, setIsInteracting] = useState(false);
@@ -276,6 +290,64 @@ export function PreviewCanvas({
   ]);
 
   useEffect(() => {
+    latestSelectionDraftRef.current = selectionDraft;
+  }, [selectionDraft]);
+
+  useEffect(() => {
+    function handleSelectionPointerMove(event: PointerEvent) {
+      if (!selectionInteractionRef.current || retouchMode !== 'select' || !selectionTargetRect) {
+        return;
+      }
+
+      const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+      if (!point || !selectionDraft) {
+        return;
+      }
+
+      const nextDraft = {
+        ...selectionDraft,
+        endX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
+        endY: clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height),
+      };
+      latestSelectionDraftRef.current = nextDraft;
+      onSelectionDraftChange?.(nextDraft);
+    }
+
+    function handleSelectionPointerUp() {
+      if (!selectionInteractionRef.current || retouchMode !== 'select') {
+        return;
+      }
+
+      selectionInteractionRef.current = false;
+      setIsInteracting(false);
+      if (latestSelectionDraftRef.current) {
+        onSelectionDraftCommit?.(latestSelectionDraftRef.current);
+      }
+      window.setTimeout(() => {
+        onDocumentInteractionEnd?.();
+      }, 0);
+    }
+
+    window.addEventListener('pointermove', handleSelectionPointerMove);
+    window.addEventListener('pointerup', handleSelectionPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleSelectionPointerMove);
+      window.removeEventListener('pointerup', handleSelectionPointerUp);
+    };
+  }, [
+    height,
+    onDocumentInteractionEnd,
+    onSelectionDraftChange,
+    onSelectionDraftCommit,
+    retouchMode,
+    selectionDraft,
+    selectionTargetRect,
+    width,
+  ]);
+
+  useEffect(() => {
     if (!editingLayerId || textLayers.some((layer) => layer.id === editingLayerId)) {
       return;
     }
@@ -352,7 +424,7 @@ export function PreviewCanvas({
 
   useEffect(() => {
     function handleDrawPointerMove(event: PointerEvent) {
-      if (!drawInteractionRef.current || retouchMode !== 'draw') {
+      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
         return;
       }
 
@@ -369,7 +441,7 @@ export function PreviewCanvas({
     }
 
     function handleDrawPointerUp() {
-      if (!drawInteractionRef.current || retouchMode !== 'draw') {
+      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
         return;
       }
 
@@ -381,12 +453,27 @@ export function PreviewCanvas({
       }, 0);
     }
 
+    function handleDrawPointerCancel() {
+      if (!drawInteractionRef.current || (retouchMode !== 'draw' && retouchMode !== 'erase')) {
+        return;
+      }
+
+      drawInteractionRef.current = false;
+      setIsInteracting(false);
+      onDraftStrokeChange?.(null);
+      window.setTimeout(() => {
+        onDocumentInteractionEnd?.();
+      }, 0);
+    }
+
     window.addEventListener('pointermove', handleDrawPointerMove);
     window.addEventListener('pointerup', handleDrawPointerUp);
+    window.addEventListener('pointercancel', handleDrawPointerCancel);
 
     return () => {
       window.removeEventListener('pointermove', handleDrawPointerMove);
       window.removeEventListener('pointerup', handleDrawPointerUp);
+      window.removeEventListener('pointercancel', handleDrawPointerCancel);
     };
   }, [
     draftStroke?.points,
@@ -501,6 +588,15 @@ export function PreviewCanvas({
       ? normalizeSceneCropRect(sceneCropDraft, { width, height })
       : null;
   const showLayerOverlay = !isSceneCropMode && retouchMode === 'idle' && isOverlayVisible;
+  const normalizedSelectionDraft = selectionDraft
+    ? normalizeSceneCropRect(selectionDraft, { width, height })
+    : null;
+  const visibleSelectionRect =
+    retouchMode === 'select'
+      ? normalizedSelectionDraft && normalizedSelectionDraft.width > 0 && normalizedSelectionDraft.height > 0
+        ? normalizedSelectionDraft
+        : selectionRect
+      : null;
 
   return (
     <div className="preview-viewport">
@@ -558,7 +654,28 @@ export function PreviewCanvas({
               return;
             }
 
-            if (retouchMode === 'draw' && event.button !== 1 && event.button !== 2) {
+            if (retouchMode === 'select' && event.button !== 1 && event.button !== 2) {
+              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+              if (!point || !selectionTargetRect) {
+                return;
+              }
+
+              event.preventDefault();
+              selectionInteractionRef.current = true;
+              setEditingLayerId(null);
+              setIsInteracting(true);
+              onDocumentInteractionStart?.();
+              onSelectionDraftChange?.({
+                startX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
+                startY: clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height),
+                endX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
+                endY: clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height),
+              });
+              return;
+            }
+
+            if ((retouchMode === 'draw' || retouchMode === 'erase') && event.button !== 1 && event.button !== 2) {
               const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
 
               if (!point) {
@@ -621,11 +738,12 @@ export function PreviewCanvas({
               <polyline
                 fill="none"
                 points={draftStroke.points.map((point) => `${point.x},${point.y}`).join(' ')}
-                stroke={retouchBrush.color}
+                stroke={retouchMode === 'erase' ? '#ffffff' : retouchBrush.color}
                 strokeOpacity={retouchBrush.opacity}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={retouchBrush.size}
+                strokeDasharray={retouchMode === 'erase' ? '6 4' : undefined}
               />
             </svg>
           ) : null}
@@ -693,6 +811,13 @@ export function PreviewCanvas({
                 />
               ))}
             </div>
+          ) : null}
+          {visibleSelectionRect ? (
+            <div
+              className="scene-crop-overlay selection-overlay"
+              aria-hidden="true"
+              style={getSceneCropOverlayStyle(visibleSelectionRect, width, height)}
+            />
           ) : null}
           <div className="preview-overlay" aria-hidden="true">
             {!isSceneCropMode && (retouchMode === 'idle' || editingLayerId !== null) ? [...layers].reverse().map((layer) => {

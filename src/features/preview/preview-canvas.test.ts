@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { fireEvent, render } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -166,5 +166,119 @@ describe('preview-canvas helpers', () => {
     );
 
     expect(container.querySelectorAll('.transform-box')).toHaveLength(0);
+  });
+
+  it('clears the draft stroke without committing when the pointer interaction is cancelled', async () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onDraftStrokeChange = vi.fn();
+    const onDraftStrokeCommit = vi.fn();
+    const onDocumentInteractionEnd = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: true,
+        layers: [],
+        onActiveLayerChange: vi.fn(),
+        onDocumentInteractionEnd,
+        onLayerChange: vi.fn(),
+        retouchMode: 'draw',
+        onDraftStrokeChange,
+        onDraftStrokeCommit,
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(surface, { button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(window, { clientX: 80, clientY: 60 });
+    fireEvent.pointerCancel(window);
+
+    expect(onDraftStrokeCommit).not.toHaveBeenCalled();
+    expect(onDraftStrokeChange).toHaveBeenLastCalledWith(null);
+    await waitFor(() => {
+      expect(onDocumentInteractionEnd).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows the marquee overlay only while selection mode is active', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const props = {
+      activeLayerId: null,
+      height: 450,
+      image: null,
+      isStageHovered: true,
+      layers: [],
+      onActiveLayerChange: vi.fn(),
+      onLayerChange: vi.fn(),
+      selectionRect: { x: 40, y: 40, width: 100, height: 60 },
+      selectionTargetRect: { x: 0, y: 0, width: 800, height: 450 },
+      width: 800,
+    } as const;
+
+    const activeResult = render(
+      createElement(PreviewCanvas, {
+        ...props,
+        retouchMode: 'select',
+      }),
+    );
+
+    expect(activeResult.container.querySelector('.selection-overlay')).toBeInTheDocument();
+
+    activeResult.unmount();
+
+    const idleResult = render(
+      createElement(PreviewCanvas, {
+        ...props,
+        retouchMode: 'idle',
+      }),
+    );
+
+    expect(idleResult.container.querySelector('.selection-overlay')).not.toBeInTheDocument();
   });
 });

@@ -59,4 +59,21 @@ describe('rasterizeBrushStroke', () => {
     expect(softStroke.data[edgeAlphaOffset]).toBeGreaterThan(0);
     expect(softStroke.data[edgeAlphaOffset]).toBeLessThan(hardStroke.data[edgeAlphaOffset] ?? 0);
   });
+
+  it('scales committed alpha by brush opacity', () => {
+    const stroke = rasterizeBrushStroke({
+      brush: {
+        color: '#ff0000',
+        size: 12,
+        opacity: 0.5,
+      },
+      height: 24,
+      points: [{ x: 12, y: 12 }],
+      width: 24,
+    });
+
+    const centerAlphaOffset = (12 * 24 + 12) * 4 + 3;
+
+    expect(stroke.data[centerAlphaOffset]).toBe(128);
+  });
 });

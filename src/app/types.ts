@@ -199,6 +199,22 @@ export type DrawPoint = {
   y: number;
 };
 
+export type SelectionDraftRect = {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+};
+
+export type SelectionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type RasterSelectionTargetId = 'base-image' | LayerId;
+
 export type DrawLayer = BaseLayer & {
   kind: 'draw';
   raster: RasterSurface;
@@ -209,12 +225,17 @@ export type DrawLayer = BaseLayer & {
 };
 
 export type RetouchState = {
-  mode: 'idle' | 'draw' | 'eyedropper';
+  mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
   activeDrawLayerId: LayerId | null;
   draftStroke: {
     points: DrawPoint[];
     targetLayerId: LayerId | null;
   } | null;
+  selection: {
+    targetId: RasterSelectionTargetId | null;
+    draftRect: SelectionDraftRect | null;
+    rect: SelectionRect | null;
+  };
   brush: {
     color: string;
     size: number;

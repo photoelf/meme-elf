@@ -29,8 +29,12 @@ Current repo state:
 - inline canvas text editing with multiline entry and live box-fit recovery after line removal
 - image layer insert, reorder, move, resize, rotate, and remove
 - draw layers with committed raster strokes in preview, clipboard copy, and PNG export
-- draw mode with draft stroke preview, auto-targeted draw-layer commits, and stroke undo
-- draw inspector controls for `Draw`, `New draw layer`, brush color, size, opacity, soft edge, and eyedropper color sampling
+- draw and erase modes with draft stroke preview, draw-layer-only erase commits, stroke undo, and pointer-cancel cleanup
+- draw inspector controls for `Draw`, `Erase`, `New draw layer`, brush color, size, opacity, soft edge, and eyedropper color sampling
+- rectangular marquee selection scoped to one raster target at a time
+- explicit selection apply/cancel flow with `Copy to new layer` and `Cut to new layer`
+- extraction from the base image, image layers, and draw layers into normal image layers
+- internal clone-stamp prototype helper for custom-stack research, not exposed in the alpha UI
 - preview zoom and middle-mouse pan for desktop editing
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
@@ -47,7 +51,7 @@ Current desktop layout conventions:
 - global actions live in the top bar as icon-only buttons with delayed tooltips
 - preview-local undo/redo and zoom controls stay with the preview header
 - advanced editing lives in the right inspector rather than a left tool rail
-- inspector navigation uses one dedicated full-width icon tab per tool, including `Draw` and `Watermark`
+- inspector navigation uses one dedicated full-width icon tab per tool, while selection/extraction actions stay embedded in `Layers`
 - scene-level rotate / flip actions in `Crop` affect only the image stack; text layers stay in place
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 
@@ -126,6 +130,7 @@ Included:
 - image layers and pre-insert preparation for UI imports
 - scene crop and canvas bounds expansion
 - draw layers and desktop brush painting
+- selection/extraction into new layers
 - desktop mouse interactions
 - copy/export as PNG
 
@@ -134,4 +139,4 @@ Excluded:
 - meme history
 - GIF/video editing
 - AI features
-- erase-on-draw-layer flow is not closed yet
+- production clone stamp, healing, or patch tools beyond the current research/prototype scope

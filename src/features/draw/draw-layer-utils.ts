@@ -49,8 +49,10 @@ export function commitDrawStroke(
     points: BrushPoint[];
     brush: {
       color: string;
+      mode?: 'draw' | 'erase';
       size: number;
       opacity?: number;
+      softEdge?: boolean;
     };
   },
 ): DrawLayer {
@@ -60,7 +62,7 @@ export function commitDrawStroke(
     points: input.points,
     brush: input.brush,
   });
-  const raster = mergeRasterSurface(layer.raster, strokeSurface);
+  const raster = mergeRasterSurface(layer.raster, strokeSurface, input.brush.mode ?? 'draw');
 
   return {
     ...layer,
@@ -68,7 +70,11 @@ export function commitDrawStroke(
   };
 }
 
-function mergeRasterSurface(base: RasterSurface, overlay: RasterSurface): RasterSurface {
+function mergeRasterSurface(
+  base: RasterSurface,
+  overlay: RasterSurface,
+  mode: 'draw' | 'erase',
+): RasterSurface {
   const nextSurface = cloneRasterSurface(base);
 
   for (let offset = 0; offset < nextSurface.data.length; offset += 4) {
@@ -80,6 +86,26 @@ function mergeRasterSurface(base: RasterSurface, overlay: RasterSurface): Raster
 
     const alpha = overlayAlpha / 255;
     const inverseAlpha = 1 - alpha;
+
+    if (mode === 'erase') {
+      const baseAlpha = base.data[offset + 3] ?? 0;
+      const nextAlpha = Math.round(baseAlpha * inverseAlpha);
+
+      if (nextAlpha <= 0) {
+        nextSurface.data[offset] = 0;
+        nextSurface.data[offset + 1] = 0;
+        nextSurface.data[offset + 2] = 0;
+        nextSurface.data[offset + 3] = 0;
+        continue;
+      }
+
+      const colorScale = baseAlpha > 0 ? nextAlpha / baseAlpha : 0;
+      nextSurface.data[offset] = Math.round((base.data[offset] ?? 0) * colorScale);
+      nextSurface.data[offset + 1] = Math.round((base.data[offset + 1] ?? 0) * colorScale);
+      nextSurface.data[offset + 2] = Math.round((base.data[offset + 2] ?? 0) * colorScale);
+      nextSurface.data[offset + 3] = nextAlpha;
+      continue;
+    }
 
     nextSurface.data[offset] = Math.round((overlay.data[offset] ?? 0) * alpha + (base.data[offset] ?? 0) * inverseAlpha);
     nextSurface.data[offset + 1] = Math.round(

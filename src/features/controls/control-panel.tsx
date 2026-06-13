@@ -4,10 +4,12 @@ import { isDrawLayer, isImageLayer, isTextLayer } from '../../app/types';
 import type {
   EditorLayer,
   LayerId,
+  RasterSelectionTargetId,
   SceneCropDraftRect,
   SceneBoundsFillMode,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SelectionRect,
   SceneWatermark,
   SceneWatermarkCorner,
   SceneWatermarkMode,
@@ -28,13 +30,16 @@ type ControlPanelProps = {
   activeLayerId: LayerId | null;
   isImportModalOpen: boolean;
   layers: EditorLayer[];
-  retouchMode: 'idle' | 'draw' | 'eyedropper';
+  retouchMode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select';
   retouchBrush: {
     color: string;
     size: number;
     opacity: number;
     softEdge: boolean;
   };
+  selectionTargetId: RasterSelectionTargetId | null;
+  selectionRect: SelectionRect | null;
+  selectionDraftRect: SelectionRect | null;
   sceneCropDraft: SceneCropDraftRect | null;
   sceneBoundsFillColor: string;
   sceneBoundsFillMode: SceneBoundsFillMode;
@@ -84,13 +89,18 @@ type ControlPanelProps = {
     historyMode?: 'immediate' | 'defer',
   ) => void;
   onRotateImageLayer: (layerId: LayerId, direction: 'clockwise' | 'counter-clockwise') => void;
-  onRetouchModeChange: (mode: 'idle' | 'draw' | 'eyedropper') => void;
+  onRetouchModeChange: (mode: 'idle' | 'draw' | 'erase' | 'eyedropper' | 'select') => void;
   onRetouchBrushChange: (updates: {
     color?: string;
     size?: number;
     opacity?: number;
     softEdge?: boolean;
   }) => void;
+  onApplySelection: () => void;
+  onCancelSelection: () => void;
+  onCopySelectionToLayer: () => void;
+  onCutSelectionToLayer: () => void;
+  onDuplicateLayer: (layerId: LayerId) => void;
   onFlipImageLayerHorizontal: (layerId: LayerId) => void;
   onFlipImageLayerVertical: (layerId: LayerId) => void;
   onReorderLayers: (
@@ -109,6 +119,9 @@ export function ControlPanel({
   layers,
   retouchMode,
   retouchBrush,
+  selectionTargetId,
+  selectionRect,
+  selectionDraftRect,
   sceneCropDraft,
   sceneBoundsFillColor,
   sceneBoundsFillMode,
@@ -147,6 +160,11 @@ export function ControlPanel({
   onRotateImageLayer,
   onRetouchModeChange,
   onRetouchBrushChange,
+  onApplySelection,
+  onCancelSelection,
+  onCopySelectionToLayer,
+  onCutSelectionToLayer,
+  onDuplicateLayer,
   onFlipImageLayerHorizontal,
   onFlipImageLayerVertical,
   onReorderLayers,
@@ -191,7 +209,7 @@ export function ControlPanel({
         }
       }}
     >
-      <div className="tool-rail inspector-rail">
+        <div className="tool-rail inspector-rail">
         <div className="tool-rail-tabs tool-rail-tabs-six" role="tablist" aria-label="Control sections">
           <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => {
             clearRetouchMode();
@@ -483,6 +501,7 @@ export function ControlPanel({
                             layer={layer}
                             layerCount={layers.filter(isTextLayer).length}
                             onApplySettingsToAllLayers={onApplySettingsToAllLayers}
+                            onDuplicateLayer={onDuplicateLayer}
                             onTextLayerChange={onTextLayerChange}
                             onRemoveLayer={onRemoveLayer}
                           />
@@ -490,6 +509,7 @@ export function ControlPanel({
                           <ImageLayerSettings
                             layer={layer}
                             layerCount={layers.length}
+                            onDuplicateLayer={onDuplicateLayer}
                             onFlipHorizontal={onFlipImageLayerHorizontal}
                             onFlipVertical={onFlipImageLayerVertical}
                             onRemoveLayer={onRemoveLayer}
@@ -499,6 +519,7 @@ export function ControlPanel({
                           <DrawLayerSettings
                             layer={layer}
                             layerCount={layers.length}
+                            onDuplicateLayer={onDuplicateLayer}
                             onRemoveLayer={onRemoveLayer}
                           />
                         )}
@@ -526,6 +547,13 @@ export function ControlPanel({
                 onClick={() => onRetouchModeChange(retouchMode === 'draw' ? 'idle' : 'draw')}
               >
                 Draw
+              </button>
+              <button
+                type="button"
+                className={`mini-action-button${retouchMode === 'erase' ? ' settings-button-active' : ''}`}
+                onClick={() => onRetouchModeChange(retouchMode === 'erase' ? 'idle' : 'erase')}
+              >
+                Erase
               </button>
               <button
                 type="button"
@@ -625,6 +653,7 @@ export function ControlPanel({
                           <DrawLayerSettings
                             layer={layer}
                             layerCount={layers.length}
+                            onDuplicateLayer={onDuplicateLayer}
                             onRemoveLayer={onRemoveLayer}
                           />
                         </div>
@@ -1159,6 +1188,7 @@ type LayerSettingsProps = {
   layer: TextLayer;
   layerCount: number;
   onApplySettingsToAllLayers: (layerId: LayerId) => void;
+  onDuplicateLayer: (layerId: LayerId) => void;
   onTextLayerChange: (
     layerId: LayerId,
     updates: Partial<TextLayer>,
@@ -1171,6 +1201,7 @@ function LayerSettings({
   layer,
   layerCount,
   onApplySettingsToAllLayers,
+  onDuplicateLayer,
   onTextLayerChange,
   onRemoveLayer,
 }: LayerSettingsProps) {
@@ -1343,6 +1374,14 @@ function LayerSettings({
         <button
           type="button"
           className="apply-all-button"
+          aria-label={`Duplicate ${layer.name}`}
+          onClick={() => onDuplicateLayer(layer.id)}
+        >
+          Duplicate layer
+        </button>
+        <button
+          type="button"
+          className="apply-all-button"
           onClick={() => onApplySettingsToAllLayers(layer.id)}
         >
           Apply to all layers
@@ -1363,6 +1402,7 @@ function LayerSettings({
 function ImageLayerSettings({
   layer,
   layerCount,
+  onDuplicateLayer,
   onFlipHorizontal,
   onFlipVertical,
   onRemoveLayer,
@@ -1370,6 +1410,7 @@ function ImageLayerSettings({
 }: {
   layer: EditorLayer;
   layerCount: number;
+  onDuplicateLayer: (layerId: LayerId) => void;
   onFlipHorizontal: (layerId: LayerId) => void;
   onFlipVertical: (layerId: LayerId) => void;
   onRemoveLayer: (layerId: LayerId) => void;
@@ -1383,6 +1424,9 @@ function ImageLayerSettings({
     <div className="image-layer-settings">
       <p className="section-copy">Transparency is preserved. Move and scale on the canvas, or drag in LAYERS to change stacking.</p>
       <div className="settings-actions">
+        <button type="button" className="apply-all-button" aria-label={`Duplicate ${layer.name}`} onClick={() => onDuplicateLayer(layer.id)}>
+          Duplicate layer
+        </button>
         <button type="button" className="apply-all-button" onClick={() => onRotate(layer.id, 'clockwise')}>
           Rotate 90 clockwise
         </button>
@@ -1408,10 +1452,12 @@ function ImageLayerSettings({
 function DrawLayerSettings({
   layer,
   layerCount,
+  onDuplicateLayer,
   onRemoveLayer,
 }: {
   layer: EditorLayer;
   layerCount: number;
+  onDuplicateLayer: (layerId: LayerId) => void;
   onRemoveLayer: (layerId: LayerId) => void;
 }) {
   if (!isDrawLayer(layer)) {
@@ -1422,6 +1468,14 @@ function DrawLayerSettings({
     <div className="image-layer-settings">
       <p className="section-copy">This draw layer stays in the scene stack and receives new strokes while it is the active brush target.</p>
       <div className="settings-actions">
+        <button
+          type="button"
+          className="apply-all-button"
+          aria-label={`Duplicate ${layer.name}`}
+          onClick={() => onDuplicateLayer(layer.id)}
+        >
+          Duplicate layer
+        </button>
         <button
           type="button"
           className="apply-all-button remove-layer-button"

@@ -56,6 +56,14 @@ import { normalizeSceneCropRect } from '../features/bounds/crop-overlay';
 import { resolveBoundsFill } from '../features/bounds/fill-modes';
 import { commitDrawStroke, createDrawLayer } from '../features/draw/draw-layer-utils';
 import {
+  clearRasterSelection,
+  clampSelectionRectToBox,
+  extractRasterSelection,
+  mapSelectionRectToSourceRect,
+  normalizeSelectionRect,
+  selectionRectIsEmpty,
+} from '../features/selection/selection-utils';
+import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
   toggleDraftFlipHorizontal,
@@ -67,8 +75,11 @@ import type {
   DrawPoint,
   EditorLayer,
   LayerId,
+  RasterSelectionTargetId,
   SceneEffectStackItem,
   SceneImageAdjustments,
+  SelectionDraftRect,
+  SelectionRect,
   SceneWatermark,
   TextLayer,
 } from './types';
@@ -107,6 +118,15 @@ type EditorHistorySnapshot = {
   sceneImageAdjustments: SceneImageAdjustments;
   sceneEffectStack: SceneEffectStackItem[];
   sceneWatermark: SceneWatermark;
+};
+
+type SelectionClipboardSnapshot = {
+  image: CanvasImageSource;
+  sceneRect: SelectionRect;
+  sourceRect: {
+    width: number;
+    height: number;
+  };
 };
 
 const MAX_HISTORY_STEPS = 10;
@@ -217,6 +237,7 @@ export function App() {
   const nextDrawLayerSequenceRef = useRef(1);
   const lastShortcutCopyAtRef = useRef(0);
   const latestExplicitClipboardRequestTokenRef = useRef(0);
+  const selectionClipboardRef = useRef<SelectionClipboardSnapshot | null>(null);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
     restoreFocusTo: null,
     target: { kind: 'base' },
@@ -251,6 +272,14 @@ export function App() {
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
+  const selectionStatusTarget = appState.retouch.selection.targetId
+    ? `Target: ${appState.retouch.selection.targetId === 'base-image' ? 'Base image' : appState.retouch.selection.targetId}`
+    : 'Target: choose a raster layer or base image';
+  const selectionStatusRect = appState.retouch.selection.rect
+    ? `Selection: ${appState.retouch.selection.rect.width} x ${appState.retouch.selection.rect.height}px`
+    : appState.retouch.selection.draftRect
+      ? `Draft: ${normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize).width} x ${normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize).height}px`
+      : 'No selection';
 
   function syncHistoryState() {
     setHistoryState({
@@ -334,6 +363,21 @@ export function App() {
       preInsertModalDraft: null,
       activeSceneBoundsMode: 'idle',
       sceneBoundsDraft: createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+      retouch: {
+        ...currentState.retouch,
+        draftStroke: null,
+        selection: {
+          targetId: resolveSelectionTargetId({
+            ...currentState,
+            image: snapshot.image,
+            canvasSize: { ...snapshot.canvasSize },
+            layers: cloneLayers(snapshot.layers),
+            activeLayerId: snapshot.activeLayerId,
+          }),
+          draftRect: null,
+          rect: null,
+        },
+      },
     }));
     setStatusMessage(status);
   }
@@ -752,7 +796,10 @@ export function App() {
         layer.id === targetLayerId && isDrawLayer(layer)
           ? commitDrawStroke(layer, {
               points: currentDraft.points,
-              brush: currentState.retouch.brush,
+              brush: {
+                ...currentState.retouch.brush,
+                mode: currentState.retouch.mode === 'erase' ? 'erase' : 'draw',
+              },
             })
           : layer,
       );
@@ -799,6 +846,196 @@ export function App() {
       },
     }));
     setStatusMessage('Brush color sampled from canvas.');
+  }
+
+  function handleSelectionDraftChange(draftRect: SelectionDraftRect | null) {
+    setAppState((currentState) => ({
+      ...currentState,
+      retouch: {
+        ...currentState.retouch,
+        selection: {
+          ...currentState.retouch.selection,
+          draftRect,
+        },
+      },
+    }));
+  }
+
+  function commitSelectionDraft(explicitDraftRect?: SelectionDraftRect) {
+    setAppState((currentState) => {
+      const targetId = currentState.retouch.selection.targetId;
+      const draftRect = explicitDraftRect ?? currentState.retouch.selection.draftRect;
+      const targetBox = targetId ? resolveSelectionTargetBox(currentState, targetId) : null;
+
+      if (!targetId || !draftRect || !targetBox) {
+        return currentState;
+      }
+
+      const normalized = normalizeSelectionRect(draftRect, currentState.canvasSize);
+      const clamped = clampSelectionRectToBox(normalized, targetBox);
+
+      if (selectionRectIsEmpty(clamped)) {
+        return {
+          ...currentState,
+          retouch: {
+            ...currentState.retouch,
+            selection: {
+              ...currentState.retouch.selection,
+              draftRect: null,
+              rect: null,
+            },
+          },
+        };
+      }
+
+      return {
+        ...currentState,
+        retouch: {
+          ...currentState.retouch,
+          selection: {
+            ...currentState.retouch.selection,
+            draftRect: null,
+            rect: clamped,
+          },
+        },
+      };
+    });
+  }
+
+  function handleApplySelection() {
+    commitSelectionDraft();
+  }
+
+  function handleCancelSelection() {
+    setAppState((currentState) => ({
+      ...currentState,
+      retouch: {
+        ...currentState.retouch,
+        selection: {
+          ...currentState.retouch.selection,
+          draftRect: null,
+          rect: null,
+        },
+      },
+    }));
+  }
+
+  function handleSelectionShortcutCopy(mode: 'copy' | 'cut') {
+    let nextStatus = mode === 'copy' ? 'Selection copied.' : 'Selection cut.';
+
+    applyAppStateChange((currentState) => {
+      const targetId = currentState.retouch.selection.targetId;
+      const rect = currentState.retouch.selection.rect;
+
+      if (!targetId || !rect) {
+        return currentState;
+      }
+
+      const extraction = extractSelectionForTarget(currentState, targetId, rect, mode);
+
+      if (!extraction) {
+        return currentState;
+      }
+
+      selectionClipboardRef.current = {
+        image: extraction.image,
+        sceneRect: extraction.sceneRect,
+        sourceRect: {
+          width: extraction.sourceRect.width,
+          height: extraction.sourceRect.height,
+        },
+      };
+
+      return mode === 'cut'
+        ? {
+            ...extraction.nextState,
+            retouch: {
+              ...extraction.nextState.retouch,
+              selection: {
+                targetId,
+                draftRect: null,
+                rect: null,
+              },
+            },
+          }
+        : currentState;
+    });
+
+    setStatusMessage(nextStatus);
+  }
+
+  function pasteSelectionClipboard() {
+    const snapshot = selectionClipboardRef.current;
+
+    if (!snapshot) {
+      return;
+    }
+
+    applyAppStateChange((currentState) => {
+      const nextSequence = nextImageLayerSequenceRef.current;
+      nextImageLayerSequenceRef.current += 1;
+      const nextLayerId = `image-${nextSequence}`;
+      const nextLayer = createExtractedImageLayer(
+        nextLayerId,
+        nextSequence,
+        snapshot.image,
+        snapshot.sceneRect,
+        snapshot.sourceRect,
+      );
+
+      return {
+        ...currentState,
+        activeLayerId: nextLayerId,
+        layers: [nextLayer, ...currentState.layers],
+      };
+    });
+
+    setStatusMessage('Selection pasted as a new layer.');
+  }
+
+  function copySelectionToLayer() {
+    applySelectionToLayer('copy');
+  }
+
+  function cutSelectionToLayer() {
+    applySelectionToLayer('cut');
+  }
+
+  function applySelectionToLayer(mode: 'copy' | 'cut') {
+    applyAppStateChange((currentState) => {
+      const targetId = currentState.retouch.selection.targetId;
+      const rect = currentState.retouch.selection.rect;
+
+      if (!targetId || !rect) {
+        return currentState;
+      }
+
+      const extraction = extractSelectionForTarget(currentState, targetId, rect, mode);
+
+      if (!extraction) {
+        return currentState;
+      }
+
+      const nextSequence = nextImageLayerSequenceRef.current;
+      nextImageLayerSequenceRef.current += 1;
+      const nextLayerId = `image-${nextSequence}`;
+      const nextLayer = createExtractedImageLayer(nextLayerId, nextSequence, extraction.image, extraction.sceneRect, extraction.sourceRect);
+
+      return {
+        ...extraction.nextState,
+        activeLayerId: nextLayerId,
+        layers: insertImageLayerAboveTarget(extraction.nextState.layers, targetId, nextLayer),
+        retouch: {
+          ...extraction.nextState.retouch,
+          selection: {
+            targetId,
+            draftRect: null,
+            rect: null,
+          },
+        },
+      };
+    });
+    setStatusMessage(mode === 'copy' ? 'Selection copied to a new layer.' : 'Selection cut to a new layer.');
   }
 
   function updateSceneImageAdjustments(
@@ -1047,6 +1284,88 @@ export function App() {
     });
   }
 
+  function duplicateLayer(layerId: LayerId) {
+    applyAppStateChange((currentState) => {
+      const sourceLayer = currentState.layers.find((layer) => layer.id === layerId);
+
+      if (!sourceLayer) {
+        return currentState;
+      }
+
+      if (isTextLayer(sourceLayer)) {
+        const nextSequence = nextLayerSequenceRef.current;
+        nextLayerSequenceRef.current += 1;
+        const nextLayerId = `layer-${nextSequence}`;
+        const nextLayer = {
+          ...sourceLayer,
+          id: nextLayerId,
+          name: `${sourceLayer.name} copy`,
+          box: {
+            ...sourceLayer.box,
+            x: sourceLayer.box.x + 16,
+            y: sourceLayer.box.y + 16,
+          },
+        };
+
+        return {
+          ...currentState,
+          activeLayerId: nextLayerId,
+          layers: [...currentState.layers, nextLayer],
+        };
+      }
+
+      if (isImageLayer(sourceLayer)) {
+        const nextSequence = nextImageLayerSequenceRef.current;
+        nextImageLayerSequenceRef.current += 1;
+        const nextLayerId = `image-${nextSequence}`;
+        const nextLayer = {
+          ...sourceLayer,
+          id: nextLayerId,
+          name: `${sourceLayer.name} copy`,
+          box: {
+            ...sourceLayer.box,
+            x: sourceLayer.box.x + 16,
+            y: sourceLayer.box.y + 16,
+          },
+        };
+
+        return {
+          ...currentState,
+          activeLayerId: nextLayerId,
+          layers: [nextLayer, ...currentState.layers],
+        };
+      }
+
+      const nextSequence = nextDrawLayerSequenceRef.current;
+      nextDrawLayerSequenceRef.current += 1;
+      const nextLayerId = `draw-${nextSequence}`;
+      const nextLayer = {
+        ...sourceLayer,
+        id: nextLayerId,
+        name: `${sourceLayer.name} copy`,
+        box: {
+          ...sourceLayer.box,
+          x: sourceLayer.box.x + 16,
+          y: sourceLayer.box.y + 16,
+        },
+        raster: {
+          ...sourceLayer.raster,
+          data: Uint8ClampedArray.from(sourceLayer.raster.data),
+        },
+      };
+
+      return {
+        ...currentState,
+        activeLayerId: nextLayerId,
+        layers: insertDrawLayer(currentState.layers, nextLayer),
+        retouch: {
+          ...currentState.retouch,
+          activeDrawLayerId: nextLayerId,
+        },
+      };
+    });
+  }
+
   function reorderLayers(
     sourceLayerId: LayerId,
     targetLayerId: LayerId,
@@ -1097,6 +1416,18 @@ export function App() {
             currentState.retouch.draftStroke?.targetLayerId === layerId
               ? null
               : currentState.retouch.draftStroke,
+          selection:
+            currentState.retouch.selection.targetId === layerId
+              ? {
+                  targetId: resolveSelectionTargetId({
+                    ...currentState,
+                    activeLayerId: nextActiveLayerId,
+                    layers: nextLayers,
+                  }),
+                  draftRect: null,
+                  rect: null,
+                }
+              : currentState.retouch.selection,
         },
       };
     });
@@ -1344,6 +1675,12 @@ export function App() {
     }
 
     function handleCopyEvent(event: ClipboardEvent) {
+      if (appStateRef.current.retouch.selection.rect) {
+        event.preventDefault();
+        handleSelectionShortcutCopy('copy');
+        return;
+      }
+
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
@@ -1368,6 +1705,12 @@ export function App() {
         return;
       }
 
+      if (appStateRef.current.retouch.selection.rect) {
+        event.preventDefault();
+        handleSelectionShortcutCopy('copy');
+        return;
+      }
+
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
@@ -1383,11 +1726,57 @@ export function App() {
       requestShortcutCopy();
     }
 
+    function handleCutKeyDown(event: KeyboardEvent) {
+      const isCutShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'x';
+
+      if (
+        !isCutShortcut ||
+        event.defaultPrevented ||
+        isEditableTarget(event.target) ||
+        isPreInsertModalOpenRef.current ||
+        !appStateRef.current.retouch.selection.rect
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      handleSelectionShortcutCopy('cut');
+    }
+
+    function handlePasteKeyDown(event: KeyboardEvent) {
+      const isPasteShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'v';
+
+      if (
+        !isPasteShortcut ||
+        event.defaultPrevented ||
+        isEditableTarget(event.target) ||
+        isPreInsertModalOpenRef.current ||
+        !selectionClipboardRef.current
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      pasteSelectionClipboard();
+    }
+
     document.addEventListener('copy', handleCopyEvent);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleCutKeyDown);
+    document.addEventListener('keydown', handlePasteKeyDown);
     return () => {
       document.removeEventListener('copy', handleCopyEvent);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleCutKeyDown);
+      document.removeEventListener('keydown', handlePasteKeyDown);
     };
   });
 
@@ -1488,7 +1877,7 @@ export function App() {
             <div className="preview-heading">
               <h2 className="preview-title">MEME</h2>
             </div>
-            <div className="preview-toolbar" role="toolbar" aria-label="Canvas zoom">
+            <div className="preview-toolbar" role="toolbar" aria-label="Canvas tools">
               <button
                 type="button"
                 className="mini-action-button preview-toolbar-button"
@@ -1543,6 +1932,50 @@ export function App() {
               >
                 1:1
               </button>
+              <button
+                type="button"
+                className={`mini-action-button preview-toolbar-button${appState.retouch.mode === 'select' ? ' settings-button-active' : ''}`}
+                aria-label="Select area"
+                title="Select area"
+                onClick={() =>
+                  setAppState((currentState) => applyRetouchModeChange(currentState, 'select'))
+                }
+              >
+                ☐
+              </button>
+              {(appState.retouch.selection.rect || appState.retouch.selection.draftRect) ? (
+                <button
+                  type="button"
+                  className="mini-action-button preview-toolbar-button"
+                  aria-label="Cancel selection"
+                  title="Cancel selection"
+                  onClick={handleCancelSelection}
+                >
+                  ✕
+                </button>
+              ) : null}
+              {appState.retouch.selection.rect ? (
+                <>
+                  <button
+                    type="button"
+                    className="mini-action-button preview-toolbar-button"
+                    aria-label="Copy selection to new layer"
+                    title="Copy selection to new layer"
+                    onClick={copySelectionToLayer}
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-action-button preview-toolbar-button"
+                    aria-label="Cut selection to new layer"
+                    title="Cut selection to new layer"
+                    onClick={cutSelectionToLayer}
+                  >
+                    ✂
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
           <div
@@ -1582,6 +2015,9 @@ export function App() {
                 image={appState.image}
                 retouchBrush={appState.retouch.brush}
                 retouchMode={appState.retouch.mode}
+                selectionDraft={appState.retouch.selection.draftRect}
+                selectionRect={appState.retouch.selection.rect}
+                selectionTargetRect={resolveSelectionTargetRect(appState)}
                 width={appState.canvasSize.width}
                 height={appState.canvasSize.height}
                 layers={appState.layers}
@@ -1600,8 +2036,10 @@ export function App() {
                 onDraftStrokeChange={handleDraftStrokeChange}
                 onDraftStrokeCommit={handleDraftStrokeCommit}
                 onRetouchBrushSample={handleRetouchBrushSample}
+                onSelectionDraftChange={handleSelectionDraftChange}
+                onSelectionDraftCommit={commitSelectionDraft}
                 onActiveLayerChange={(layerId) =>
-                  setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
+                  setAppState((currentState) => applyLayerActivation(currentState, layerId))
                 }
                 onLayerChange={updateLayer}
                 onSceneCropDraftChange={(cropRect) =>
@@ -1614,6 +2052,10 @@ export function App() {
                   }))
                 }
               />
+              <div className="preview-status-hud" aria-live="polite">
+                <span>{selectionStatusTarget}</span>
+                <span>{selectionStatusRect}</span>
+              </div>
             </div>
           </div>
           <div className="status-strip" aria-label="Editor status">
@@ -1631,6 +2073,13 @@ export function App() {
           layers={appState.layers}
           retouchMode={appState.retouch.mode}
           retouchBrush={appState.retouch.brush}
+          selectionTargetId={appState.retouch.selection.targetId}
+          selectionRect={appState.retouch.selection.rect}
+          selectionDraftRect={
+            appState.retouch.selection.draftRect
+              ? normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize)
+              : null
+          }
           sceneCropDraft={appState.sceneBoundsDraft.cropRect}
           sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
           sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
@@ -1646,7 +2095,7 @@ export function App() {
           onApplySceneCrop={applySceneCropCommit}
           onApplySceneExpand={applySceneExpandCommit}
           onActiveLayerChange={(layerId) =>
-            setAppState((currentState) => ({ ...currentState, activeLayerId: layerId }))
+            setAppState((currentState) => applyLayerActivation(currentState, layerId))
           }
           onActiveTabChange={setActiveInspectorTab}
           onCancelSceneBounds={cancelSceneBounds}
@@ -1700,16 +2149,14 @@ export function App() {
             transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
           }
           onRetouchModeChange={(mode) =>
-            setAppState((currentState) => ({
-              ...currentState,
-              retouch: {
-                ...currentState.retouch,
-                draftStroke: mode === 'draw' ? currentState.retouch.draftStroke : null,
-                mode,
-              },
-            }))
+            setAppState((currentState) => applyRetouchModeChange(currentState, mode))
           }
           onRetouchBrushChange={updateRetouchBrush}
+          onApplySelection={handleApplySelection}
+          onCancelSelection={handleCancelSelection}
+          onCopySelectionToLayer={copySelectionToLayer}
+          onCutSelectionToLayer={cutSelectionToLayer}
+          onDuplicateLayer={duplicateLayer}
           onFlipImageLayerHorizontal={(layerId) =>
             transformImageLayer(layerId, (layer) => flipImageLayerHorizontal(layer))
           }
@@ -2255,6 +2702,34 @@ function insertDrawLayer(layers: EditorLayer[], nextLayer: Extract<EditorLayer, 
   ];
 }
 
+function insertImageLayerAboveTarget(
+  layers: EditorLayer[],
+  targetId: RasterSelectionTargetId,
+  nextLayer: Extract<EditorLayer, { kind: 'image' }>,
+) {
+  if (targetId === 'base-image') {
+    const firstNonTextIndex = layers.findIndex((layer) => !isTextLayer(layer));
+
+    if (firstNonTextIndex === -1) {
+      return [...layers, nextLayer];
+    }
+
+    return [
+      ...layers.slice(0, firstNonTextIndex),
+      nextLayer,
+      ...layers.slice(firstNonTextIndex),
+    ];
+  }
+
+  const targetIndex = layers.findIndex((layer) => layer.id === targetId);
+
+  if (targetIndex === -1) {
+    return [...layers, nextLayer];
+  }
+
+  return [...layers.slice(0, targetIndex), nextLayer, ...layers.slice(targetIndex)];
+}
+
 function resolveDrawLayerTargetId(
   state: ReturnType<typeof createDefaultAppState>,
 ) {
@@ -2273,6 +2748,359 @@ function resolveDrawLayerTargetId(
   }
 
   return null;
+}
+
+function resolveSelectionTargetId(state: ReturnType<typeof createDefaultAppState>): RasterSelectionTargetId | null {
+  if (state.activeLayerId) {
+    const activeLayer = state.layers.find((layer) => layer.id === state.activeLayerId);
+
+    if (activeLayer && (isImageLayer(activeLayer) || isDrawLayer(activeLayer))) {
+      return activeLayer.id;
+    }
+  }
+
+  return state.image ? 'base-image' : null;
+}
+
+function resolveSelectionTargetBox(
+  state: ReturnType<typeof createDefaultAppState>,
+  targetId: RasterSelectionTargetId,
+) {
+  if (targetId === 'base-image') {
+    return {
+      x: 0,
+      y: 0,
+      width: state.canvasSize.width,
+      height: state.canvasSize.height,
+    };
+  }
+
+  const layer = state.layers.find((candidateLayer) => candidateLayer.id === targetId);
+
+  if (!layer || (!isImageLayer(layer) && !isDrawLayer(layer))) {
+    return null;
+  }
+
+  return {
+    x: layer.box.x,
+    y: layer.box.y,
+    width: layer.box.width,
+    height: layer.box.height,
+  };
+}
+
+function resolveSelectionTargetRect(state: ReturnType<typeof createDefaultAppState>): SelectionRect | null {
+  const targetId = state.retouch.selection.targetId;
+  const box = targetId ? resolveSelectionTargetBox(state, targetId) : null;
+
+  return box
+    ? {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      }
+    : null;
+}
+
+function extractSelectionForTarget(
+  state: ReturnType<typeof createDefaultAppState>,
+  targetId: RasterSelectionTargetId,
+  selectionRect: SelectionRect,
+  mode: 'copy' | 'cut',
+) {
+  if (targetId === 'base-image') {
+    if (!state.image) {
+      return null;
+    }
+
+    const sceneRect = clampSelectionRectToBox(selectionRect, {
+      x: 0,
+      y: 0,
+      width: state.canvasSize.width,
+      height: state.canvasSize.height,
+    });
+
+    if (!sceneRect) {
+      return null;
+    }
+
+    const sourceRect = mapSelectionRectToSourceRect(
+      sceneRect,
+      { x: 0, y: 0, width: state.canvasSize.width, height: state.canvasSize.height },
+      state.canvasSize,
+    );
+    const image = extractCanvasImageRegion(state.image, state.canvasSize, sourceRect);
+
+    if (!image) {
+      return null;
+    }
+
+    return {
+      image,
+      sceneRect,
+      sourceRect,
+      nextState:
+        mode === 'cut'
+          ? {
+              ...state,
+              image: clearCanvasImageRegion(state.image, state.canvasSize, sourceRect) ?? state.image,
+            }
+          : state,
+    };
+  }
+
+  const targetLayer = state.layers.find((layer) => layer.id === targetId);
+
+  if (!targetLayer || (!isImageLayer(targetLayer) && !isDrawLayer(targetLayer))) {
+    return null;
+  }
+
+  const sceneRect = clampSelectionRectToBox(selectionRect, targetLayer.box);
+
+  if (!sceneRect) {
+    return null;
+  }
+
+  const sourceRect = mapSelectionRectToSourceRect(
+    sceneRect,
+    targetLayer.box,
+    targetLayer.sourceSize,
+    isImageLayer(targetLayer) ? targetLayer.skew : { x: 1, y: 1 },
+  );
+
+  if (isDrawLayer(targetLayer)) {
+    const extractedRaster = extractRasterSelection(targetLayer.raster, sourceRect);
+    const image = createCanvasImageFromRasterSurface(extractedRaster);
+
+    return {
+      image,
+      sceneRect,
+      sourceRect,
+      nextState:
+        mode === 'cut'
+          ? {
+              ...state,
+              layers: state.layers.map((layer) =>
+                layer.id === targetLayer.id && isDrawLayer(layer)
+                  ? {
+                      ...layer,
+                      raster: clearRasterSelection(layer.raster, sourceRect),
+                    }
+                  : layer,
+              ),
+            }
+          : state,
+    };
+  }
+
+  const image = extractCanvasImageRegion(targetLayer.image, targetLayer.sourceSize, sourceRect);
+
+  if (!image) {
+    return null;
+  }
+
+  return {
+    image,
+    sceneRect,
+    sourceRect,
+    nextState:
+      mode === 'cut'
+        ? {
+            ...state,
+            layers: state.layers.map((layer) =>
+              layer.id === targetLayer.id && isImageLayer(layer)
+                ? {
+                    ...layer,
+                    image:
+                      clearCanvasImageRegion(layer.image, layer.sourceSize, sourceRect) ?? layer.image,
+                  }
+                : layer,
+            ),
+          }
+        : state,
+  };
+}
+
+function createExtractedImageLayer(
+  id: LayerId,
+  sequence: number,
+  image: CanvasImageSource,
+  sceneRect: SelectionRect,
+  sourceRect: { width: number; height: number },
+): Extract<EditorLayer, { kind: 'image' }> {
+  return {
+    id,
+    kind: 'image',
+    name: `Image ${sequence}`,
+    box: {
+      x: sceneRect.x,
+      y: sceneRect.y,
+      width: sceneRect.width,
+      height: sceneRect.height,
+      rotation: 0,
+    },
+    opacity: 1,
+    image,
+    sourceSize: {
+      width: sourceRect.width,
+      height: sourceRect.height,
+    },
+    skew: { x: 1, y: 1 },
+  };
+}
+
+function createCanvasImageFromRasterSurface(raster: ReturnType<typeof extractRasterSelection>) {
+  const canvas = document.createElement('canvas');
+  canvas.width = raster.width;
+  canvas.height = raster.height;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return canvas;
+  }
+
+  context.putImageData(
+    typeof ImageData === 'function'
+      ? new ImageData(Uint8ClampedArray.from(raster.data), raster.width, raster.height)
+      : ({
+          data: Uint8ClampedArray.from(raster.data),
+          width: raster.width,
+          height: raster.height,
+          colorSpace: 'srgb',
+        } as ImageData),
+    0,
+    0,
+  );
+  return canvas;
+}
+
+function extractCanvasImageRegion(
+  image: CanvasImageSource | null,
+  sourceSize: { width: number; height: number },
+  sourceRect: { x: number; y: number; width: number; height: number },
+) {
+  if (!image) {
+    return null;
+  }
+
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = sourceSize.width;
+  sourceCanvas.height = sourceSize.height;
+  const sourceContext = sourceCanvas.getContext('2d');
+
+  if (!sourceContext) {
+    return null;
+  }
+
+  sourceContext.clearRect(0, 0, sourceSize.width, sourceSize.height);
+  sourceContext.drawImage(image, 0, 0, sourceSize.width, sourceSize.height);
+
+  const nextCanvas = document.createElement('canvas');
+  nextCanvas.width = sourceRect.width;
+  nextCanvas.height = sourceRect.height;
+  const nextContext = nextCanvas.getContext('2d');
+
+  if (!nextContext) {
+    return null;
+  }
+
+  nextContext.drawImage(
+    sourceCanvas,
+    sourceRect.x,
+    sourceRect.y,
+    sourceRect.width,
+    sourceRect.height,
+    0,
+    0,
+    sourceRect.width,
+    sourceRect.height,
+  );
+  return nextCanvas;
+}
+
+function clearCanvasImageRegion(
+  image: CanvasImageSource | null,
+  sourceSize: { width: number; height: number },
+  sourceRect: { x: number; y: number; width: number; height: number },
+) {
+  if (!image) {
+    return null;
+  }
+
+  const nextCanvas = document.createElement('canvas');
+  nextCanvas.width = sourceSize.width;
+  nextCanvas.height = sourceSize.height;
+  const context = nextCanvas.getContext('2d');
+
+  if (!context) {
+    return null;
+  }
+
+  context.clearRect(0, 0, sourceSize.width, sourceSize.height);
+  context.drawImage(image, 0, 0, sourceSize.width, sourceSize.height);
+  context.clearRect(sourceRect.x, sourceRect.y, sourceRect.width, sourceRect.height);
+  return nextCanvas as unknown as HTMLImageElement;
+}
+
+function applyLayerActivation(
+  state: ReturnType<typeof createDefaultAppState>,
+  layerId: LayerId,
+) {
+  const nextState = {
+    ...state,
+    activeLayerId: layerId,
+  };
+
+  if (state.retouch.mode !== 'select') {
+    return nextState;
+  }
+
+  return {
+    ...nextState,
+    retouch: {
+      ...nextState.retouch,
+      selection: {
+        targetId: resolveSelectionTargetId(nextState),
+        draftRect: null,
+        rect: null,
+      },
+    },
+  };
+}
+
+function applyRetouchModeChange(
+  state: ReturnType<typeof createDefaultAppState>,
+  mode: ReturnType<typeof createDefaultAppState>['retouch']['mode'],
+) {
+  const nextMode = state.retouch.mode === mode && mode !== 'select' ? 'idle' : mode;
+  const enteringSelect = nextMode === 'select';
+  const nextSelectionTargetId = enteringSelect
+    ? resolveSelectionTargetId({
+        ...state,
+        retouch: {
+          ...state.retouch,
+          mode: nextMode,
+        },
+      })
+    : state.retouch.selection.targetId;
+
+  return {
+    ...state,
+    retouch: {
+      ...state.retouch,
+      draftStroke:
+        nextMode === 'draw' || nextMode === 'erase'
+          ? state.retouch.draftStroke
+          : null,
+      mode: nextMode,
+      selection: {
+        targetId: nextSelectionTargetId,
+        draftRect: enteringSelect ? null : state.retouch.selection.draftRect,
+        rect: enteringSelect ? state.retouch.selection.rect : state.retouch.selection.rect,
+      },
+    },
+  };
 }
 
 function resolveSceneExpandPreset(

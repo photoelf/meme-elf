@@ -64,4 +64,34 @@ describe('commitDrawStroke', () => {
     expect(updatedLayer.raster.data[centerIndex + 2]).toBe(0);
     expect(updatedLayer.raster.data[centerIndex + 3]).toBe(255);
   });
+
+  it('removes alpha from existing draw pixels when the brush is in erase mode', () => {
+    const layer = createDrawLayer({
+      id: 'draw-1',
+      name: 'Brush layer',
+      width: 48,
+      height: 48,
+    });
+
+    const paintedLayer = commitDrawStroke(layer, {
+      points: [{ x: 24, y: 24 }],
+      brush: {
+        color: '#ff0000',
+        size: 12,
+      },
+    });
+    const erasedLayer = commitDrawStroke(paintedLayer, {
+      points: [{ x: 24, y: 24 }],
+      brush: {
+        color: '#ff0000',
+        size: 12,
+        mode: 'erase',
+      },
+    });
+
+    const centerIndex = ((24 * erasedLayer.raster.width + 24) * 4) as number;
+
+    expect(paintedLayer.raster.data[centerIndex + 3]).toBeGreaterThan(0);
+    expect(erasedLayer.raster.data[centerIndex + 3]).toBe(0);
+  });
 });
