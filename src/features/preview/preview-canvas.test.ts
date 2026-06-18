@@ -319,6 +319,7 @@ describe('preview-canvas helpers', () => {
     );
 
     const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const canvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
     vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
       bottom: 450,
       height: 450,
@@ -346,4 +347,299 @@ describe('preview-canvas helpers', () => {
     });
     expect(onDraftStrokeChange).not.toHaveBeenCalled();
   });
+
+  it('shows transform handles for the active layer on phone touch sessions without hover', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'top',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'text',
+            id: 'top',
+            name: 'Top text',
+            opacity: 1,
+            text: 'TOP',
+            fontFamily: 'Impact',
+            fontSize: 90,
+            fillStyle: '#ffffff',
+            strokeStyle: '#000000',
+            outlineWidth: 5,
+            textAlign: 'center',
+            verticalAlign: 'top',
+            effect: 'outline',
+            allCaps: true,
+            bold: false,
+            italic: false,
+            box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'top',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    expect(container.querySelector('.transform-box-active')).toBeInTheDocument();
+    expect(container.querySelectorAll('.transform-handle')).toHaveLength(8);
+  });
+
+  it('disables native touch scrolling on the preview surface', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: true,
+        layers: [],
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    expect(surface.style.touchAction).toBe('none');
+    expect(surface.style.overscrollBehavior).toBe('contain');
+  });
+
+  it('opens inline text editing from a touch tap on the active text layer', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onInlineTextEditStart = vi.fn();
+    const onLayerChange = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'top',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'text',
+            id: 'top',
+            name: 'Top text',
+            opacity: 1,
+            text: 'TOP',
+            fontFamily: 'Impact',
+            fontSize: 90,
+            fillStyle: '#ffffff',
+            strokeStyle: '#000000',
+            outlineWidth: 5,
+            textAlign: 'center',
+            verticalAlign: 'top',
+            effect: 'outline',
+            allCaps: true,
+            bold: false,
+            italic: false,
+            box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'top',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onInlineTextEditStart,
+        onLayerChange,
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const canvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
+    fireEvent.pointerDown(transformBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 122,
+      clientY: 62,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onInlineTextEditStart).toHaveBeenCalledTimes(1);
+    expect(onLayerChange).not.toHaveBeenCalled();
+    expect(container.querySelector('.canvas-text-editor')).toBeInTheDocument();
+  });
+
+  it('clears the active text layer after an outside tap blurs inline touch editing', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onActiveLayerClear = vi.fn();
+    const onInlineTextEditStart = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'top',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'text',
+            id: 'top',
+            name: 'Top text',
+            opacity: 1,
+            text: 'TOP',
+            fontFamily: 'Impact',
+            fontSize: 90,
+            fillStyle: '#ffffff',
+            strokeStyle: '#000000',
+            outlineWidth: 5,
+            textAlign: 'center',
+            verticalAlign: 'top',
+            effect: 'outline',
+            allCaps: true,
+            bold: false,
+            italic: false,
+            box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'top',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onActiveLayerClear,
+        onInlineTextEditStart,
+        onLayerChange: vi.fn(),
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const canvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
+    fireEvent.pointerDown(transformBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 122,
+      clientY: 62,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onInlineTextEditStart).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerDown(canvas, {
+      button: 0,
+      clientX: 300,
+      clientY: 200,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    expect(onActiveLayerClear).toHaveBeenCalledTimes(1);
+  });
+
 });

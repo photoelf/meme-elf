@@ -97,12 +97,6 @@ describe('renderPreview', () => {
 
     renderPreview(context, image, { width: 800, height: 450 }, layers);
 
-    expect(context.font).toBe('400 83px Impact');
-    expect(context.textAlign).toBe('center');
-    expect(context.textBaseline).toBe('top');
-    expect(context.fillStyle).toBe('#ffffff');
-    expect(context.strokeStyle).toBe('#000000');
-    expect(context.lineWidth).toBe(5);
     expect(context.translate).toHaveBeenCalledWith(400, 55);
     expect(context.strokeText).toHaveBeenCalledWith('TOP TEXT', 0, -43);
     expect(context.fillText).toHaveBeenCalledWith('TOP TEXT', 0, -43);

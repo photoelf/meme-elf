@@ -21,6 +21,12 @@ import type {
 } from '../../app/types';
 import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
 import type { SceneImageStackTransform } from '../image/scene-image-stack-utils';
+import {
+  handleTooltipTouchClick,
+  handleTooltipTouchFocus,
+  handleTooltipTouchPointerDown,
+  handleTooltipTouchStart,
+} from './tooltip-touch-focus';
 
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
@@ -53,6 +59,7 @@ type ControlPanelProps = {
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
   onBackgroundPointerDown: () => void;
+  onInterfacePointerDown: () => void;
   onApplySceneCrop: () => void;
   onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
@@ -138,6 +145,7 @@ export function ControlPanel({
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
   onBackgroundPointerDown,
+  onInterfacePointerDown,
   onApplySceneCrop,
   onApplySceneExpand,
   onActiveLayerChange,
@@ -208,6 +216,7 @@ export function ControlPanel({
     <aside
       className="inspector"
       aria-label="Controls"
+      onPointerDownCapture={onInterfacePointerDown}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
           clearRetouchMode();
@@ -215,7 +224,7 @@ export function ControlPanel({
         }
       }}
     >
-        <div className="tool-rail inspector-rail">
+      <div className="tool-rail inspector-rail">
         <div className="tool-rail-tabs" role="tablist" aria-label="Control sections">
           <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => {
             clearRetouchMode();
@@ -257,7 +266,11 @@ export function ControlPanel({
                   className="mini-action-button mini-action-button-icon icon-button-with-tooltip"
                   aria-label="Add text"
                   data-tooltip="Add text"
-                  onClick={() => {
+                  onPointerDown={handleTooltipTouchPointerDown}
+                  onTouchStart={handleTooltipTouchStart}
+                  onFocus={handleTooltipTouchFocus}
+                  onClick={(event) => {
+                    handleTooltipTouchClick(event);
                     clearRetouchMode();
                     onAddLayer();
                   }}
@@ -270,7 +283,11 @@ export function ControlPanel({
                   aria-label="Advanced import from file"
                   data-tooltip="Advanced import from file"
                   disabled={isImportModalOpen}
+                  onPointerDown={handleTooltipTouchPointerDown}
+                  onTouchStart={handleTooltipTouchStart}
+                  onFocus={handleTooltipTouchFocus}
                   onClick={(event) => {
+                    handleTooltipTouchClick(event);
                     clearRetouchMode();
                     onOpenAdvancedImportFile(event.currentTarget);
                   }}
@@ -283,7 +300,11 @@ export function ControlPanel({
                   aria-label="Advanced import from clipboard"
                   data-tooltip="Advanced import from clipboard"
                   disabled={isImportModalOpen}
+                  onPointerDown={handleTooltipTouchPointerDown}
+                  onTouchStart={handleTooltipTouchStart}
+                  onFocus={handleTooltipTouchFocus}
                   onClick={(event) => {
+                    handleTooltipTouchClick(event);
                     clearRetouchMode();
                     onOpenAdvancedImportClipboard(event.currentTarget);
                   }}
@@ -1097,7 +1118,13 @@ function InspectorTabButton({
       aria-label={label}
       data-tooltip={label}
       className={`tool-rail-button icon-button-with-tooltip${isActive ? ' tool-rail-button-active' : ''}`}
-      onClick={onClick}
+      onPointerDown={handleTooltipTouchPointerDown}
+      onTouchStart={handleTooltipTouchStart}
+      onFocus={handleTooltipTouchFocus}
+      onClick={(event) => {
+        handleTooltipTouchClick(event);
+        onClick();
+      }}
     >
       {icon}
     </button>

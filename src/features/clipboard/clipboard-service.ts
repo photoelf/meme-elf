@@ -12,6 +12,8 @@ export type ClipboardReadResult =
       reason: 'unsupported' | 'permission-denied' | 'no-image' | 'load-failed';
     };
 
+export type ClipboardReadTarget = 'base-import' | 'advanced-import';
+
 export async function readImageFromClipboardResult(): Promise<ClipboardReadResult> {
   if (!('clipboard' in navigator) || typeof navigator.clipboard.read !== 'function') {
     return { image: null, reason: 'unsupported' };
@@ -51,6 +53,25 @@ export async function readImageFromClipboardResult(): Promise<ClipboardReadResul
 export async function readImageFromClipboard(): Promise<HTMLImageElement | null> {
   const result = await readImageFromClipboardResult();
   return result.image;
+}
+
+export function resolveClipboardReadFailureMessage(
+  reason: Exclude<ClipboardReadResult['reason'], null>,
+  target: ClipboardReadTarget,
+) {
+  const fallbackAction =
+    target === 'advanced-import' ? 'Use Advanced import from file instead.' : 'Use Upload Image instead.';
+
+  switch (reason) {
+    case 'unsupported':
+      return `This browser cannot read images from the clipboard here. ${fallbackAction}`;
+    case 'permission-denied':
+      return `Clipboard access was blocked. Try again or ${fallbackAction.toLowerCase()}`;
+    case 'no-image':
+      return `No image was found in the clipboard. Copy an image first or ${fallbackAction.toLowerCase()}`;
+    case 'load-failed':
+      return `The clipboard image could not be loaded. ${fallbackAction}`;
+  }
 }
 
 export async function extractImageFromPasteEvent(

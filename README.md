@@ -37,6 +37,11 @@ Current repo state:
 - extraction from the base image, image layers, and draw layers into normal image layers
 - local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool using `Alt+click` source sampling, layer-scoped stamping, undoable stroke commits, and no healing or seamless-patch automation
 - preview zoom with `1:1`, `Fit`, mouse-wheel zoom, and middle-mouse pan for desktop editing
+- responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Paste` / `Upload` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, and viewport-height / keyboard-aware layout state
+- mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership
+- explicit preview touch scroll suppression so active canvas gestures stay on the canvas instead of turning into page scroll on phone
+- touch-oriented focus cues with a mobile summary banner for active tool / target state and larger preview handles for crop and transform work
+- mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and copy-to-download export messaging that stays actionable on phone browsers
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
@@ -78,6 +83,10 @@ Current source documents:
 1. `npm install`
 2. `npm run dev`
 3. Open the local URL shown by Vite
+
+For local-network manual testing on a phone or tablet:
+1. `npm run dev:lan`
+2. Open `http://<your-lan-ip>:5173` from the other device on the same network
 
 ## Hosting Direction
 

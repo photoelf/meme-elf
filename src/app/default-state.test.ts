@@ -5,6 +5,7 @@ import {
   DEFAULT_FONT_SIZE,
   DEFAULT_OUTLINE_WIDTH,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
+  DEFAULT_MOBILE_INTERACTION_STATE,
   DEFAULT_RETOUCH_BRUSH,
   DEFAULT_SCENE_BOUNDS_DRAFT,
 } from './default-state';
@@ -104,6 +105,7 @@ describe('createDefaultAppState', () => {
       },
       sceneBoundsDraft: DEFAULT_SCENE_BOUNDS_DRAFT,
       activeSceneBoundsMode: 'idle',
+      mobileInteraction: DEFAULT_MOBILE_INTERACTION_STATE,
       retouch: {
         mode: 'idle',
         activeDrawLayerId: null,
@@ -142,6 +144,7 @@ describe('createDefaultAppState', () => {
     firstState.sceneEffectStack[0]!.value = 12;
     firstState.sceneWatermark.text = 'PRIVATE';
     firstState.sceneBoundsDraft.cropRect = { startX: 0, startY: 0, endX: 10, endY: 10 };
+    firstState.mobileInteraction.lastPointerType = 'touch';
     firstState.retouch.mode = 'draw';
     firstState.retouch.brush.color = '#00ff00';
 
@@ -159,6 +162,7 @@ describe('createDefaultAppState', () => {
     expect(secondState.sceneWatermark.text).toBe('создано в программе meme-elf');
     expect(secondState.sceneBoundsDraft).toEqual(DEFAULT_SCENE_BOUNDS_DRAFT);
     expect(secondState.activeSceneBoundsMode).toBe('idle');
+    expect(secondState.mobileInteraction).toEqual(DEFAULT_MOBILE_INTERACTION_STATE);
     expect(secondState.retouch).toEqual({
       mode: 'idle',
       activeDrawLayerId: null,

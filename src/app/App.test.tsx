@@ -16,6 +16,26 @@ vi.mock('../features/clipboard/clipboard-service', () => ({
   extractImageFromPasteEvent: mocks.extractImageFromPasteEvent,
   readImageFromClipboard: mocks.readImageFromClipboard,
   readImageFromClipboardResult: mocks.readImageFromClipboardResult,
+  resolveClipboardReadFailureMessage: (
+    reason: 'unsupported' | 'permission-denied' | 'no-image' | 'load-failed',
+    target: 'base-import' | 'advanced-import',
+  ) => {
+    const fallbackAction =
+      target === 'advanced-import'
+        ? 'Use Advanced import from file instead.'
+        : 'Use Upload Image instead.';
+
+    switch (reason) {
+      case 'unsupported':
+        return `This browser cannot read images from the clipboard here. ${fallbackAction}`;
+      case 'permission-denied':
+        return `Clipboard access was blocked. Try again or ${fallbackAction.toLowerCase()}`;
+      case 'no-image':
+        return `No image was found in the clipboard. Copy an image first or ${fallbackAction.toLowerCase()}`;
+      case 'load-failed':
+        return `The clipboard image could not be loaded. ${fallbackAction}`;
+    }
+  },
 }));
 
 vi.mock('../features/image/image-loader', () => ({
@@ -54,6 +74,8 @@ describe('App', () => {
     resetPreviewRenderSurfacesForTests();
     vi.clearAllMocks();
     document.documentElement.dataset.theme = '';
+    window.innerWidth = 1280;
+    window.innerHeight = 768;
     mockHostname('localhost');
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
     mocks.readImageFromClipboardResult.mockImplementation(async () => {
@@ -83,6 +105,188 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+  });
+
+  it('exposes desktop shell mode by default and updates to phone shell mode on resize', async () => {
+    window.innerWidth = 1280;
+
+    render(<App />);
+
+    expect(screen.getByRole('main')).toHaveAttribute('data-shell-mode', 'desktop');
+    expect(screen.getByRole('toolbar', { name: /editor actions/i })).toHaveAttribute(
+      'data-actions-mode',
+      'inline',
+    );
+    expect(screen.getByLabelText(/workspace/i)).toHaveAttribute('data-workspace-mode', 'split');
+
+    window.innerWidth = 680;
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('main')).toHaveAttribute('data-shell-mode', 'phone');
+    });
+
+    expect(screen.getByRole('toolbar', { name: /editor actions/i })).toHaveAttribute(
+      'data-actions-mode',
+      'wrap',
+    );
+    expect(screen.getByLabelText(/workspace/i)).toHaveAttribute('data-workspace-mode', 'stacked');
+  });
+
+  it('collapses the phone inspector behind a tools toggle and expands it on demand', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    const toggle = screen.getByRole('button', { name: /show tools/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('textbox', { name: /top text/i })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /hide tools/i })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+    });
+
+    expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
+  });
+
+  it('keeps theme directly in the phone top bar and keeps sticky mobile actions reachable', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    const topbar = screen.getByRole('toolbar', { name: /editor actions/i });
+    expect(within(topbar).getByRole('button', { name: /paste from clipboard/i })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: /upload image/i })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: /copy image/i })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: /download png/i })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu', { name: /more actions/i })).not.toBeInTheDocument();
+
+    const stickyBar = screen.getByRole('toolbar', { name: /mobile primary actions/i });
+    expect(within(stickyBar).getByRole('button', { name: /copy image/i })).toBeInTheDocument();
+    expect(within(stickyBar).getByRole('button', { name: /download png/i })).toBeInTheDocument();
+    expect(within(stickyBar).getByRole('button', { name: /show tools/i })).toBeInTheDocument();
+  });
+
+  it('hides the preview MEME title on phone so canvas actions keep one row', () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    expect(screen.queryByRole('heading', { name: /^meme$/i })).not.toBeInTheDocument();
+  });
+
+  it('tracks keyboard-open state for phone editing fields', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+
+    const topTextField = await screen.findByRole('textbox', { name: /top text/i });
+    act(() => {
+      topTextField.focus();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('main')).toHaveAttribute('data-keyboard-open', 'true');
+    });
+
+    act(() => {
+      topTextField.blur();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('main')).toHaveAttribute('data-keyboard-open', 'false');
+    });
+  });
+
+  it('keeps the phone inspector collapsed when inline text editing starts from the canvas', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const topTextBox = container.querySelector('.transform-box-text') as HTMLDivElement;
+    fireEvent.pointerDown(topTextBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-text.transform-box-active')).toBeInTheDocument();
+    });
+
+    const activeTextBox = container.querySelector('.transform-box-text.transform-box-active') as HTMLDivElement;
+    fireEvent.doubleClick(activeTextBox);
+
+    await waitFor(() => {
+      expect(container.querySelector('.canvas-text-editor')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /show tools/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hide tools/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: /controls/i })).not.toBeInTheDocument();
+  });
+
+  it('shows mobile clipboard import fallback guidance when direct clipboard read is unsupported', async () => {
+    window.innerWidth = 680;
+    mocks.readImageFromClipboardResult.mockResolvedValue({
+      image: null,
+      reason: 'unsupported',
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /paste from clipboard/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/this browser cannot read images from the clipboard here\. use upload image instead\./i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('shows download fallback guidance when phone copy cannot use direct clipboard image write', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /copy image/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/direct image copy is not supported in this browser\. use download png\./i),
+      ).toBeInTheDocument();
+    });
   });
 
   it('keeps watermark visible but hides experimental tab outside localhost hosts', () => {
@@ -478,7 +682,9 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/clipboard import could not read an image\. try paste or choose a file/i),
+        screen.getByText(
+          /no image was found in the clipboard\. copy an image first or use advanced import from file instead\./i,
+        ),
       ).toBeInTheDocument();
     });
 
@@ -939,6 +1145,376 @@ describe('App', () => {
     await waitFor(() => {
       expect(previewSurface.style.width).toBe('240px');
       expect(previewSurface.style.height).toBe('240px');
+    });
+  });
+
+  it('fits the default empty canvas into the preview frame on first render', async () => {
+    const previewFrameRect = createClientRect({ width: 320, height: 240 });
+    const defaultRect = createClientRect({ width: 0, height: 0 });
+    const boundsSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function mockBounds() {
+        if (this instanceof HTMLElement && this.classList.contains('preview-frame')) {
+          return previewFrameRect;
+        }
+
+        return defaultRect;
+      });
+
+    try {
+      const { container } = render(<App />);
+      const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+
+      await waitFor(() => {
+        expect(previewSurface.style.width).toBe('320px');
+        expect(previewSurface.style.height).toBe('180px');
+      });
+
+      expect(screen.getByText('40%')).toBeInTheDocument();
+    } finally {
+      boundsSpy.mockRestore();
+    }
+  });
+
+  it('fits a newly loaded large image into the phone preview frame by default', async () => {
+    window.innerWidth = 680;
+
+    const file = new File(['base-image'], 'phone-wide.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(5000, 2500));
+
+    const { container } = render(<App />);
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 280,
+      height: 280,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    await uploadBaseImage(file);
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    await waitFor(() => {
+      expect(previewSurface.style.width).toBe('320px');
+      expect(previewSurface.style.height).toBe('160px');
+    });
+  });
+
+  it('keeps touch draw gestures owned by draw mode instead of panning the preview', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, {
+      button: 0,
+      clientX: 120,
+      clientY: 120,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 200,
+      clientY: 160,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 200,
+      clientY: 160,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(previewSurface.style.transform).toBe('translate(0px, 0px)');
+    expect(screen.getByText(/tool: draw/i)).toBeInTheDocument();
+    expect(screen.getByText(/target: brush 1/i)).toBeInTheDocument();
+  });
+
+  it('explicitly disables native touch scrolling on the preview canvas surface', () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    expect(previewSurface.style.touchAction).toBe('none');
+    expect(previewSurface.style.overscrollBehavior).toBe('contain');
+  });
+
+  it('shows a mobile focus summary for the active tool and target on phone', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /draw/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+
+    const statusStrip = screen.getByLabelText(/editor status/i);
+
+    await waitFor(() => {
+      expect(within(statusStrip).getByText(/tool: draw/i)).toBeInTheDocument();
+    });
+
+    expect(within(statusStrip).getByText(/target: brush 1/i)).toBeInTheDocument();
+  });
+
+  it('clears the active text focus box when a touch tap lands outside the box', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const topTextBox = container.querySelector('.transform-box-text') as HTMLDivElement;
+    fireEvent.pointerDown(topTextBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-text.transform-box-active')).toBeInTheDocument();
+    });
+
+    fireEvent.pointerDown(previewCanvas, {
+      button: 0,
+      clientX: 400,
+      clientY: 180,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 400,
+      clientY: 180,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-active')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clears an active text box when a touch tap lands on the interface', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const topTextBox = container.querySelector('.transform-box-text') as HTMLDivElement;
+    fireEvent.pointerDown(topTextBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-text.transform-box-active')).toBeInTheDocument();
+    });
+
+    const showToolsButton = screen.getByRole('button', { name: /tools/i });
+    fireEvent.pointerDown(showToolsButton, {
+      button: 0,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(showToolsButton, {
+      button: 0,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.click(showToolsButton);
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-active')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clears text editing and active text focus when a touch tap lands on empty canvas', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const topTextBox = container.querySelector('.transform-box-text') as HTMLDivElement;
+    fireEvent.pointerDown(topTextBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-text.transform-box-active')).toBeInTheDocument();
+    });
+
+    const activeTextBox = container.querySelector('.transform-box-text.transform-box-active') as HTMLDivElement;
+    fireEvent.doubleClick(activeTextBox);
+
+    await waitFor(() => {
+      expect(container.querySelector('.canvas-text-editor')).toBeInTheDocument();
+    });
+
+    fireEvent.pointerDown(previewCanvas, {
+      button: 0,
+      clientX: 400,
+      clientY: 180,
+      pointerId: 3,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 400,
+      clientY: 180,
+      pointerId: 3,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.canvas-text-editor')).not.toBeInTheDocument();
+      expect(container.querySelector('.transform-box-active')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clears text editing and active text focus when a touch tap lands on the interface', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const topTextBox = container.querySelector('.transform-box-text') as HTMLDivElement;
+    fireEvent.pointerDown(topTextBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.transform-box-text.transform-box-active')).toBeInTheDocument();
+    });
+
+    const activeTextBox = container.querySelector('.transform-box-text.transform-box-active') as HTMLDivElement;
+    fireEvent.doubleClick(activeTextBox);
+
+    await waitFor(() => {
+      expect(container.querySelector('.canvas-text-editor')).toBeInTheDocument();
+    });
+
+    const showToolsButton = screen.getByRole('button', { name: /tools/i });
+    fireEvent.pointerDown(showToolsButton, {
+      button: 0,
+      pointerId: 3,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(showToolsButton, {
+      button: 0,
+      pointerId: 3,
+      pointerType: 'touch',
+    });
+    fireEvent.click(showToolsButton);
+
+    await waitFor(() => {
+      expect(container.querySelector('.canvas-text-editor')).not.toBeInTheDocument();
+      expect(container.querySelector('.transform-box-active')).not.toBeInTheDocument();
     });
   });
 
@@ -2535,6 +3111,30 @@ function openEffectsTab() {
 
 function openWatermarkTab() {
   fireEvent.click(screen.getByRole('tab', { name: /watermark/i }));
+}
+
+function createClientRect({
+  left = 0,
+  top = 0,
+  width,
+  height,
+}: {
+  left?: number;
+  top?: number;
+  width: number;
+  height: number;
+}) {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    top,
+    width,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
 
 function escapeForRegex(value: string) {

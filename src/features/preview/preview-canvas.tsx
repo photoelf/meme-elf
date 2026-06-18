@@ -22,6 +22,7 @@ import type {
   DrawPoint,
   EditorLayer,
   LayerId,
+  MobileInteractionState,
   SelectionDraftRect,
   SelectionRect,
   SceneCropDraftRect,
@@ -32,6 +33,10 @@ import type {
   TextBox,
 } from '../../app/types';
 import { getTextLayoutMetrics, renderPreview } from '../canvas/canvas-renderer';
+import {
+  resolveMobileGestureOwner,
+  resolveTouchHandleSize,
+} from './mobile-gesture-policy';
 
 type PreviewCanvasProps = {
   activeLayerId: LayerId | null;
@@ -41,6 +46,7 @@ type PreviewCanvasProps = {
   width: number;
   height: number;
   layers: EditorLayer[];
+  mobileInteraction?: MobileInteractionState;
   previewPan?: Point;
   previewZoomFactor?: number;
   sceneImageAdjustments?: SceneImageAdjustments;
@@ -53,10 +59,14 @@ type PreviewCanvasProps = {
   onDraftStrokeChange?: (draft: { points: DrawPoint[]; targetLayerId: LayerId | null } | null) => void;
   onDraftStrokeCommit?: () => void;
   onCloneStampSourceSet?: (point: DrawPoint) => void;
+  onMobileInteractionChange?: (interaction: MobileInteractionState) => void;
+  onPreviewPanEnd?: () => void;
+  onPreviewPanStart?: (input: { clientX: number; clientY: number; pointerId: number }) => void;
   onRetouchBrushSample?: (sample: { color: string; opacity: number }) => void;
   onInlineTextEditEnd?: () => void;
   onInlineTextEditStart?: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
+  onActiveLayerClear?: () => void;
   onLayerChange: (
     layerId: LayerId,
     updates: Partial<EditorLayer>,
@@ -100,6 +110,17 @@ type SceneCropInteractionMode =
       startRect: NormalizedSceneCropRect;
     }
   | null;
+type PreviewPanInteraction = {
+  pointerId: number;
+} | null;
+type PendingTouchTextEditInteraction = {
+  layerId: LayerId;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startPoint: Point;
+  startBox: EditorLayer['box'];
+} | null;
 
 type Point = { x: number; y: number };
 type ResizeHandle = {
@@ -116,6 +137,7 @@ type NormalizedSceneCropRect = {
 
 const MIN_BOX_WIDTH = 60;
 const MIN_BOX_HEIGHT = 28;
+const TOUCH_TEXT_EDIT_TAP_SLOP = 10;
 const RESIZE_HANDLES: ResizeHandle[] = [
   { axisX: 'left', axisY: 'top', className: 'transform-handle-corner-top-left' },
   { axisX: null, axisY: 'top', className: 'transform-handle-edge-top' },
@@ -135,6 +157,11 @@ export function PreviewCanvas({
   width,
   height,
   layers,
+  mobileInteraction = {
+    activeGestureOwner: 'idle',
+    activeTargetId: null,
+    lastPointerType: 'unknown',
+  },
   previewPan = { x: 0, y: 0 },
   previewZoomFactor = 1,
   sceneImageAdjustments = createDefaultSceneImageAdjustments(),
@@ -147,10 +174,14 @@ export function PreviewCanvas({
   onDraftStrokeChange,
   onDraftStrokeCommit,
   onCloneStampSourceSet,
+  onMobileInteractionChange,
+  onPreviewPanEnd,
+  onPreviewPanStart,
   onRetouchBrushSample,
   onInlineTextEditEnd,
   onInlineTextEditStart,
   onActiveLayerChange,
+  onActiveLayerClear,
   onLayerChange,
   onSceneCropDraftChange,
   draftStroke = null,
@@ -172,6 +203,9 @@ export function PreviewCanvas({
   const interactionRef = useRef<InteractionMode>(null);
   const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
   const drawInteractionRef = useRef(false);
+  const panInteractionRef = useRef<PreviewPanInteraction>(null);
+  const pendingTouchTextEditRef = useRef<PendingTouchTextEditInteraction>(null);
+  const clearActiveLayerOnTextBlurRef = useRef(false);
   const selectionInteractionRef = useRef(false);
   const altKeyPressedRef = useRef(false);
   const latestSelectionDraftRef = useRef<SelectionDraftRect | null>(selectionDraft);
@@ -181,6 +215,9 @@ export function PreviewCanvas({
   const [editingLayerId, setEditingLayerId] = useState<LayerId | null>(null);
   const [isPreviewSurfaceHovered, setIsPreviewSurfaceHovered] = useState(false);
   const textLayers = getTextLayers(layers);
+  const activeLayer = activeLayerId
+    ? layers.find((layer) => layer.id === activeLayerId) ?? null
+    : null;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -207,6 +244,46 @@ export function PreviewCanvas({
       window.removeEventListener('blur', handleBlur);
     };
   }, []);
+
+  function updateMobileInteraction(
+    activeGestureOwner: MobileInteractionState['activeGestureOwner'],
+    input: {
+      activeTargetId?: MobileInteractionState['activeTargetId'];
+      pointerType?: MobileInteractionState['lastPointerType'];
+    } = {},
+  ) {
+    onMobileInteractionChange?.({
+      activeGestureOwner,
+      activeTargetId:
+        input.activeTargetId === undefined ? mobileInteraction.activeTargetId : input.activeTargetId,
+      lastPointerType:
+        input.pointerType === undefined ? mobileInteraction.lastPointerType : input.pointerType,
+      });
+  }
+
+  function resolveEventPointerType(event: {
+    nativeEvent?: { pointerType?: string };
+    pointerType?: string;
+  }) {
+    if ('pointerType' in event && typeof event.pointerType === 'string' && event.pointerType.length > 0) {
+      return event.pointerType;
+    }
+
+    const nativeEvent = 'nativeEvent' in event ? event.nativeEvent : null;
+
+    if (
+      nativeEvent &&
+      'pointerType' in nativeEvent &&
+      typeof nativeEvent.pointerType === 'string' &&
+      nativeEvent.pointerType.length > 0
+    ) {
+      return nativeEvent.pointerType;
+    }
+
+    return mobileInteraction.lastPointerType === 'unknown'
+      ? 'mouse'
+      : mobileInteraction.lastPointerType;
+  }
 
   function startSceneCrop(clientX: number, clientY: number) {
     const point = getCanvasPoint(shellRef.current, width, height, clientX, clientY);
@@ -329,6 +406,43 @@ export function PreviewCanvas({
   }, [selectionDraft]);
 
   useEffect(() => {
+    function handlePanPointerMove(event: PointerEvent) {
+      if (!panInteractionRef.current || panInteractionRef.current.pointerId !== event.pointerId) {
+        return;
+      }
+
+      onPreviewPanStart?.({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        pointerId: event.pointerId,
+      });
+    }
+
+    function handlePanPointerEnd(event: PointerEvent) {
+      if (!panInteractionRef.current || panInteractionRef.current.pointerId !== event.pointerId) {
+        return;
+      }
+
+      panInteractionRef.current = null;
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+        pointerType: 'touch',
+      });
+      onPreviewPanEnd?.();
+    }
+
+    window.addEventListener('pointermove', handlePanPointerMove);
+    window.addEventListener('pointerup', handlePanPointerEnd);
+    window.addEventListener('pointercancel', handlePanPointerEnd);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePanPointerMove);
+      window.removeEventListener('pointerup', handlePanPointerEnd);
+      window.removeEventListener('pointercancel', handlePanPointerEnd);
+    };
+  }, [activeLayerId, onPreviewPanEnd, onPreviewPanStart]);
+
+  useEffect(() => {
     function handleSelectionPointerMove(event: PointerEvent) {
       if (!selectionInteractionRef.current || retouchMode !== 'select' || !selectionTargetRect) {
         return;
@@ -356,6 +470,9 @@ export function PreviewCanvas({
 
       selectionInteractionRef.current = false;
       setIsInteracting(false);
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+      });
       if (latestSelectionDraftRef.current) {
         onSelectionDraftCommit?.(latestSelectionDraftRef.current);
       }
@@ -372,6 +489,7 @@ export function PreviewCanvas({
       window.removeEventListener('pointerup', handleSelectionPointerUp);
     };
   }, [
+    activeLayerId,
     height,
     onDocumentInteractionEnd,
     onSelectionDraftChange,
@@ -442,6 +560,9 @@ export function PreviewCanvas({
 
       sceneCropInteractionRef.current = null;
       setIsInteracting(false);
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+      });
     }
 
     window.addEventListener('pointermove', handleSceneCropPointerMove);
@@ -455,7 +576,7 @@ export function PreviewCanvas({
       window.removeEventListener('pointerup', handleSceneCropPointerUp);
       window.removeEventListener('mouseup', handleSceneCropPointerUp);
     };
-  }, [height, isSceneCropMode, onSceneCropDraftChange, width]);
+  }, [activeLayerId, height, isSceneCropMode, onSceneCropDraftChange, width]);
 
   useEffect(() => {
     function handleDrawPointerMove(event: PointerEvent) {
@@ -488,6 +609,9 @@ export function PreviewCanvas({
 
       drawInteractionRef.current = false;
       setIsInteracting(false);
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+      });
       onDraftStrokeCommit?.();
       window.setTimeout(() => {
         onDocumentInteractionEnd?.();
@@ -504,6 +628,9 @@ export function PreviewCanvas({
 
       drawInteractionRef.current = false;
       setIsInteracting(false);
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+      });
       onDraftStrokeChange?.(null);
       window.setTimeout(() => {
         onDocumentInteractionEnd?.();
@@ -522,11 +649,105 @@ export function PreviewCanvas({
   }, [
     draftStroke?.points,
     draftStroke?.targetLayerId,
+    activeLayerId,
     height,
     onDocumentInteractionEnd,
     onDraftStrokeChange,
     onDraftStrokeCommit,
     retouchMode,
+    width,
+  ]);
+
+  useEffect(() => {
+    function handlePendingTouchTextEditMove(event: PointerEvent) {
+      const pendingTouchEdit = pendingTouchTextEditRef.current;
+
+      if (!pendingTouchEdit || pendingTouchEdit.pointerId !== event.pointerId || !shellRef.current) {
+        return;
+      }
+
+      const movedEnough =
+        Math.abs(event.clientX - pendingTouchEdit.startClientX) >= TOUCH_TEXT_EDIT_TAP_SLOP ||
+        Math.abs(event.clientY - pendingTouchEdit.startClientY) >= TOUCH_TEXT_EDIT_TAP_SLOP;
+
+      if (!movedEnough) {
+        return;
+      }
+
+      const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+
+      if (!point) {
+        return;
+      }
+
+      pendingTouchTextEditRef.current = null;
+      onDocumentInteractionStart?.();
+      interactionRef.current = {
+        type: 'move',
+        layerId: pendingTouchEdit.layerId,
+        startPointer: pendingTouchEdit.startPoint,
+        startBox: pendingTouchEdit.startBox,
+      };
+      setIsInteracting(true);
+      updateMobileInteraction('transform', {
+        activeTargetId: pendingTouchEdit.layerId,
+        pointerType: 'touch',
+      });
+      onLayerChange(
+        pendingTouchEdit.layerId,
+        {
+          box: {
+            ...pendingTouchEdit.startBox,
+            x: pendingTouchEdit.startBox.x + (point.x - pendingTouchEdit.startPoint.x),
+            y: pendingTouchEdit.startBox.y + (point.y - pendingTouchEdit.startPoint.y),
+          },
+        },
+        'defer',
+      );
+    }
+
+    function handlePendingTouchTextEditEnd(event: PointerEvent) {
+      const pendingTouchEdit = pendingTouchTextEditRef.current;
+
+      if (!pendingTouchEdit || pendingTouchEdit.pointerId !== event.pointerId) {
+        return;
+      }
+
+      pendingTouchTextEditRef.current = null;
+      clearActiveLayerOnTextBlurRef.current = false;
+      onActiveLayerChange(pendingTouchEdit.layerId);
+      onInlineTextEditStart?.();
+      setEditingLayerId(pendingTouchEdit.layerId);
+      updateMobileInteraction('focus-layer', {
+        activeTargetId: pendingTouchEdit.layerId,
+        pointerType: 'touch',
+      });
+    }
+
+    function handlePendingTouchTextEditCancel(event: PointerEvent) {
+      if (
+        pendingTouchTextEditRef.current &&
+        pendingTouchTextEditRef.current.pointerId === event.pointerId
+      ) {
+        pendingTouchTextEditRef.current = null;
+      }
+    }
+
+    window.addEventListener('pointermove', handlePendingTouchTextEditMove);
+    window.addEventListener('pointerup', handlePendingTouchTextEditEnd);
+    window.addEventListener('pointercancel', handlePendingTouchTextEditCancel);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePendingTouchTextEditMove);
+      window.removeEventListener('pointerup', handlePendingTouchTextEditEnd);
+      window.removeEventListener('pointercancel', handlePendingTouchTextEditCancel);
+    };
+  }, [
+    height,
+    onActiveLayerChange,
+    onDocumentInteractionStart,
+    onInlineTextEditStart,
+    onLayerChange,
     width,
   ]);
 
@@ -614,6 +835,9 @@ export function PreviewCanvas({
 
       interactionRef.current = null;
       setIsInteracting(false);
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+      });
     }
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -623,10 +847,15 @@ export function PreviewCanvas({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [height, layers, onDocumentInteractionEnd, onLayerChange, textLayers, width]);
+  }, [activeLayerId, height, layers, onDocumentInteractionEnd, onLayerChange, textLayers, width]);
 
+  const isTouchFocusVisible =
+    mobileInteraction.lastPointerType === 'touch' &&
+    activeLayerId !== null &&
+    retouchMode === 'idle' &&
+    !isSceneCropMode;
   const isOverlayVisible =
-    isStageHovered || isPreviewSurfaceHovered || isInteracting || editingLayerId !== null;
+    isStageHovered || isPreviewSurfaceHovered || isInteracting || editingLayerId !== null || isTouchFocusVisible;
   const normalizedSceneCropRect =
     isSceneCropMode && sceneCropDraft
       ? normalizeSceneCropRect(sceneCropDraft, { width, height })
@@ -639,6 +868,10 @@ export function PreviewCanvas({
     normalizedSelectionDraft && normalizedSelectionDraft.width > 0 && normalizedSelectionDraft.height > 0
       ? normalizedSelectionDraft
       : selectionRect;
+  const handleSize = resolveTouchHandleSize(mobileInteraction.lastPointerType);
+  const handleOffset = Math.round(handleSize / 2);
+  const rotateSize = mobileInteraction.lastPointerType === 'touch' ? 28 : 20;
+  const rotateOffset = mobileInteraction.lastPointerType === 'touch' ? 36 : 28;
 
   return (
     <div className="preview-viewport">
@@ -646,6 +879,7 @@ export function PreviewCanvas({
         ref={viewportRef}
         className="preview-viewport-content"
         onPointerDown={(event) => {
+          const pointerType = resolveEventPointerType(event);
           if (!isSceneCropMode) {
             return;
           }
@@ -655,6 +889,10 @@ export function PreviewCanvas({
           }
 
           event.preventDefault();
+          updateMobileInteraction('crop', {
+            activeTargetId: activeLayerId,
+            pointerType: pointerType === 'touch' ? 'touch' : 'mouse',
+          });
           startSceneCrop(event.clientX, event.clientY);
         }}
         onMouseDown={(event) => {
@@ -669,7 +907,10 @@ export function PreviewCanvas({
         <div
           ref={shellRef}
           className={`preview-surface${isOverlayVisible ? ' preview-surface-overlay-visible' : ''}`}
+          data-touch-mode={mobileInteraction.lastPointerType === 'touch'}
           style={{
+            overscrollBehavior: 'contain',
+            touchAction: 'none',
             transform: `translate(${previewPan.x}px, ${previewPan.y}px)`,
             width: `${width * previewZoomFactor}px`,
             height: `${height * previewZoomFactor}px`,
@@ -677,15 +918,64 @@ export function PreviewCanvas({
           onPointerEnter={() => setIsPreviewSurfaceHovered(true)}
           onPointerLeave={() => setIsPreviewSurfaceHovered(false)}
           onPointerDown={(event) => {
-            if (retouchMode === 'eyedropper' && event.button !== 1 && event.button !== 2) {
-              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+            const pointerType = resolveEventPointerType(event);
+            const pointerTarget = event.target instanceof Element ? event.target : null;
+            const tappedInsideActiveTextEditingChrome = Boolean(
+              pointerTarget?.closest('.transform-box-active') ||
+              pointerTarget?.closest('.canvas-text-editor'),
+            );
+            const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
+            const targetLayer = point ? getTopLayerAtPoint(layers, point) : null;
+            const mobileGestureOwner = resolveMobileGestureOwner({
+              hasLayerAtPoint: Boolean(targetLayer),
+              hasSelectionTarget: Boolean(selectionTargetRect),
+              isSceneCropMode,
+              pointerType,
+              retouchMode,
+              targetType: 'surface',
+            });
 
+            if (
+              editingLayerId !== null &&
+              activeLayer &&
+              isTextLayer(activeLayer) &&
+              !tappedInsideActiveTextEditingChrome
+            ) {
+              clearActiveLayerOnTextBlurRef.current = false;
+              setEditingLayerId(null);
+              updateMobileInteraction('idle', {
+                activeTargetId: null,
+                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+              });
+              onActiveLayerClear?.();
+              return;
+            }
+
+            if (pointerType === 'touch' && mobileGestureOwner === 'pan') {
+              panInteractionRef.current = { pointerId: event.pointerId };
+              updateMobileInteraction('pan', {
+                activeTargetId: activeLayerId,
+                pointerType: 'touch',
+              });
+              onPreviewPanStart?.({
+                clientX: event.clientX,
+                clientY: event.clientY,
+                pointerId: event.pointerId,
+              });
+              return;
+            }
+
+            if (retouchMode === 'eyedropper' && event.button !== 1 && event.button !== 2) {
               if (!point) {
                 return;
               }
 
               event.preventDefault();
               setEditingLayerId(null);
+              updateMobileInteraction('eyedropper', {
+                activeTargetId: activeLayerId,
+                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+              });
               const sample = sampleCanvasPixel(resolvedCanvasRef.current, width, height, point);
 
               if (!sample) {
@@ -697,8 +987,6 @@ export function PreviewCanvas({
             }
 
             if (retouchMode === 'select' && event.button !== 1 && event.button !== 2) {
-              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
-
               if (!point || !selectionTargetRect) {
                 return;
               }
@@ -707,6 +995,10 @@ export function PreviewCanvas({
               selectionInteractionRef.current = true;
               setEditingLayerId(null);
               setIsInteracting(true);
+              updateMobileInteraction('select', {
+                activeTargetId: activeLayerId,
+                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+              });
               onDocumentInteractionStart?.();
               onSelectionDraftChange?.({
                 startX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
@@ -729,14 +1021,16 @@ export function PreviewCanvas({
               );
 
             if (isCloneSourceSample) {
-              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
-
               if (!point) {
                 return;
               }
 
               event.preventDefault();
               setEditingLayerId(null);
+              updateMobileInteraction('clone-stamp', {
+                activeTargetId: activeLayerId,
+                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+              });
               onCloneStampSourceSet?.(point);
               return;
             }
@@ -746,8 +1040,6 @@ export function PreviewCanvas({
               event.button !== 1 &&
               event.button !== 2
             ) {
-              const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
-
               if (!point) {
                 return;
               }
@@ -756,6 +1048,10 @@ export function PreviewCanvas({
               drawInteractionRef.current = true;
               setEditingLayerId(null);
               setIsInteracting(true);
+              updateMobileInteraction(retouchMode, {
+                activeTargetId: activeLayerId,
+                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+              });
               onDocumentInteractionStart?.();
               onDraftStrokeChange?.({
                 points: [point],
@@ -764,24 +1060,39 @@ export function PreviewCanvas({
               return;
             }
 
-            if ((event.button === 1 || event.button === 2) || event.target !== event.currentTarget) {
+            if (event.button === 1 || event.button === 2) {
               return;
             }
-
-            const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
 
             if (!point) {
               return;
             }
 
-            const targetLayer = getTopLayerAtPoint(layers, point);
-
             if (!targetLayer) {
+              if (activeLayer && isTextLayer(activeLayer)) {
+                if (editingLayerId === activeLayer.id) {
+                  clearActiveLayerOnTextBlurRef.current = true;
+                }
+                setEditingLayerId(null);
+                updateMobileInteraction('idle', {
+                  activeTargetId: null,
+                  pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                });
+                onActiveLayerClear?.();
+              }
+              return;
+            }
+
+            if (event.target !== event.currentTarget) {
               return;
             }
 
             onActiveLayerChange(targetLayer.id);
             setEditingLayerId(null);
+            updateMobileInteraction('focus-layer', {
+              activeTargetId: targetLayer.id,
+              pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+            });
           }}
         >
           <canvas
@@ -827,7 +1138,9 @@ export function PreviewCanvas({
                 type="button"
                 className="scene-crop-hitbox"
                 aria-label="Move crop selection"
+                style={mobileInteraction.lastPointerType === 'touch' ? { inset: '-10px' } : undefined}
                 onPointerDown={(event) => {
+                  const pointerType = resolveEventPointerType(event);
                   if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
                     return;
                   }
@@ -847,6 +1160,10 @@ export function PreviewCanvas({
                   };
                   setEditingLayerId(null);
                   setIsInteracting(true);
+                  updateMobileInteraction('crop', {
+                    activeTargetId: activeLayerId,
+                    pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                  });
                 }}
               />
               {RESIZE_HANDLES.map(({ axisX, axisY, className }) => (
@@ -855,7 +1172,9 @@ export function PreviewCanvas({
                   type="button"
                   className={`transform-handle ${className}`}
                   aria-label="Resize crop selection"
+                  style={getHandleStyle(className, handleSize, handleOffset)}
                   onPointerDown={(event) => {
+                    const pointerType = resolveEventPointerType(event);
                     if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
                       return;
                     }
@@ -877,6 +1196,10 @@ export function PreviewCanvas({
                     };
                     setEditingLayerId(null);
                     setIsInteracting(true);
+                    updateMobileInteraction('crop', {
+                      activeTargetId: activeLayerId,
+                      pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                    });
                   }}
                 />
               ))}
@@ -901,6 +1224,7 @@ export function PreviewCanvas({
                   className={`transform-box transform-box-${layer.kind}${isActive ? ' transform-box-active' : ''}`}
                   style={boxStyle}
                   onPointerDown={(event) => {
+                    const pointerType = resolveEventPointerType(event);
                     if ((event.button === 1 || event.button === 2) || editingLayerId === layer.id) {
                       return;
                     }
@@ -909,9 +1233,33 @@ export function PreviewCanvas({
                     event.stopPropagation();
                     onActiveLayerChange(layer.id);
                     setEditingLayerId(null);
+                    updateMobileInteraction('transform', {
+                      activeTargetId: layer.id,
+                      pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                    });
                     const point = getCanvasPoint(shellRef.current, width, height, event.clientX, event.clientY);
 
                     if (!point) {
+                      return;
+                    }
+
+                    if (
+                      pointerType === 'touch' &&
+                      isTextLayer(layer) &&
+                      layer.id === activeLayerId
+                    ) {
+                      pendingTouchTextEditRef.current = {
+                        layerId: layer.id,
+                        pointerId: event.pointerId,
+                        startClientX: event.clientX,
+                        startClientY: event.clientY,
+                        startPoint: point,
+                        startBox: { ...layer.box },
+                      };
+                      updateMobileInteraction('focus-layer', {
+                        activeTargetId: layer.id,
+                        pointerType: 'touch',
+                      });
                       return;
                     }
 
@@ -946,11 +1294,15 @@ export function PreviewCanvas({
                       style={getEditorTextStyle(layer, previewZoomFactor)}
                       onPointerDown={(event) => event.stopPropagation()}
                       onBlur={(event) => {
-                        onLayerChange(layer.id, {
+                      onLayerChange(layer.id, {
                           text: finalizeInlineEditorText(
                             (event.currentTarget as HTMLDivElement).innerText,
                           ),
                         }, 'defer');
+                        if (clearActiveLayerOnTextBlurRef.current) {
+                          clearActiveLayerOnTextBlurRef.current = false;
+                          onActiveLayerClear?.();
+                        }
                         setEditingLayerId(null);
                         onInlineTextEditEnd?.();
                       }}
@@ -982,7 +1334,9 @@ export function PreviewCanvas({
                           key={`${axisX ?? 'center'}-${axisY ?? 'center'}`}
                           type="button"
                           className={`transform-handle ${className}`}
+                          style={getHandleStyle(className, handleSize, handleOffset)}
                           onPointerDown={(event) => {
+                            const pointerType = resolveEventPointerType(event);
                             if (event.button === 1 || event.button === 2) {
                               return;
                             }
@@ -1003,6 +1357,10 @@ export function PreviewCanvas({
 
                             onActiveLayerChange(layer.id);
                             setEditingLayerId(null);
+                            updateMobileInteraction('transform', {
+                              activeTargetId: layer.id,
+                              pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                            });
                             onDocumentInteractionStart?.();
                             interactionRef.current = {
                               type: 'resize',
@@ -1019,7 +1377,9 @@ export function PreviewCanvas({
                       <button
                         type="button"
                         className="transform-rotate"
+                        style={getRotateHandleStyle(rotateSize, rotateOffset)}
                         onPointerDown={(event) => {
+                          const pointerType = resolveEventPointerType(event);
                           if (event.button === 1 || event.button === 2) {
                             return;
                           }
@@ -1041,6 +1401,10 @@ export function PreviewCanvas({
                           const center = getBoxCenter(layer.box);
                           onActiveLayerChange(layer.id);
                           setEditingLayerId(null);
+                          updateMobileInteraction('transform', {
+                            activeTargetId: layer.id,
+                            pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+                          });
                           onDocumentInteractionStart?.();
 
                           interactionRef.current = {
@@ -1196,6 +1560,49 @@ function getOverlayBoxStyle(box: TextLayer['box'], canvasWidth: number, canvasHe
     width: `${(box.width / canvasWidth) * 100}%`,
     height: `${(box.height / canvasHeight) * 100}%`,
     transform: `rotate(${box.rotation}rad)`,
+  };
+}
+
+function getHandleStyle(className: string, handleSize: number, handleOffset: number) {
+  const style: Record<string, string> = {
+    width: `${handleSize}px`,
+    height: `${handleSize}px`,
+  };
+
+  if (className.includes('top-left')) {
+    style.left = `${-handleOffset}px`;
+    style.top = `${-handleOffset}px`;
+  } else if (className.includes('top-right')) {
+    style.right = `${-handleOffset}px`;
+    style.top = `${-handleOffset}px`;
+  } else if (className.includes('bottom-left')) {
+    style.left = `${-handleOffset}px`;
+    style.bottom = `${-handleOffset}px`;
+  } else if (className.includes('bottom-right')) {
+    style.right = `${-handleOffset}px`;
+    style.bottom = `${-handleOffset}px`;
+  } else if (className.includes('edge-top')) {
+    style.left = `calc(50% - ${handleOffset}px)`;
+    style.top = `${-handleOffset}px`;
+  } else if (className.includes('edge-right')) {
+    style.right = `${-handleOffset}px`;
+    style.top = `calc(50% - ${handleOffset}px)`;
+  } else if (className.includes('edge-bottom')) {
+    style.left = `calc(50% - ${handleOffset}px)`;
+    style.bottom = `${-handleOffset}px`;
+  } else if (className.includes('edge-left')) {
+    style.left = `${-handleOffset}px`;
+    style.top = `calc(50% - ${handleOffset}px)`;
+  }
+
+  return style;
+}
+
+function getRotateHandleStyle(rotateSize: number, rotateOffset: number) {
+  return {
+    width: `${rotateSize}px`,
+    height: `${rotateSize}px`,
+    bottom: `${-rotateOffset}px`,
   };
 }
 

@@ -214,6 +214,23 @@ export type SelectionRect = {
 };
 
 export type RasterSelectionTargetId = 'base-image' | LayerId;
+export type MobileGestureOwner =
+  | 'idle'
+  | 'pan'
+  | 'draw'
+  | 'erase'
+  | 'select'
+  | 'crop'
+  | 'transform'
+  | 'clone-stamp'
+  | 'eyedropper'
+  | 'focus-layer';
+
+export type MobileInteractionState = {
+  activeGestureOwner: MobileGestureOwner;
+  activeTargetId: RasterSelectionTargetId | null;
+  lastPointerType: 'mouse' | 'pen' | 'touch' | 'unknown';
+};
 
 export type DrawLayer = BaseLayer & {
   kind: 'draw';
@@ -282,5 +299,6 @@ export type AppState = {
   sceneWatermark: SceneWatermark;
   sceneBoundsDraft: SceneBoundsDraft;
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
+  mobileInteraction: MobileInteractionState;
   retouch: RetouchState;
 };

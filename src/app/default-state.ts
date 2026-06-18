@@ -33,6 +33,11 @@ export const DEFAULT_RETOUCH_BRUSH = {
   opacity: 1,
   softEdge: false,
 } as const;
+export const DEFAULT_MOBILE_INTERACTION_STATE = {
+  activeGestureOwner: 'idle',
+  activeTargetId: null,
+  lastPointerType: 'unknown',
+} as const;
 export const DEFAULT_SCENE_BOUNDS_DRAFT: SceneBoundsDraft = {
   cropRect: null,
   expand: {
@@ -121,6 +126,7 @@ export function createDefaultAppState(): AppState {
       fillColor: DEFAULT_SCENE_BOUNDS_DRAFT.fillColor,
     },
     activeSceneBoundsMode: 'idle',
+    mobileInteraction: { ...DEFAULT_MOBILE_INTERACTION_STATE },
     retouch: {
       mode: 'idle',
       activeDrawLayerId: null,

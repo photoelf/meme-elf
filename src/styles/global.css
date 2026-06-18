@@ -103,6 +103,7 @@ button {
 
 .app-shell {
   width: min(1680px, calc(100% - 20px));
+  min-height: var(--app-height, 100dvh);
   margin: 0 auto;
   padding: 10px 0 12px;
 }
@@ -141,10 +142,38 @@ button {
 }
 
 .topbar-actions {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.toolbar-overflow-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 6;
+  min-width: 220px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.toolbar-overflow-item {
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+}
+
+.toolbar-overflow-item:hover {
+  border-color: var(--accent);
 }
 
 .toolbar-icon-button,
@@ -241,8 +270,8 @@ button {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 14px;
-  min-height: calc(100dvh - 120px);
-  height: calc(100dvh - 120px);
+  min-height: calc(var(--app-height, 100dvh) - 120px);
+  height: calc(var(--app-height, 100dvh) - 120px);
 }
 
 .preview-panel-header,
@@ -492,6 +521,7 @@ button {
 
 .status-strip {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
   gap: 12px;
   padding-top: 8px;
@@ -508,6 +538,20 @@ button {
   gap: 10px;
   padding: 0;
   align-self: start;
+}
+
+.phone-inspector-toggle-row,
+.mobile-primary-actions {
+  display: none;
+}
+
+.phone-inspector-toggle {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-strong);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .inspector-rail {
@@ -1266,49 +1310,150 @@ button {
 }
 
 @media (max-width: 720px) {
+  html {
+    overflow-x: hidden;
+  }
+
+  body {
+    overflow-y: auto;
+  }
+
   .app-shell {
-    width: min(100%, calc(100% - 12px));
+    width: 100%;
+    margin: 0;
+    padding-inline: 6px;
     padding-top: 6px;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
 
   .topbar {
-    align-items: start;
+    align-items: center;
     padding: 10px;
   }
 
+  .topbar-brand {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .topbar-brand h1 {
+    white-space: nowrap;
+  }
+
   .topbar-actions {
-    width: 100%;
-    justify-content: flex-start;
+    width: auto;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    margin-left: auto;
   }
 
   .toolbar-icon-button {
     flex: 0 0 38px;
   }
 
+  .toolbar-overflow-menu {
+    left: auto;
+    right: 0;
+  }
+
   .workspace-shell {
     grid-template-columns: 1fr;
+  }
+
+  .phone-inspector-toggle-row {
+    display: block;
   }
 
   .preview-panel,
   .inspector-card {
     min-height: auto;
   }
+
+  .preview-panel {
+    height: auto;
+    min-height: 0;
+  }
+
   .preview-frame {
     min-height: 42vh;
   }
 
   .preview-viewport {
     min-height: 42vh;
-    padding: 12px;
+    padding: 0;
   }
 
   .preview-viewport-content {
-    min-height: calc(42vh - 24px);
+    min-height: 42vh;
+  }
+
+  .preview-panel-header {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .preview-heading {
+    display: none;
   }
 
   .status-strip {
     flex-direction: column;
     gap: 4px;
+  }
+
+  .preview-toolbar {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 10px;
+  }
+
+  .preview-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .preview-toolbar-button,
+  .mini-action-button.preview-toolbar-button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .mobile-primary-actions {
+    position: fixed;
+    left: 6px;
+    right: 6px;
+    bottom: env(safe-area-inset-bottom);
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-primary-actions .toolbar-icon-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+  }
+
+  .inspector {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .app-shell[data-keyboard-open='true'] .inspector-card {
+    max-height: calc(var(--app-height, 100dvh) * 0.44);
+    overflow: auto;
+  }
+
+  .app-shell[data-keyboard-open='true'] .preview-frame,
+  .app-shell[data-keyboard-open='true'] .preview-viewport {
+    min-height: 28vh;
   }
 
   .modal-backdrop {

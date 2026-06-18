@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   extractImageFromPasteEvent,
+  readImageFromClipboardResult,
   readImageFromClipboard,
+  resolveClipboardReadFailureMessage,
 } from './clipboard-service';
 
 const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
@@ -57,6 +59,19 @@ function stubImageLoad() {
 }
 
 describe('readImageFromClipboard', () => {
+  it('returns an unsupported reason when clipboard read is unavailable', async () => {
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: {},
+    });
+
+    await expect(readImageFromClipboardResult()).resolves.toEqual({
+      image: null,
+      reason: 'unsupported',
+    });
+  });
+
   it('returns null when clipboard read is unavailable', async () => {
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
@@ -82,6 +97,23 @@ describe('readImageFromClipboard', () => {
 
     await expect(readImageFromClipboard()).resolves.toBeNull();
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a permission-denied reason when clipboard read is denied', async () => {
+    const read = vi.fn().mockRejectedValue(new Error('NotAllowedError'));
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: {
+        clipboard: { read },
+      },
+    });
+
+    await expect(readImageFromClipboardResult()).resolves.toEqual({
+      image: null,
+      reason: 'permission-denied',
+    });
   });
 
   it('loads the first clipboard image blob when available', async () => {
@@ -150,6 +182,86 @@ describe('readImageFromClipboard', () => {
     vi.stubGlobal('Image', FailingImage as unknown as typeof Image);
 
     await expect(readImageFromClipboard()).resolves.toBeNull();
+  });
+
+  it('returns a no-image reason when the clipboard has no image payloads', async () => {
+    const read = vi.fn().mockResolvedValue([
+      {
+        types: ['text/plain'],
+        getType: vi.fn(),
+      },
+    ]);
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: {
+        clipboard: { read },
+      },
+    });
+
+    await expect(readImageFromClipboardResult()).resolves.toEqual({
+      image: null,
+      reason: 'no-image',
+    });
+  });
+
+  it('returns a load-failed reason when image payloads exist but decoding fails', async () => {
+    const pngBlob = new Blob(['fake'], { type: 'image/png' });
+    const read = vi.fn().mockResolvedValue([
+      {
+        types: ['image/png'],
+        getType: vi.fn().mockResolvedValue(pngBlob),
+      },
+    ]);
+
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: {
+        clipboard: { read },
+      },
+    });
+
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:broken-image');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    class FailingImage {
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+      src = '';
+
+      constructor() {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+
+    vi.stubGlobal('Image', FailingImage as unknown as typeof Image);
+
+    await expect(readImageFromClipboardResult()).resolves.toEqual({
+      image: null,
+      reason: 'load-failed',
+    });
+  });
+});
+
+describe('resolveClipboardReadFailureMessage', () => {
+  it('maps clipboard read failures to actionable base import guidance', () => {
+    expect(resolveClipboardReadFailureMessage('unsupported', 'base-import')).toBe(
+      'This browser cannot read images from the clipboard here. Use Upload Image instead.',
+    );
+    expect(resolveClipboardReadFailureMessage('permission-denied', 'base-import')).toBe(
+      'Clipboard access was blocked. Try again or use upload image instead.',
+    );
+  });
+
+  it('maps clipboard read failures to actionable advanced import guidance', () => {
+    expect(resolveClipboardReadFailureMessage('no-image', 'advanced-import')).toBe(
+      'No image was found in the clipboard. Copy an image first or use advanced import from file instead.',
+    );
+    expect(resolveClipboardReadFailureMessage('load-failed', 'advanced-import')).toBe(
+      'The clipboard image could not be loaded. Use Advanced import from file instead.',
+    );
   });
 });
 

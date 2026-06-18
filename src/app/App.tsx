@@ -18,11 +18,27 @@ import {
 import { getContainedCanvasSize } from '../features/canvas/canvas-renderer';
 import {
   extractImageFromPasteEvent,
-  readImageFromClipboard,
   readImageFromClipboardResult,
+  resolveClipboardReadFailureMessage,
 } from '../features/clipboard/clipboard-service';
 import { PreviewCanvas } from '../features/preview/preview-canvas';
 import { ControlPanel } from '../features/controls/control-panel';
+import {
+  resolveMobileShellLayout,
+  resolveTopbarActionLayout,
+  SMALL_TABLET_MAX_WIDTH,
+  type ToolbarActionId,
+} from '../features/controls/mobile-layout';
+import {
+  canCopyImageToClipboard,
+  resolveMobileExportMessage,
+} from '../features/mobile/mobile-export-fallbacks';
+import {
+  handleTooltipTouchClick,
+  handleTooltipTouchFocus,
+  handleTooltipTouchPointerDown,
+  handleTooltipTouchStart,
+} from '../features/controls/tooltip-touch-focus';
 import {
   loadImageElementFromFile,
   revokeLoadedImageObjectUrl,
@@ -186,6 +202,14 @@ function clampPreviewZoom(nextZoom: number) {
   return Math.min(MAX_PREVIEW_ZOOM_FACTOR, Math.max(MIN_PREVIEW_ZOOM_FACTOR, nextZoom));
 }
 
+function resolveViewportHeight() {
+  if (typeof window === 'undefined') {
+    return 0;
+  }
+
+  return Math.round(window.visualViewport?.height ?? window.innerHeight);
+}
+
 function resolveFitToWindowZoomFactor(
   canvasSize: { width: number; height: number },
   previewFrame: HTMLDivElement | null,
@@ -237,6 +261,14 @@ function blurActiveEditable() {
 
   if (activeElement instanceof HTMLElement && isEditableTarget(activeElement)) {
     activeElement.blur();
+    return;
+  }
+
+  const inlineEditor = document.querySelector('.canvas-text-editor');
+
+  if (inlineEditor instanceof HTMLElement) {
+    inlineEditor.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    inlineEditor.dispatchEvent(new FocusEvent('blur'));
   }
 }
 
@@ -267,6 +299,7 @@ export function App() {
   const nextDrawLayerSequenceRef = useRef(1);
   const lastShortcutCopyAtRef = useRef(0);
   const latestExplicitClipboardRequestTokenRef = useRef(0);
+  const pendingAutoFitPreviewRef = useRef(true);
   const selectionClipboardRef = useRef<SelectionClipboardSnapshot | null>(null);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
     restoreFocusTo: null,
@@ -286,12 +319,28 @@ export function App() {
   });
   const isPreInsertModalOpenRef = useRef(false);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>('layers');
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === 'undefined' ? SMALL_TABLET_MAX_WIDTH + 1 : window.innerWidth,
+  );
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window === 'undefined' ? 0 : resolveViewportHeight(),
+  );
+  const [isPhoneInspectorOpen, setIsPhoneInspectorOpen] = useState(false);
+  const [isTopbarOverflowOpen, setIsTopbarOverflowOpen] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isPreInsertCropMode, setIsPreInsertCropMode] = useState(false);
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
+  const mobileShellLayout = resolveMobileShellLayout(viewportWidth);
+  const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
+  const isInspectorVisible =
+    mobileShellLayout.inspectorMode !== 'collapsed' || isPhoneInspectorOpen;
+  const toolToggleLabel = isInspectorVisible ? 'Hide tools' : 'Show tools';
   const previewPanSessionRef = useRef<{
+    pointerId: number | null;
+    source: 'mouse' | 'touch';
     startClientX: number;
     startClientY: number;
     startPanX: number;
@@ -303,11 +352,26 @@ export function App() {
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
+  const activeToolLabel = resolveActiveToolLabel(appState);
+  const activeTargetLabel = resolveActiveTargetLabel(appState);
+  const activeGestureLabel = resolveMobileGestureLabel(appState.mobileInteraction.activeGestureOwner);
   function syncHistoryState() {
     setHistoryState({
       canUndo: historyPastRef.current.length > 0,
       canRedo: historyFutureRef.current.length > 0,
     });
+  }
+
+  function updateMobileInteractionState(
+    updates: Partial<typeof appState.mobileInteraction>,
+  ) {
+    setAppState((currentState) => ({
+      ...currentState,
+      mobileInteraction: {
+        ...currentState.mobileInteraction,
+        ...updates,
+      },
+    }));
   }
 
   function createHistorySnapshot(state: typeof appState): EditorHistorySnapshot {
@@ -438,6 +502,85 @@ export function App() {
   }, [appState]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(resolveViewportHeight());
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mobileShellLayout.shellMode !== 'phone') {
+      setIsPhoneInspectorOpen(false);
+      setIsKeyboardOpen(false);
+      return undefined;
+    }
+
+    const syncKeyboardState = () => {
+      setIsKeyboardOpen(isEditableTarget(document.activeElement));
+    };
+
+    const handleFocusOut = () => {
+      window.setTimeout(syncKeyboardState, 0);
+    };
+
+    document.addEventListener('focus', syncKeyboardState, true);
+    document.addEventListener('blur', handleFocusOut, true);
+
+    return () => {
+      document.removeEventListener('focus', syncKeyboardState, true);
+      document.removeEventListener('blur', handleFocusOut, true);
+    };
+  }, [mobileShellLayout.shellMode]);
+
+  useEffect(() => {
+    setIsTopbarOverflowOpen(false);
+  }, [mobileShellLayout.shellMode]);
+
+  useEffect(() => {
+    if (!pendingAutoFitPreviewRef.current || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const previewFrame = previewFrameRef.current;
+
+      if (!previewFrame) {
+        return;
+      }
+
+      const bounds = previewFrame.getBoundingClientRect();
+
+      if (bounds.width <= 0 || bounds.height <= 0) {
+        return;
+      }
+
+      pendingAutoFitPreviewRef.current = false;
+      setAppState((currentState) => ({
+        ...currentState,
+        previewZoomFactor: resolveFitToWindowZoomFactor(
+          currentState.canvasSize,
+          previewFrame,
+        ),
+      }));
+      setPreviewPan({ x: 0, y: 0 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [appState.canvasSize, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
     if (!showLocalOnlyTabs && activeInspectorTab === 'experimental') {
       setActiveInspectorTab('layers');
     }
@@ -463,6 +606,8 @@ export function App() {
   }
 
   function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
+    pendingAutoFitPreviewRef.current = true;
+
     applyAppStateChange((currentState) => {
       const sourceSize = getImageSourceSize(image, currentState.canvasSize);
       const canvasSize = getContainedCanvasSize(
@@ -777,6 +922,10 @@ export function App() {
         ...currentState,
         activeLayerId: nextLayerId,
         layers: insertDrawLayer(currentState.layers, nextLayer),
+        mobileInteraction: {
+          ...currentState.mobileInteraction,
+          activeTargetId: nextLayerId,
+        },
         retouch: {
           ...currentState.retouch,
           activeDrawLayerId: nextLayerId,
@@ -1540,18 +1689,18 @@ export function App() {
     const requestToken = beginExplicitClipboardRequest();
     setStatusMessage('Reading the clipboard...');
 
-    const image = await readImageFromClipboard();
+    const result = await readImageFromClipboardResult();
 
     if (!isLatestExplicitClipboardRequest(requestToken)) {
       return;
     }
 
-    if (!image) {
-      setStatusMessage('No image was found in the clipboard. Try Ctrl+V or upload a file.');
+    if (!result.image) {
+      setStatusMessage(resolveClipboardReadFailureMessage(result.reason, 'base-import'));
       return;
     }
 
-    applyLoadedImage(image, 'Image loaded from clipboard.');
+    applyLoadedImage(result.image, 'Image loaded from clipboard.');
   }
 
   function handleUploadClick(opener: HTMLButtonElement) {
@@ -1582,7 +1731,7 @@ export function App() {
     }
 
     if (!result.image) {
-      setStatusMessage('Clipboard import could not read an image. Try Paste or choose a file.');
+      setStatusMessage(resolveClipboardReadFailureMessage(result.reason, 'advanced-import'));
       return;
     }
 
@@ -1632,23 +1781,28 @@ export function App() {
       return;
     }
 
-    if (typeof navigator.clipboard?.write !== 'function' || typeof ClipboardItem === 'undefined') {
-      setStatusMessage('Direct image copy is not supported in this browser. Use Download PNG.');
+    if (
+      !canCopyImageToClipboard({
+        hasClipboardItem: typeof ClipboardItem !== 'undefined',
+        hasClipboardWrite: typeof navigator.clipboard?.write === 'function',
+      })
+    ) {
+      setStatusMessage(resolveMobileExportMessage('clipboard-unsupported'));
       return;
     }
 
     const blob = await canvasToBlob(canvas);
 
     if (!blob) {
-      setStatusMessage('The image could not be copied. Try Download PNG instead.');
+      setStatusMessage(resolveMobileExportMessage('blob-unavailable'));
       return;
     }
 
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      setStatusMessage('Image copied to the clipboard.');
+      setStatusMessage(resolveMobileExportMessage('copy-success'));
     } catch {
-      setStatusMessage('Clipboard copy was blocked by the browser. Try Download PNG instead.');
+      setStatusMessage(resolveMobileExportMessage('clipboard-blocked'));
     }
   }
 
@@ -1742,7 +1896,7 @@ export function App() {
     function handleMouseMove(event: globalThis.MouseEvent) {
       const panSession = previewPanSessionRef.current;
 
-      if (!panSession) {
+      if (!panSession || panSession.source !== 'mouse') {
         return;
       }
 
@@ -1753,7 +1907,9 @@ export function App() {
     }
 
     function handleMouseUp() {
-      previewPanSessionRef.current = null;
+      if (previewPanSessionRef.current?.source === 'mouse') {
+        previewPanSessionRef.current = null;
+      }
     }
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -1762,6 +1918,44 @@ export function App() {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [previewPan.x, previewPan.y]);
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      const panSession = previewPanSessionRef.current;
+
+      if (!panSession || panSession.source !== 'touch' || panSession.pointerId !== event.pointerId) {
+        return;
+      }
+
+      setPreviewPan({
+        x: panSession.startPanX + (event.clientX - panSession.startClientX),
+        y: panSession.startPanY + (event.clientY - panSession.startClientY),
+      });
+    }
+
+    function handlePointerEnd(event: PointerEvent) {
+      const panSession = previewPanSessionRef.current;
+
+      if (!panSession || panSession.source !== 'touch' || panSession.pointerId !== event.pointerId) {
+        return;
+      }
+
+      previewPanSessionRef.current = null;
+      updateMobileInteractionState({
+        activeGestureOwner: 'idle',
+      });
+    }
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerEnd);
+    window.addEventListener('pointercancel', handlePointerEnd);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
     };
   }, [previewPan.x, previewPan.y]);
 
@@ -1913,9 +2107,155 @@ export function App() {
   }, []);
 
   const workspaceStyle = {
+    '--app-height': `${viewportHeight}px`,
     '--inspector-width': `${inspectorWidth}%`,
   } as CSSProperties;
   const preInsertDraft = appState.preInsertModalDraft;
+
+  function handleThemeToggle() {
+    setTheme((currentTheme) => (currentTheme === 'light' ? 'dark' : 'light'));
+  }
+
+  function handleTextEditSessionStart(source: 'canvas' | 'inspector' = 'inspector') {
+    beginHistoryTransaction();
+
+    if (mobileShellLayout.shellMode === 'phone') {
+      setIsKeyboardOpen(true);
+
+      if (source === 'inspector') {
+        setIsPhoneInspectorOpen(true);
+      }
+    }
+  }
+
+  function handleTextEditSessionEnd() {
+    commitHistoryTransaction();
+
+    if (mobileShellLayout.shellMode === 'phone') {
+      setIsKeyboardOpen(false);
+    }
+  }
+
+  function dismissActiveTextFocus() {
+    const currentState = appStateRef.current;
+    const activeLayer = currentState.layers.find((layer) => layer.id === currentState.activeLayerId);
+
+    if (!activeLayer || !isTextLayer(activeLayer)) {
+      return;
+    }
+
+    blurActiveEditable();
+    setAppState((state) => clearActiveLayer(state));
+  }
+
+  function renderToolbarAction(actionId: ToolbarActionId) {
+    switch (actionId) {
+      case 'paste':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Paste from Clipboard"
+            icon={<PasteIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              handlePasteClick();
+            }}
+          />
+        );
+      case 'upload':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Upload Image"
+            icon={<UploadIcon />}
+            buttonRef={uploadButtonRef}
+            onClick={(event) => {
+              dismissActiveTextFocus();
+              handleUploadClick(event.currentTarget);
+            }}
+          />
+        );
+      case 'copy':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Copy Image"
+            icon={<CopyIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              handleCopyClick();
+            }}
+          />
+        );
+      case 'download':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Download PNG"
+            icon={<DownloadIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              handleDownloadClick();
+            }}
+          />
+        );
+      case 'theme':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            icon={theme === 'light' ? <MoonIcon /> : <SunIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              handleThemeToggle();
+            }}
+          />
+        );
+      case 'tools':
+        return (
+          <button
+            key={actionId}
+            type="button"
+            className="toolbar-icon-button icon-button-with-tooltip"
+            aria-label={toolToggleLabel}
+            aria-expanded={isInspectorVisible}
+            data-tooltip={toolToggleLabel}
+            onPointerDown={handleTooltipTouchPointerDown}
+            onTouchStart={handleTooltipTouchStart}
+            onFocus={handleTooltipTouchFocus}
+            onClick={(event) => {
+              handleTooltipTouchClick(event);
+              dismissActiveTextFocus();
+              setIsPhoneInspectorOpen((currentState) => !currentState);
+            }}
+          >
+            <ToolsIcon />
+          </button>
+        );
+      case 'overflow':
+        return (
+          <button
+            key={actionId}
+            type="button"
+            className={`toolbar-icon-button icon-button-with-tooltip${isTopbarOverflowOpen ? ' tool-rail-button-active' : ''}`}
+            aria-label="More actions"
+            aria-expanded={isTopbarOverflowOpen}
+            aria-haspopup="menu"
+            data-tooltip="More actions"
+            onPointerDown={handleTooltipTouchPointerDown}
+            onTouchStart={handleTooltipTouchStart}
+            onFocus={handleTooltipTouchFocus}
+            onClick={(event) => {
+              handleTooltipTouchClick(event);
+              dismissActiveTextFocus();
+              setIsTopbarOverflowOpen((currentState) => !currentState);
+            }}
+          >
+            <MoreIcon />
+          </button>
+        );
+    }
+  }
 
   function updatePreviewZoom(resolveNextZoom: (currentZoom: number) => number) {
     setAppState((currentState) => ({
@@ -1935,46 +2275,97 @@ export function App() {
     setPreviewPan({ x: 0, y: 0 });
   }
 
+  useEffect(() => {
+    function handleDocumentTouchPointerDown(event: PointerEvent) {
+      const currentState = appStateRef.current;
+      const pointerType = event.pointerType || currentState.mobileInteraction.lastPointerType;
+      const target = event.target;
+
+      if (
+        pointerType !== 'touch' ||
+        !(target instanceof HTMLElement) ||
+        target.closest('.preview-surface')
+      ) {
+        return;
+      }
+
+      const activeLayer = currentState.layers.find((layer) => layer.id === currentState.activeLayerId);
+
+      if (!activeLayer || !isTextLayer(activeLayer)) {
+        return;
+      }
+
+      blurActiveEditable();
+      setAppState((state) => clearActiveLayer(state));
+    }
+
+    document.addEventListener('pointerdown', handleDocumentTouchPointerDown, true);
+    return () => document.removeEventListener('pointerdown', handleDocumentTouchPointerDown, true);
+  }, []);
+
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell app-shell-${mobileShellLayout.shellMode}`}
+      data-shell-mode={mobileShellLayout.shellMode}
+      data-keyboard-open={isKeyboardOpen}
+    >
       <header className="topbar">
         <div className="topbar-brand">
           <h1>meme-elf</h1>
         </div>
-        <div className="topbar-actions" role="toolbar" aria-label="Editor actions">
-          <ToolbarIconButton
-            label="Paste from Clipboard"
-            icon={<PasteIcon />}
-            onClick={handlePasteClick}
-          />
-          <ToolbarIconButton
-            label="Upload Image"
-            icon={<UploadIcon />}
-            buttonRef={uploadButtonRef}
-            onClick={(event) => handleUploadClick(event.currentTarget)}
-          />
-          <ToolbarIconButton
-            label="Copy Image"
-            icon={<CopyIcon />}
-            onClick={handleCopyClick}
-          />
-          <ToolbarIconButton
-            label="Download PNG"
-            icon={<DownloadIcon />}
-            onClick={handleDownloadClick}
-          />
-          <ToolbarIconButton
-            label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-            icon={theme === 'light' ? <MoonIcon /> : <SunIcon />}
-            onClick={() => setTheme((currentTheme) => (currentTheme === 'light' ? 'dark' : 'light'))}
-          />
+        <div
+          className={`topbar-actions topbar-actions-${mobileShellLayout.topbarActionsMode}`}
+          role="toolbar"
+          aria-label="Editor actions"
+          data-actions-mode={mobileShellLayout.topbarActionsMode}
+        >
+          {topbarActionLayout.primary.map((actionId) => renderToolbarAction(actionId))}
+          {topbarActionLayout.overflow.length > 0 &&
+          !topbarActionLayout.primary.includes('overflow')
+            ? renderToolbarAction('overflow')
+            : null}
+          {isTopbarOverflowOpen ? (
+            <div className="toolbar-overflow-menu" role="menu" aria-label="More actions">
+              {topbarActionLayout.overflow.map((actionId) => (
+                <button
+                  key={actionId}
+                  type="button"
+                  role="menuitem"
+                  className="toolbar-overflow-item"
+                  aria-label={
+                    actionId === 'theme'
+                      ? theme === 'light'
+                        ? 'Switch to dark theme'
+                        : 'Switch to light theme'
+                      : actionId
+                  }
+                  onClick={() => {
+                    setIsTopbarOverflowOpen(false);
+
+                    if (actionId === 'theme') {
+                      handleThemeToggle();
+                    }
+                  }}
+                >
+                  {actionId === 'theme'
+                    ? theme === 'light'
+                      ? 'Switch to dark theme'
+                      : 'Switch to light theme'
+                    : actionId}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </header>
 
       <section
         ref={workspaceRef}
         style={workspaceStyle}
-        className="workspace-shell"
+        className={`workspace-shell workspace-shell-${mobileShellLayout.workspaceMode}`}
+        aria-label="Workspace"
+        data-inspector-mode={mobileShellLayout.inspectorMode}
+        data-workspace-mode={mobileShellLayout.workspaceMode}
       >
         <section className="preview-panel" aria-label="Preview">
           <div
@@ -1989,7 +2380,9 @@ export function App() {
           />
           <div className="preview-panel-header">
             <div className="preview-heading">
-              <h2 className="preview-title">MEME</h2>
+              {mobileShellLayout.shellMode === 'phone' ? null : (
+                <h2 className="preview-title">MEME</h2>
+              )}
             </div>
             <div className="preview-toolbar" role="toolbar" aria-label="Canvas tools">
               <button
@@ -2115,6 +2508,8 @@ export function App() {
 
               event.preventDefault();
               previewPanSessionRef.current = {
+                pointerId: null,
+                source: 'mouse',
                 startClientX: event.clientX,
                 startClientY: event.clientY,
                 startPanX: previewPan.x,
@@ -2139,6 +2534,7 @@ export function App() {
                 activeLayerId={appState.activeLayerId}
                 draftStroke={appState.retouch.draftStroke}
                 image={appState.image}
+                mobileInteraction={appState.mobileInteraction}
                 retouchBrush={appState.retouch.brush}
                 retouchMode={appState.retouch.mode}
                 selectionDraft={appState.retouch.selection.draftRect}
@@ -2157,16 +2553,45 @@ export function App() {
                 isStageHovered={isPreviewStageHovered}
                 onDocumentInteractionStart={beginHistoryTransaction}
                 onDocumentInteractionEnd={commitHistoryTransaction}
-                onInlineTextEditStart={beginHistoryTransaction}
-                onInlineTextEditEnd={commitHistoryTransaction}
+                onInlineTextEditStart={() => handleTextEditSessionStart('canvas')}
+                onInlineTextEditEnd={handleTextEditSessionEnd}
                 onDraftStrokeChange={handleDraftStrokeChange}
                 onDraftStrokeCommit={handleDraftStrokeCommit}
                 onCloneStampSourceSet={handleCloneStampSourceSet}
+                onMobileInteractionChange={(interaction) =>
+                  updateMobileInteractionState(interaction)
+                }
+                onPreviewPanStart={({ clientX, clientY, pointerId }) => {
+                  const currentSession = previewPanSessionRef.current;
+
+                  if (!currentSession || currentSession.pointerId !== pointerId) {
+                    previewPanSessionRef.current = {
+                      pointerId,
+                      source: 'touch',
+                      startClientX: clientX,
+                      startClientY: clientY,
+                      startPanX: previewPan.x,
+                      startPanY: previewPan.y,
+                    };
+                    return;
+                  }
+
+                  setPreviewPan({
+                    x: currentSession.startPanX + (clientX - currentSession.startClientX),
+                    y: currentSession.startPanY + (clientY - currentSession.startClientY),
+                  });
+                }}
+                onPreviewPanEnd={() => {
+                  previewPanSessionRef.current = null;
+                }}
                 onRetouchBrushSample={handleRetouchBrushSample}
                 onSelectionDraftChange={handleSelectionDraftChange}
                 onSelectionDraftCommit={commitSelectionDraft}
                 onActiveLayerChange={(layerId) =>
                   setAppState((currentState) => applyLayerActivation(currentState, layerId))
+                }
+                onActiveLayerClear={() =>
+                  setAppState((currentState) => clearActiveLayer(currentState))
                 }
                 onLayerChange={updateLayer}
                 onSceneCropDraftChange={(cropRect) =>
@@ -2183,114 +2608,129 @@ export function App() {
           </div>
           <div className="status-strip" aria-label="Editor status">
             <span>{activeStatusLabel}</span>
+            {mobileShellLayout.shellMode !== 'desktop' ? (
+              <>
+                <span>Tool: {activeToolLabel}</span>
+                <span>Target: {activeTargetLabel ?? 'Base image'}</span>
+                {activeGestureLabel ? <span>Gesture: {activeGestureLabel}</span> : null}
+              </>
+            ) : null}
           </div>
         </section>
 
-        <ControlPanel
-          activeTab={activeInspectorTab}
-          activeSceneBoundsMode={appState.activeSceneBoundsMode}
-          activeLayerId={appState.activeLayerId}
-          isImportModalOpen={preInsertDraft !== null}
-          layers={appState.layers}
-          showLocalOnlyTabs={showLocalOnlyTabs}
-          retouchMode={appState.retouch.mode}
-          retouchBrush={appState.retouch.brush}
-          cloneStampSourcePoint={appState.retouch.cloneStamp.sourcePoint}
-          cloneStampSourceTargetId={appState.retouch.cloneStamp.sourceTargetId}
-          selectionTargetId={appState.retouch.selection.targetId}
-          selectionRect={appState.retouch.selection.rect}
-          selectionDraftRect={
-            appState.retouch.selection.draftRect
-              ? normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize)
-              : null
-          }
-          sceneCropDraft={appState.sceneBoundsDraft.cropRect}
-          sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
-          sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
-          sceneImageAdjustments={appState.sceneImageAdjustments}
-          sceneEffectStack={appState.sceneEffectStack}
-          sceneWatermark={appState.sceneWatermark}
-          sceneExpandDraft={appState.sceneBoundsDraft.expand}
-          onOpenAdvancedImportClipboard={(opener) => {
-            void handleAdvancedImportClipboardClick(opener);
-          }}
-          onOpenAdvancedImportFile={handleAdvancedImportFileClick}
-          onBackgroundPointerDown={blurActiveEditable}
-          onApplySceneCrop={applySceneCropCommit}
-          onApplySceneExpand={applySceneExpandCommit}
-          onActiveLayerChange={(layerId) =>
-            setAppState((currentState) => applyLayerActivation(currentState, layerId))
-          }
-          onActiveTabChange={setActiveInspectorTab}
-          onCancelSceneBounds={cancelSceneBounds}
-          onClearActiveLayer={() =>
-            setAppState((currentState) => ({ ...currentState, activeLayerId: null }))
-          }
-          onAddLayer={addLayer}
-          onCreateDrawLayer={handleCreateDrawLayer}
-          onApplySettingsToAllLayers={applyLayerSettingsToAllLayers}
-          onSceneBoundsFillColorChange={(fillColor) =>
-            setAppState((currentState) => ({
-              ...currentState,
-              sceneBoundsDraft: {
-                ...currentState.sceneBoundsDraft,
-                fillColor,
-              },
-            }))
-          }
-          onSceneBoundsFillModeChange={(fillMode) =>
-            setAppState((currentState) => ({
-              ...currentState,
-              sceneBoundsDraft: {
-                ...currentState.sceneBoundsDraft,
-                fillMode,
-              },
-            }))
-          }
-          onSceneImageAdjustmentsChange={(updates) => updateSceneImageAdjustments(updates)}
-          onResetSceneImageAdjustments={resetSceneImageAdjustments}
-          onSceneEffectValueChange={updateSceneEffectValue}
-          onReorderSceneEffects={reorderSceneEffectStack}
-          onResetSceneEffectStack={resetSceneEffectStack}
-          onSceneWatermarkChange={updateSceneWatermark}
-          onResetSceneWatermark={resetSceneWatermark}
-          onSceneBoundsPreset={applySceneBoundsPreset}
-          onSceneImageStackTransform={applySceneImageTransform}
-          onSceneExpandDraftChange={updateSceneExpandDraft}
-          onStartSceneCrop={() =>
-            setAppState((currentState) => ({
-              ...currentState,
-              activeSceneBoundsMode: 'crop',
-              sceneBoundsDraft: {
-                ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
-              },
-            }))
-          }
-          onTextLayerChange={updateTextLayer}
-          onTextEditSessionStart={beginHistoryTransaction}
-          onTextEditSessionEnd={commitHistoryTransaction}
-          onRotateImageLayer={(layerId, direction) =>
-            transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
-          }
-          onRetouchModeChange={(mode) =>
-            setAppState((currentState) => applyRetouchModeChange(currentState, mode))
-          }
-          onRetouchBrushChange={updateRetouchBrush}
-          onApplySelection={handleApplySelection}
-          onCancelSelection={handleCancelSelection}
-          onCopySelectionToLayer={copySelectionToLayer}
-          onCutSelectionToLayer={cutSelectionToLayer}
-          onDuplicateLayer={duplicateLayer}
-          onFlipImageLayerHorizontal={(layerId) =>
-            transformImageLayer(layerId, (layer) => flipImageLayerHorizontal(layer))
-          }
-          onFlipImageLayerVertical={(layerId) =>
-            transformImageLayer(layerId, (layer) => flipImageLayerVertical(layer))
-          }
-          onReorderLayers={reorderLayers}
-          onRemoveLayer={removeLayer}
-        />
+        {isInspectorVisible ? (
+          <ControlPanel
+            activeTab={activeInspectorTab}
+            activeSceneBoundsMode={appState.activeSceneBoundsMode}
+            activeLayerId={appState.activeLayerId}
+            isImportModalOpen={preInsertDraft !== null}
+            layers={appState.layers}
+            showLocalOnlyTabs={showLocalOnlyTabs}
+            retouchMode={appState.retouch.mode}
+            retouchBrush={appState.retouch.brush}
+            cloneStampSourcePoint={appState.retouch.cloneStamp.sourcePoint}
+            cloneStampSourceTargetId={appState.retouch.cloneStamp.sourceTargetId}
+            selectionTargetId={appState.retouch.selection.targetId}
+            selectionRect={appState.retouch.selection.rect}
+            selectionDraftRect={
+              appState.retouch.selection.draftRect
+                ? normalizeSelectionRect(appState.retouch.selection.draftRect, appState.canvasSize)
+                : null
+            }
+            sceneCropDraft={appState.sceneBoundsDraft.cropRect}
+            sceneBoundsFillColor={appState.sceneBoundsDraft.fillColor}
+            sceneBoundsFillMode={appState.sceneBoundsDraft.fillMode}
+            sceneImageAdjustments={appState.sceneImageAdjustments}
+            sceneEffectStack={appState.sceneEffectStack}
+            sceneWatermark={appState.sceneWatermark}
+            sceneExpandDraft={appState.sceneBoundsDraft.expand}
+            onOpenAdvancedImportClipboard={(opener) => {
+              void handleAdvancedImportClipboardClick(opener);
+            }}
+            onOpenAdvancedImportFile={handleAdvancedImportFileClick}
+            onBackgroundPointerDown={blurActiveEditable}
+            onInterfacePointerDown={dismissActiveTextFocus}
+            onApplySceneCrop={applySceneCropCommit}
+            onApplySceneExpand={applySceneExpandCommit}
+            onActiveLayerChange={(layerId) =>
+              setAppState((currentState) => applyLayerActivation(currentState, layerId))
+            }
+            onActiveTabChange={setActiveInspectorTab}
+            onCancelSceneBounds={cancelSceneBounds}
+            onClearActiveLayer={() =>
+              setAppState((currentState) => clearActiveLayer(currentState))
+            }
+            onAddLayer={addLayer}
+            onCreateDrawLayer={handleCreateDrawLayer}
+            onApplySettingsToAllLayers={applyLayerSettingsToAllLayers}
+            onSceneBoundsFillColorChange={(fillColor) =>
+              setAppState((currentState) => ({
+                ...currentState,
+                sceneBoundsDraft: {
+                  ...currentState.sceneBoundsDraft,
+                  fillColor,
+                },
+              }))
+            }
+            onSceneBoundsFillModeChange={(fillMode) =>
+              setAppState((currentState) => ({
+                ...currentState,
+                sceneBoundsDraft: {
+                  ...currentState.sceneBoundsDraft,
+                  fillMode,
+                },
+              }))
+            }
+            onSceneImageAdjustmentsChange={(updates) => updateSceneImageAdjustments(updates)}
+            onResetSceneImageAdjustments={resetSceneImageAdjustments}
+            onSceneEffectValueChange={updateSceneEffectValue}
+            onReorderSceneEffects={reorderSceneEffectStack}
+            onResetSceneEffectStack={resetSceneEffectStack}
+            onSceneWatermarkChange={updateSceneWatermark}
+            onResetSceneWatermark={resetSceneWatermark}
+            onSceneBoundsPreset={applySceneBoundsPreset}
+            onSceneImageStackTransform={applySceneImageTransform}
+            onSceneExpandDraftChange={updateSceneExpandDraft}
+            onStartSceneCrop={() =>
+              setAppState((currentState) => ({
+                ...currentState,
+                activeSceneBoundsMode: 'crop',
+                sceneBoundsDraft: {
+                  ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+                },
+              }))
+            }
+            onTextLayerChange={updateTextLayer}
+            onTextEditSessionStart={() => handleTextEditSessionStart('inspector')}
+            onTextEditSessionEnd={handleTextEditSessionEnd}
+            onRotateImageLayer={(layerId, direction) =>
+              transformImageLayer(layerId, (layer) => rotateImageLayer90(layer, direction))
+            }
+            onRetouchModeChange={(mode) =>
+              setAppState((currentState) => applyRetouchModeChange(currentState, mode))
+            }
+            onRetouchBrushChange={updateRetouchBrush}
+            onApplySelection={handleApplySelection}
+            onCancelSelection={handleCancelSelection}
+            onCopySelectionToLayer={copySelectionToLayer}
+            onCutSelectionToLayer={cutSelectionToLayer}
+            onDuplicateLayer={duplicateLayer}
+            onFlipImageLayerHorizontal={(layerId) =>
+              transformImageLayer(layerId, (layer) => flipImageLayerHorizontal(layer))
+            }
+            onFlipImageLayerVertical={(layerId) =>
+              transformImageLayer(layerId, (layer) => flipImageLayerVertical(layer))
+            }
+            onReorderLayers={reorderLayers}
+            onRemoveLayer={removeLayer}
+          />
+        ) : null}
       </section>
+      {topbarActionLayout.sticky.length > 0 ? (
+        <div className="mobile-primary-actions" role="toolbar" aria-label="Mobile primary actions">
+          {topbarActionLayout.sticky.map((actionId) => renderToolbarAction(actionId))}
+        </div>
+      ) : null}
       <input
         ref={fileInputRef}
         className="file-input file-input-hidden"
@@ -2429,7 +2869,13 @@ function ToolbarIconButton({
       className="toolbar-icon-button icon-button-with-tooltip"
       aria-label={label}
       data-tooltip={label}
-      onClick={onClick}
+      onPointerDown={handleTooltipTouchPointerDown}
+      onTouchStart={handleTooltipTouchStart}
+      onFocus={handleTooltipTouchFocus}
+      onClick={(event) => {
+        handleTooltipTouchClick(event);
+        onClick(event);
+      }}
     >
       {icon}
     </button>
@@ -2493,6 +2939,29 @@ function SunIcon() {
     <IconBase>
       <circle cx="10" cy="10" r="3.2" stroke="currentColor" strokeWidth="1.6" />
       <path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1 4.7 4.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <IconBase>
+      <circle cx="4.5" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="10" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="15.5" cy="10" r="1.3" fill="currentColor" />
+    </IconBase>
+  );
+}
+
+function ToolsIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M4.5 6.5h11M4.5 10h11M4.5 13.5h11"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
     </IconBase>
   );
 }
@@ -2884,6 +3353,64 @@ function resolveSelectionTargetId(state: ReturnType<typeof createDefaultAppState
   }
 
   return state.image ? 'base-image' : null;
+}
+
+function resolveActiveToolLabel(state: ReturnType<typeof createDefaultAppState>) {
+  switch (state.retouch.mode) {
+    case 'draw':
+      return 'Draw';
+    case 'erase':
+      return 'Erase';
+    case 'select':
+      return 'Select';
+    case 'clone-stamp':
+      return 'Clone Stamp';
+    case 'eyedropper':
+      return 'Eyedropper';
+    case 'idle':
+      return state.activeSceneBoundsMode === 'crop' ? 'Crop' : 'Move';
+  }
+}
+
+function resolveActiveTargetLabel(state: ReturnType<typeof createDefaultAppState>) {
+  if (state.activeLayerId) {
+    const activeLayer = state.layers.find((layer) => layer.id === state.activeLayerId);
+
+    if (activeLayer) {
+      return activeLayer.name;
+    }
+  }
+
+  if (state.retouch.selection.targetId === 'base-image') {
+    return 'Base image';
+  }
+
+  return state.image ? 'Base image' : null;
+}
+
+function resolveMobileGestureLabel(gestureOwner: ReturnType<typeof createDefaultAppState>['mobileInteraction']['activeGestureOwner']) {
+  switch (gestureOwner) {
+    case 'idle':
+      return null;
+    case 'draw':
+      return 'Draw';
+    case 'erase':
+      return 'Erase';
+    case 'select':
+      return 'Select';
+    case 'crop':
+      return 'Crop';
+    case 'transform':
+      return 'Transform';
+    case 'clone-stamp':
+      return 'Clone stamp';
+    case 'eyedropper':
+      return 'Eyedropper';
+    case 'focus-layer':
+      return 'Focus target';
+    case 'pan':
+      return 'Pan';
+  }
 }
 
 function resolveSelectionTargetBox(
@@ -3345,6 +3872,48 @@ function applyLayerActivation(
   const nextState = {
     ...state,
     activeLayerId: layerId,
+    mobileInteraction: {
+      ...state.mobileInteraction,
+      activeTargetId: layerId,
+    },
+    retouch: {
+      ...state.retouch,
+      cloneStamp: nextCloneStamp,
+    },
+  };
+
+  if (state.retouch.mode !== 'select') {
+    return nextState;
+  }
+
+  return {
+    ...nextState,
+    retouch: {
+      ...nextState.retouch,
+      selection: {
+        targetId: resolveSelectionTargetId(nextState),
+        draftRect: null,
+        rect: null,
+      },
+    },
+  };
+}
+
+function clearActiveLayer(state: ReturnType<typeof createDefaultAppState>) {
+  const nextCloneStamp =
+    state.retouch.cloneStamp.sourceTargetId === state.activeLayerId
+      ? {
+          sourcePoint: null,
+          sourceTargetId: null,
+        }
+      : state.retouch.cloneStamp;
+  const nextState = {
+    ...state,
+    activeLayerId: null,
+    mobileInteraction: {
+      ...state.mobileInteraction,
+      activeTargetId: null,
+    },
     retouch: {
       ...state.retouch,
       cloneStamp: nextCloneStamp,
@@ -3386,6 +3955,13 @@ function applyRetouchModeChange(
 
   return {
     ...state,
+    mobileInteraction: {
+      ...state.mobileInteraction,
+      activeTargetId:
+        nextMode === 'select'
+          ? nextSelectionTargetId
+          : state.activeLayerId,
+    },
     retouch: {
       ...state.retouch,
       draftStroke:
