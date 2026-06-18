@@ -16,7 +16,10 @@ import {
   createDefaultSceneImageAdjustments,
 } from '../image/image-effects';
 import { createDefaultSceneWatermark } from '../image/watermark-utils';
-import { normalizeSceneCropRect } from '../bounds/crop-overlay';
+import {
+  normalizeSceneCropRect,
+  resolveSceneCropInteractionGeometry,
+} from '../bounds/crop-overlay';
 import { isImageLayer, isTextLayer } from '../../app/types';
 import type {
   DrawPoint,
@@ -870,6 +873,9 @@ export function PreviewCanvas({
       : selectionRect;
   const handleSize = resolveTouchHandleSize(mobileInteraction.lastPointerType);
   const handleOffset = Math.round(handleSize / 2);
+  const cropInteractionGeometry = resolveSceneCropInteractionGeometry(
+    mobileInteraction.lastPointerType,
+  );
   const rotateSize = mobileInteraction.lastPointerType === 'touch' ? 28 : 20;
   const rotateOffset = mobileInteraction.lastPointerType === 'touch' ? 36 : 28;
 
@@ -1130,15 +1136,24 @@ export function PreviewCanvas({
           ) : null}
           {normalizedSceneCropRect ? (
             <div
-              className="scene-crop-overlay"
+              className={cropInteractionGeometry.overlayClassName}
               aria-hidden="true"
-              style={getSceneCropOverlayStyle(normalizedSceneCropRect, width, height)}
+              style={getSceneCropOverlayStyle(
+                normalizedSceneCropRect,
+                width,
+                height,
+                cropInteractionGeometry,
+              )}
             >
               <button
                 type="button"
                 className="scene-crop-hitbox"
                 aria-label="Move crop selection"
-                style={mobileInteraction.lastPointerType === 'touch' ? { inset: '-10px' } : undefined}
+                style={
+                  cropInteractionGeometry.moveHitboxInset > 0
+                    ? { inset: `${-cropInteractionGeometry.moveHitboxInset}px` }
+                    : undefined
+                }
                 onPointerDown={(event) => {
                   const pointerType = resolveEventPointerType(event);
                   if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
@@ -1172,7 +1187,11 @@ export function PreviewCanvas({
                   type="button"
                   className={`transform-handle ${className}`}
                   aria-label="Resize crop selection"
-                  style={getHandleStyle(className, handleSize, handleOffset)}
+                  style={getHandleStyle(
+                    className,
+                    cropInteractionGeometry.handleSize,
+                    cropInteractionGeometry.handleOffset,
+                  )}
                   onPointerDown={(event) => {
                     const pointerType = resolveEventPointerType(event);
                     if (!normalizedSceneCropRect || event.button === 1 || event.button === 2) {
@@ -1610,8 +1629,14 @@ function getSceneCropOverlayStyle(
   cropRect: { x: number; y: number; width: number; height: number },
   canvasWidth: number,
   canvasHeight: number,
+  geometry?: {
+    overlayBorderWidth: number;
+    overlayFill: string;
+  },
 ) {
   return {
+    background: geometry?.overlayFill,
+    borderWidth: `${geometry?.overlayBorderWidth ?? 1}px`,
     left: `${(cropRect.x / canvasWidth) * 100}%`,
     top: `${(cropRect.y / canvasHeight) * 100}%`,
     width: `${(cropRect.width / canvasWidth) * 100}%`,

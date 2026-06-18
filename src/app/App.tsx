@@ -33,6 +33,7 @@ import {
   canCopyImageToClipboard,
   resolveMobileExportMessage,
 } from '../features/mobile/mobile-export-fallbacks';
+import { CopyFallbackModal } from '../features/mobile/copy-fallback-modal';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -272,8 +273,12 @@ function blurActiveEditable() {
   }
 }
 
-function resolveClipboardRouting(target: EventTarget | null, isPreInsertModalOpen: boolean) {
-  const modalOwnsClipboard = isPreInsertModalOpen;
+function resolveClipboardRouting(
+  target: EventTarget | null,
+  isPreInsertModalOpen: boolean,
+  isCopyFallbackModalOpen: boolean,
+) {
+  const modalOwnsClipboard = isPreInsertModalOpen || isCopyFallbackModalOpen;
   const backgroundCopyAllowed =
     !modalOwnsClipboard && !isEditableTarget(target) && !hasTextSelection();
 
@@ -318,6 +323,7 @@ export function App() {
     },
   });
   const isPreInsertModalOpenRef = useRef(false);
+  const isCopyFallbackModalOpenRef = useRef(false);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>('layers');
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === 'undefined' ? SMALL_TABLET_MAX_WIDTH + 1 : window.innerWidth,
@@ -332,6 +338,10 @@ export function App() {
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
+  const [copyFallbackModalState, setCopyFallbackModalState] = useState<{
+    imageDataUrl: string;
+    restoreFocusTo: HTMLElement | null;
+  } | null>(null);
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
   const mobileShellLayout = resolveMobileShellLayout(viewportWidth);
   const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
@@ -1773,7 +1783,7 @@ export function App() {
     }
   }
 
-  async function handleCopyClick() {
+  async function handleCopyClick(restoreFocusTo: HTMLElement | null = null) {
     const canvas = canvasRef.current;
 
     if (!canvas) {
@@ -1787,23 +1797,43 @@ export function App() {
         hasClipboardWrite: typeof navigator.clipboard?.write === 'function',
       })
     ) {
-      setStatusMessage(resolveMobileExportMessage('clipboard-unsupported'));
+      openCopyFallbackModal(canvas, 'clipboard-unsupported', restoreFocusTo);
       return;
     }
 
     const blob = await canvasToBlob(canvas);
 
     if (!blob) {
-      setStatusMessage(resolveMobileExportMessage('blob-unavailable'));
+      openCopyFallbackModal(canvas, 'blob-unavailable', restoreFocusTo);
       return;
     }
 
     try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': Promise.resolve(blob),
+        }),
+      ]);
+      setCopyFallbackModalState(null);
       setStatusMessage(resolveMobileExportMessage('copy-success'));
     } catch {
-      setStatusMessage(resolveMobileExportMessage('clipboard-blocked'));
+      openCopyFallbackModal(canvas, 'clipboard-blocked', restoreFocusTo);
     }
+  }
+
+  function openCopyFallbackModal(
+    canvas: HTMLCanvasElement,
+    outcome: Exclude<Parameters<typeof resolveMobileExportMessage>[0], 'copy-success'>,
+    restoreFocusTo: HTMLElement | null,
+  ) {
+    try {
+      const imageDataUrl = canvas.toDataURL('image/png');
+      setCopyFallbackModalState({ imageDataUrl, restoreFocusTo });
+    } catch {
+      setCopyFallbackModalState(null);
+    }
+
+    setStatusMessage(resolveMobileExportMessage(outcome));
   }
 
   function handleDownloadClick() {
@@ -1826,10 +1856,15 @@ export function App() {
   }, [appState.preInsertModalDraft]);
 
   useEffect(() => {
+    isCopyFallbackModalOpenRef.current = copyFallbackModalState !== null;
+  }, [copyFallbackModalState]);
+
+  useEffect(() => {
     async function handlePasteEvent(event: ClipboardEvent) {
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
+        isCopyFallbackModalOpenRef.current,
       );
 
       if (clipboardRouting.modalOwnsClipboard) {
@@ -1981,6 +2016,7 @@ export function App() {
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
+        isCopyFallbackModalOpenRef.current,
       );
 
       if (!clipboardRouting.backgroundCopyAllowed) {
@@ -2011,6 +2047,7 @@ export function App() {
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
+        isCopyFallbackModalOpenRef.current,
       );
 
       if (!clipboardRouting.backgroundCopyAllowed) {
@@ -2181,9 +2218,9 @@ export function App() {
             key={actionId}
             label="Copy Image"
             icon={<CopyIcon />}
-            onClick={() => {
+            onClick={(event) => {
               dismissActiveTextFocus();
-              handleCopyClick();
+              handleCopyClick(event.currentTarget);
             }}
           />
         );
@@ -2832,6 +2869,13 @@ export function App() {
           }
           onToggleCropMode={() => setIsPreInsertCropMode((currentState) => !currentState)}
           restoreFocusTo={preInsertSessionRef.current.requestContext.restoreFocusTo}
+        />
+      ) : null}
+      {copyFallbackModalState ? (
+        <CopyFallbackModal
+          imageDataUrl={copyFallbackModalState.imageDataUrl}
+          onClose={() => setCopyFallbackModalState(null)}
+          restoreFocusTo={copyFallbackModalState.restoreFocusTo}
         />
       ) : null}
     </main>

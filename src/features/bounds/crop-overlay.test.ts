@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { SceneCropDraftRect } from '../../app/types';
-import { normalizeSceneCropRect } from './crop-overlay';
+import {
+  normalizeSceneCropRect,
+  resolveSceneCropInteractionGeometry,
+} from './crop-overlay';
 
 describe('normalizeSceneCropRect', () => {
   it('normalizes a drag from bottom-right to top-left into a top-left crop rect', () => {
@@ -43,6 +46,22 @@ describe('normalizeSceneCropRect', () => {
       y: 0,
       width: 800,
       height: 450,
+    });
+  });
+
+  it('uses larger touch geometry for crop handles and move hitboxes than mouse', () => {
+    expect(resolveSceneCropInteractionGeometry('touch')).toMatchObject({
+      handleOffset: 22,
+      handleSize: 44,
+      moveHitboxInset: 14,
+      overlayClassName: 'scene-crop-overlay scene-crop-overlay-touch',
+    });
+
+    expect(resolveSceneCropInteractionGeometry('mouse')).toMatchObject({
+      handleOffset: 7,
+      handleSize: 14,
+      moveHitboxInset: 0,
+      overlayClassName: 'scene-crop-overlay',
     });
   });
 });

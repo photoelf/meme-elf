@@ -40,8 +40,8 @@ Current repo state:
 - responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Paste` / `Upload` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, and viewport-height / keyboard-aware layout state
 - mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership
 - explicit preview touch scroll suppression so active canvas gestures stay on the canvas instead of turning into page scroll on phone
-- touch-oriented focus cues with a mobile summary banner for active tool / target state and larger preview handles for crop and transform work
-- mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and copy-to-download export messaging that stays actionable on phone browsers
+- touch-oriented focus cues with a mobile summary banner for active tool / target state, larger preview handles for crop and transform work, and a coarse-pointer fallback that hides pre-insert `Crop mode` until touch-safe parity is in place
+- mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and phone copy fallback that opens a long-press-ready finished-image modal with bottom-edge download and close icon actions when direct clipboard image write is unavailable or blocked
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows

@@ -61,6 +61,9 @@ export function PreInsertModal({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cropInteractionRef = useRef<CropInteraction | null>(null);
+  const isAdvancedImport = draft.pendingSource.sourceKind !== 'upload-image';
+  const supportsCropMode = !isCoarsePointerEnvironment();
+  const effectiveCropMode = supportsCropMode && isCropMode;
   const previewSize = resolvePreparedOutputDimensions({
     sourceSize: draft.pendingSource.sourceSize,
     cropBox: draft.cropBox,
@@ -79,8 +82,6 @@ export function PreInsertModal({
         flipVertical: draft.flipVertical,
       })
     : null;
-  const isAdvancedImport = draft.pendingSource.sourceKind !== 'upload-image';
-
   useEffect(() => {
     previousFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -163,7 +164,7 @@ export function PreInsertModal({
 
   useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
-      if (!isCropMode || !cropInteractionRef.current) {
+      if (!effectiveCropMode || !cropInteractionRef.current) {
         return;
       }
 
@@ -236,7 +237,7 @@ export function PreInsertModal({
     draft.flipVertical,
     draft.pendingSource.sourceSize,
     draft.rotationQuarterTurns,
-    isCropMode,
+    effectiveCropMode,
     onCropBoxChange,
   ]);
 
@@ -308,10 +309,10 @@ export function PreInsertModal({
               </span>
             </div>
             <div
-              className={`pre-insert-preview${isCropMode ? ' pre-insert-preview-crop-mode' : ''}`}
+              className={`pre-insert-preview${effectiveCropMode ? ' pre-insert-preview-crop-mode' : ''}`}
               aria-label="Pre-insert preview"
               onMouseDown={(event) => {
-                if (!isCropMode) {
+                if (!effectiveCropMode) {
                   return;
                 }
 
@@ -353,10 +354,10 @@ export function PreInsertModal({
                   />
                   {cropOverlayStyle ? (
                     <div
-                      className={`pre-insert-crop-overlay${isCropMode ? ' pre-insert-crop-overlay-interactive' : ''}`}
+                      className={`pre-insert-crop-overlay${effectiveCropMode ? ' pre-insert-crop-overlay-interactive' : ''}`}
                       style={cropOverlayStyle}
                       onMouseDown={(event) => {
-                        if (!isCropMode || !draft.cropBox) {
+                        if (!effectiveCropMode || !draft.cropBox) {
                           return;
                         }
 
@@ -390,7 +391,7 @@ export function PreInsertModal({
                       }}
                     >
                       <div className="pre-insert-crop-overlay-frame" />
-                      {isCropMode && draft.cropBox ? (
+                      {effectiveCropMode && draft.cropBox ? (
                         <>
                           {(['top-left', 'top-right', 'bottom-right', 'bottom-left'] as CropHandle[]).map((handle) => (
                             <button
@@ -466,14 +467,16 @@ export function PreInsertModal({
                 </select>
               </div>
             ) : null}
-            <button
-              type="button"
-              className={`apply-all-button${isCropMode ? ' pre-insert-toggle-active' : ''}`}
-              aria-pressed={isCropMode}
-              onClick={onToggleCropMode}
-            >
-              Crop mode
-            </button>
+            {supportsCropMode ? (
+              <button
+                type="button"
+                className={`apply-all-button${effectiveCropMode ? ' pre-insert-toggle-active' : ''}`}
+                aria-pressed={effectiveCropMode}
+                onClick={onToggleCropMode}
+              >
+                Crop mode
+              </button>
+            ) : null}
             <button type="button" className="apply-all-button" onClick={onRotateClockwise}>
               Rotate 90 clockwise
             </button>
@@ -514,6 +517,23 @@ function getFocusableElements(container: HTMLElement) {
   ).filter((element) => {
     return element.tabIndex >= 0 && !element.hasAttribute('aria-hidden');
   });
+}
+
+function isCoarsePointerEnvironment() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  if (typeof window.matchMedia === 'function') {
+    if (
+      window.matchMedia('(pointer: coarse)').matches ||
+      window.matchMedia('(any-pointer: coarse)').matches
+    ) {
+      return true;
+    }
+  }
+
+  return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
 }
 
 function getPreviewCanvasSize(

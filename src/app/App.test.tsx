@@ -76,6 +76,16 @@ describe('App', () => {
     document.documentElement.dataset.theme = '';
     window.innerWidth = 1280;
     window.innerHeight = 768;
+    window.matchMedia = vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
     mockHostname('localhost');
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
     mocks.readImageFromClipboardResult.mockImplementation(async () => {
@@ -277,6 +287,7 @@ describe('App', () => {
 
   it('shows download fallback guidance when phone copy cannot use direct clipboard image write', async () => {
     window.innerWidth = 680;
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,unsupported');
 
     render(<App />);
 
@@ -284,9 +295,14 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/direct image copy is not supported in this browser\. use download png\./i),
+        screen.getByText(
+          /direct image copy is not supported in this browser\. press and hold the image to save or copy it\./i,
+        ),
       ).toBeInTheDocument();
     });
+
+    expect(screen.getByRole('dialog', { name: /save or copy image/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /export preview image/i })).toBeInTheDocument();
   });
 
   it('keeps watermark visible but hides experimental tab outside localhost hosts', () => {
@@ -413,6 +429,38 @@ describe('App', () => {
     expect(screen.getByText('1200 x 800')).toBeInTheDocument();
     expect(container.querySelector('.pre-insert-preview-canvas')).toBeInTheDocument();
     expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+  });
+
+  it('hides crop mode in the upload-image modal on coarse-pointer devices', async () => {
+    window.innerWidth = 680;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+
+    const file = new File(['fake-image'], 'meme.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageElement(1200, 800));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /upload image/i }));
+    fireEvent.change(screen.getByLabelText(/upload image file/i), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/^upload image$/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
   it('keeps the current base image when upload modal is cancelled', async () => {
@@ -2549,6 +2597,48 @@ describe('App', () => {
     await waitFor(() => {
       expect(write).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('opens a long-press fallback modal when clipboard image write is blocked', async () => {
+    const write = vi.fn().mockRejectedValue(new Error('blocked'));
+    const blob = new Blob(['png'], { type: 'image/png' });
+
+    vi.stubGlobal('ClipboardItem', class ClipboardItemStub {
+      constructor(public items: Record<string, Blob>) {}
+    });
+    Object.assign(navigator, {
+      clipboard: {
+        write,
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+      callback(blob);
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,fallback');
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /copy image/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /clipboard copy was blocked by the browser\. press and hold the image to save or copy it\./i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    const dialog = screen.getByRole('dialog', { name: /save or copy image/i });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: /export preview image/i })).toHaveAttribute(
+      'src',
+      'data:image/png;base64,fallback',
+    );
+    expect(within(dialog).queryByRole('button', { name: /close modal/i })).not.toBeInTheDocument();
+    const downloadLink = within(dialog).getByRole('link', { name: /download png/i });
+    expect(downloadLink).toBeInTheDocument();
+    expect(downloadLink.querySelector('svg')).not.toBeNull();
+    expect(within(dialog).getByRole('button', { name: /close save or copy image/i })).toBeInTheDocument();
   });
 
   it('enters draw mode, auto-creates a draw layer on first stroke, and undoes the committed stroke', async () => {

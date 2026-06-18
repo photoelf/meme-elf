@@ -409,6 +409,59 @@ describe('preview-canvas helpers', () => {
     expect(container.querySelectorAll('.transform-handle')).toHaveLength(8);
   });
 
+  it('renders touch-safe crop overlay handles and mobile cues during scene crop mode', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isSceneCropMode: true,
+        isStageHovered: true,
+        layers: [],
+        mobileInteraction: {
+          activeGestureOwner: 'crop',
+          activeTargetId: null,
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        sceneCropDraft: {
+          startX: 100,
+          startY: 80,
+          endX: 420,
+          endY: 260,
+        },
+        width: 800,
+      }),
+    );
+
+    const overlay = container.querySelector('.scene-crop-overlay') as HTMLDivElement | null;
+    const hitbox = container.querySelector('.scene-crop-hitbox') as HTMLButtonElement | null;
+    const handle = container.querySelector('.scene-crop-overlay .transform-handle') as HTMLButtonElement | null;
+
+    expect(overlay).toHaveClass('scene-crop-overlay-touch');
+    expect(hitbox?.style.inset).toBe('-14px');
+    expect(handle?.style.width).toBe('44px');
+    expect(handle?.style.height).toBe('44px');
+  });
+
   it('disables native touch scrolling on the preview surface', () => {
     const context = {
       clearRect: vi.fn(),

@@ -20,6 +20,16 @@ describe('PreInsertModal', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       canvasContextSpy as unknown as CanvasRenderingContext2D,
     );
+    window.matchMedia = vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
   });
 
   it('renders the preview region and all preparation controls', () => {
@@ -74,6 +84,67 @@ describe('PreInsertModal', () => {
     });
 
     expect(onPlacementModeChange).toHaveBeenCalledWith('outside-bottom');
+  });
+
+  it('hides crop mode for advanced imports on coarse-pointer devices', () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+
+    render(
+      <PreInsertModal
+        draft={createDraft(createImageElement(), 'advanced-import-file')}
+        isCropMode={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onFlipHorizontal={() => {}}
+        onFlipVertical={() => {}}
+        onRotateClockwise={() => {}}
+        onRotateCounterClockwise={() => {}}
+        onToggleCropMode={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('combobox', { name: /placement mode/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
+  });
+
+  it('hides crop mode for upload-image imports on coarse-pointer devices', () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+
+    render(
+      <PreInsertModal
+        draft={createDraft(createImageElement(), 'upload-image')}
+        isCropMode={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onFlipHorizontal={() => {}}
+        onFlipVertical={() => {}}
+        onRotateClockwise={() => {}}
+        onRotateCounterClockwise={() => {}}
+        onToggleCropMode={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
   it('routes preview control actions through its callbacks', () => {
