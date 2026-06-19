@@ -88,6 +88,8 @@ import {
   selectionRectIsEmpty,
 } from '../features/selection/selection-utils';
 import { applyCloneStampStroke } from '../features/selection/clone-stamp-prototype';
+import { applyMelfTemplateToState } from '../features/templates/apply-template';
+import { STARTER_MELF_TEMPLATE_PRESETS } from '../features/templates/melf-template';
 import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
@@ -1023,25 +1025,32 @@ export function App() {
     sourceKind: 'upload-image' | 'advanced-import-file' | 'advanced-import-clipboard',
     requestContext: ImportRequestContext,
   ) {
+    const sourceSize = {
+      width: image.naturalWidth || appStateRef.current.canvasSize.width,
+      height: image.naturalHeight || appStateRef.current.canvasSize.height,
+    };
+
     preInsertSessionRef.current = {
       pendingUploadFileName: fileName,
       previousStatusMessage: statusMessage,
       requestContext,
     };
     isPreInsertModalOpenRef.current = true;
-    setIsPreInsertCropMode(false);
+    setIsPreInsertCropMode(true);
     setAppState((currentState) => ({
       ...currentState,
       preInsertModalDraft: {
         pendingSource: {
           image,
           sourceKind,
-          sourceSize: {
-            width: image.naturalWidth || currentState.canvasSize.width,
-            height: image.naturalHeight || currentState.canvasSize.height,
-          },
+          sourceSize,
         },
-        cropBox: null,
+        cropBox: {
+          startX: 0,
+          startY: 0,
+          endX: sourceSize.width,
+          endY: sourceSize.height,
+        },
         rotationQuarterTurns: 0,
         flipHorizontal: false,
         flipVertical: false,
@@ -1268,6 +1277,19 @@ export function App() {
         },
       },
     }));
+  }
+
+  function applyTemplatePreset(templateId: string) {
+    const template = STARTER_MELF_TEMPLATE_PRESETS.find((preset) => preset.templateId === templateId);
+
+    if (!template) {
+      setStatusMessage('That template is no longer available.');
+      return;
+    }
+
+    setAppState((currentState) => applyMelfTemplateToState(currentState, template));
+    setActiveInspectorTab('layers');
+    setStatusMessage(`Applied template: ${template.name}.`);
   }
 
   function handleRetouchBrushSample(sample: { color: string; opacity: number }) {
@@ -2906,6 +2928,7 @@ export function App() {
             sceneEffectStack={appState.sceneEffectStack}
             sceneWatermark={appState.sceneWatermark}
             sceneExpandDraft={appState.sceneBoundsDraft.expand}
+            templatePresets={STARTER_MELF_TEMPLATE_PRESETS}
             onOpenAdvancedImportClipboard={(opener) => {
               void handleAdvancedImportClipboardClick(opener);
             }}
@@ -2953,6 +2976,7 @@ export function App() {
             onSceneBoundsPreset={applySceneBoundsPreset}
             onSceneImageStackTransform={applySceneImageTransform}
             onSceneExpandDraftChange={updateSceneExpandDraft}
+            onApplyTemplatePreset={applyTemplatePreset}
             onStartSceneCrop={startSceneCropSession}
             onTextLayerChange={updateTextLayer}
             onTextEditSessionStart={() => handleTextEditSessionStart('inspector')}
@@ -3175,7 +3199,6 @@ export function App() {
                 : null,
             }))
           }
-          onToggleCropMode={() => setIsPreInsertCropMode((currentState) => !currentState)}
           restoreFocusTo={preInsertSessionRef.current.requestContext.restoreFocusTo}
         />
       ) : null}

@@ -35,21 +35,25 @@ describe('PreInsertModal', () => {
   it('renders the preview region and all preparation controls', () => {
     render(
       <PreInsertModal
-        draft={createDraft()}
-        isCropMode={false}
+        draft={createDraft(createImageElement(), 'upload-image', 'inside-canvas', { width: 1200, height: 800 })}
+        isCropMode
         onCancel={() => {}}
         onConfirm={() => {}}
         onFlipHorizontal={() => {}}
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
     expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/pre-insert preview/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /crop mode/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(document.querySelector('.pre-insert-crop-overlay')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-left/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-right/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from bottom-right/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from bottom-left/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 counter-clockwise/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /flip horizontal/i })).toBeInTheDocument();
@@ -72,7 +76,6 @@ describe('PreInsertModal', () => {
         onPlacementModeChange={onPlacementModeChange}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
@@ -86,7 +89,7 @@ describe('PreInsertModal', () => {
     expect(onPlacementModeChange).toHaveBeenCalledWith('outside-bottom');
   });
 
-  it('hides crop mode for advanced imports on coarse-pointer devices', () => {
+  it('keeps crop handles hidden on coarse-pointer devices because crop mode stays unavailable there', () => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
       media: query,
@@ -108,16 +111,16 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
     expect(screen.getByRole('combobox', { name: /placement mode/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
-  it('hides crop mode for upload-image imports on coarse-pointer devices', () => {
+  it('keeps crop handles hidden for upload-image imports on coarse-pointer devices', () => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
       media: query,
@@ -139,11 +142,11 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
@@ -155,7 +158,6 @@ describe('PreInsertModal', () => {
       onFlipVertical: vi.fn(),
       onRotateClockwise: vi.fn(),
       onRotateCounterClockwise: vi.fn(),
-      onToggleCropMode: vi.fn(),
     };
 
     render(
@@ -166,7 +168,6 @@ describe('PreInsertModal', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /crop mode/i }));
     fireEvent.click(screen.getByRole('button', { name: /rotate 90 clockwise/i }));
     fireEvent.click(screen.getByRole('button', { name: /rotate 90 counter-clockwise/i }));
     fireEvent.click(screen.getByRole('button', { name: /flip horizontal/i }));
@@ -174,8 +175,7 @@ describe('PreInsertModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
 
-    expect(screen.getByRole('button', { name: /crop mode/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(handlers.onToggleCropMode).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
     expect(handlers.onRotateClockwise).toHaveBeenCalledTimes(1);
     expect(handlers.onRotateCounterClockwise).toHaveBeenCalledTimes(1);
     expect(handlers.onFlipHorizontal).toHaveBeenCalledTimes(1);
@@ -195,7 +195,6 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
@@ -217,7 +216,6 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
@@ -243,7 +241,6 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
@@ -297,7 +294,6 @@ describe('PreInsertModal', () => {
         onFlipVertical={() => {}}
         onRotateClockwise={() => {}}
         onRotateCounterClockwise={() => {}}
-        onToggleCropMode={() => {}}
       />,
     );
 
@@ -396,7 +392,12 @@ function createDraft(
       image,
       sourceSize,
     },
-    cropBox: null,
+    cropBox: {
+      startX: 0,
+      startY: 0,
+      endX: sourceSize.width,
+      endY: sourceSize.height,
+    },
     rotationQuarterTurns: 0,
     flipHorizontal: false,
     flipVertical: false,
@@ -430,7 +431,6 @@ function ModalHarness() {
           onFlipVertical={() => {}}
           onRotateClockwise={() => {}}
           onRotateCounterClockwise={() => {}}
-          onToggleCropMode={() => {}}
         />
       ) : null}
     </>
@@ -462,7 +462,6 @@ function RestoreFocusHarness() {
           onFlipVertical={() => {}}
           onRotateClockwise={() => {}}
           onRotateCounterClockwise={() => {}}
-          onToggleCropMode={() => {}}
           restoreFocusTo={restoreFocusTo}
         />
       ) : null}

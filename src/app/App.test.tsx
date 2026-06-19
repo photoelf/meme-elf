@@ -135,6 +135,43 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
   });
 
+  it('shows starter templates in experimental and quick-applies a single-caption preset', async () => {
+    render(<App />);
+
+    expect(screen.queryByRole('button', { name: /apply classic top and bottom template/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+
+    expect(screen.getByRole('button', { name: /apply classic top and bottom template/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply square social template/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /apply top caption template/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: /bottom text/i })).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(/applied template: top caption\./i);
+  });
+
+  it('preserves existing text content when a template is applied', async () => {
+    render(<App />);
+
+    const topText = screen.getByRole('textbox', { name: /top text/i });
+    const bottomText = screen.getByRole('textbox', { name: /bottom text/i });
+    fireEvent.change(topText, { target: { value: 'HELLO TOP' } });
+    fireEvent.change(bottomText, { target: { value: 'hello bottom' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+    fireEvent.click(screen.getByRole('button', { name: /apply square social template/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('HELLO TOP');
+      expect(screen.getByRole('textbox', { name: /bottom text/i })).toHaveValue('hello bottom');
+    });
+  });
+
   it('exposes desktop shell mode by default and updates to phone shell mode on resize', async () => {
     window.innerWidth = 1280;
 
@@ -439,7 +476,11 @@ describe('App', () => {
     const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
     expect(dialog).toBeInTheDocument();
     expect(screen.getByLabelText(/pre-insert preview/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /crop mode/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-left/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-right/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from bottom-right/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from bottom-left/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 counter-clockwise/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /flip horizontal/i })).toBeInTheDocument();
@@ -478,6 +519,7 @@ describe('App', () => {
 
     expect(screen.getByText(/^upload image$/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
@@ -2688,7 +2730,6 @@ describe('App', () => {
     });
 
     await screen.findByRole('dialog', { name: /prepare image/i });
-    fireEvent.click(screen.getByRole('button', { name: /crop mode/i }));
 
     const previewCanvas = container.querySelector('.pre-insert-preview-canvas') as HTMLCanvasElement;
     vi.spyOn(previewCanvas, 'getBoundingClientRect').mockReturnValue({

@@ -24,7 +24,6 @@ type PreInsertModalProps = {
   onCropBoxChange?: (cropBox: CropDraftBox | null) => void;
   onRotateClockwise: () => void;
   onRotateCounterClockwise: () => void;
-  onToggleCropMode: () => void;
   restoreFocusTo?: HTMLElement | null;
 };
 
@@ -54,7 +53,6 @@ export function PreInsertModal({
   onCropBoxChange,
   onRotateClockwise,
   onRotateCounterClockwise,
-  onToggleCropMode,
   restoreFocusTo,
 }: PreInsertModalProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -466,16 +464,6 @@ export function PreInsertModal({
                   <option value="outside-bottom">Outside bottom</option>
                 </select>
               </div>
-            ) : null}
-            {supportsCropMode ? (
-              <button
-                type="button"
-                className={`apply-all-button${effectiveCropMode ? ' pre-insert-toggle-active' : ''}`}
-                aria-pressed={effectiveCropMode}
-                onClick={onToggleCropMode}
-              >
-                Crop mode
-              </button>
             ) : null}
             <button type="button" className="apply-all-button" onClick={onRotateClockwise}>
               Rotate 90 clockwise

@@ -602,6 +602,37 @@ button {
   gap: 8px;
 }
 
+.template-preset-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.template-preset-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+}
+
+.template-preset-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.template-preset-name {
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.template-preset-meta {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .layer-tools-card {
   display: grid;
   gap: 6px;

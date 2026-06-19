@@ -22,6 +22,7 @@ import type {
 import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
 import type { SceneImageStackTransform } from '../image/scene-image-stack-utils';
 import { describeSceneWatermarkPreview } from '../image/watermark-utils';
+import type { MelfTemplateDocument } from '../templates/melf-template';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -58,6 +59,7 @@ type ControlPanelProps = {
   sceneEffectStack: SceneEffectStackItem[];
   sceneWatermark: SceneWatermark;
   sceneExpandDraft: SceneExpandDraft;
+  templatePresets: readonly MelfTemplateDocument[];
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
   onBackgroundPointerDown: () => void;
@@ -94,6 +96,7 @@ type ControlPanelProps = {
     side: keyof SceneExpandDraft,
     value: number,
   ) => void;
+  onApplyTemplatePreset: (templateId: string) => void;
   onStartSceneCrop: () => void;
   onTextLayerChange: (
     layerId: LayerId,
@@ -145,6 +148,7 @@ export function ControlPanel({
   sceneEffectStack,
   sceneWatermark,
   sceneExpandDraft,
+  templatePresets,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
   onBackgroundPointerDown,
@@ -172,6 +176,7 @@ export function ControlPanel({
   onTextEditSessionEnd,
   onTextEditSessionStart,
   onSceneExpandDraftChange,
+  onApplyTemplatePreset,
   onStartSceneCrop,
   onTextLayerChange,
   onRotateImageLayer,
@@ -854,6 +859,36 @@ export function ControlPanel({
               <div>
                 <h2 className="section-title">EXPERIMENTAL</h2>
                 <p className="section-copy">Narrow retouch tools outside the default meme path</p>
+              </div>
+            </div>
+            <div className="section-subgroup section-subgroup-first">
+              <div className="section-heading">
+                <div>
+                  <p className="section-subtitle">Starter templates</p>
+                  <p className="section-copy">
+                    Temporary home for quick-apply caption layouts until the dedicated template UX lands in `8C`.
+                  </p>
+                </div>
+              </div>
+              <div className="template-preset-stack">
+                {templatePresets.map((preset) => (
+                  <div key={preset.templateId} className="template-preset-card">
+                    <div className="template-preset-copy">
+                      <span className="template-preset-name">{preset.name}</span>
+                      <span className="template-preset-meta">
+                        {preset.scene.canvasSize.width} x {preset.scene.canvasSize.height} - {preset.description}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="mini-action-button"
+                      aria-label={`Apply ${preset.name} template`}
+                      onClick={() => onApplyTemplatePreset(preset.templateId)}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
             {shellMode === 'phone' ? (
