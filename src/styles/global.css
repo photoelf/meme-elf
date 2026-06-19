@@ -762,8 +762,16 @@ button {
   gap: 6px;
 }
 
+.layer-order-actions,
+.effect-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .layer-swatch,
 .layer-order-handle,
+.layer-order-button,
 .settings-button,
 .mini-action-button {
   border: 1px solid var(--border-strong);
@@ -793,11 +801,25 @@ button {
   cursor: grab;
 }
 
+.layer-order-button {
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
 .settings-button-active,
 .layer-order-handle:hover,
+.layer-order-button:hover,
 .mini-action-button:hover,
 .settings-button:hover {
   border-color: var(--accent);
+}
+
+.layer-order-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .settings-popover {
@@ -828,6 +850,28 @@ button {
   border-top: 1px solid var(--border);
 }
 
+.watermark-preview-summary {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+}
+
+.watermark-preview-summary-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.watermark-preview-summary-copy {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
 .effect-card {
   display: grid;
   gap: 8px;
@@ -838,6 +882,13 @@ button {
 }
 
 .effect-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.effect-card-mobile-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
@@ -882,6 +933,10 @@ button {
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
+}
+
+.effect-range-input {
+  min-width: 0;
 }
 
 .settings-grid {
@@ -933,6 +988,15 @@ button {
 
 .section-heading-stack {
   align-items: start;
+}
+
+.section-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .section-action-row {
@@ -1504,10 +1568,10 @@ button {
     min-height: 40px;
   }
 
-  .mobile-primary-actions {
-    position: fixed;
-    left: 6px;
-    right: 6px;
+.mobile-primary-actions {
+  position: fixed;
+  left: 6px;
+  right: 6px;
     bottom: env(safe-area-inset-bottom);
     z-index: 5;
     display: grid;
@@ -1515,13 +1579,90 @@ button {
     gap: 8px;
     padding: 0;
     background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.mobile-session-actions {
+  position: fixed;
+  left: 6px;
+  right: 6px;
+  bottom: env(safe-area-inset-bottom);
+  z-index: 6;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.mobile-session-actions-retouch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-inline: 12px;
+}
+
+.mobile-session-actions-retouch::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-session-label {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mobile-primary-actions .toolbar-icon-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 50px;
+}
+
+.mobile-session-actions .mini-action-button {
+  min-height: 50px;
+  padding-inline: 12px;
+  flex: 0 0 auto;
+}
+
+  .mobile-session-actions-retouch .mini-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+  width: 50px;
+  padding-inline: 0;
+}
+
+  .layer-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .mobile-primary-actions .toolbar-icon-button {
+  .layer-row-swatches {
     width: 100%;
-    min-width: 0;
-    min-height: 50px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .effect-card-title-group {
+    gap: 8px;
+  }
+
+  .effect-order-actions {
+    justify-content: flex-end;
+  }
+
+  .effect-card-mobile-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .watermark-preview-summary {
+    padding: 10px;
   }
 
   .inspector {

@@ -1,6 +1,7 @@
 import {
   buildWatermarkLayout,
   createDefaultSceneWatermark,
+  describeSceneWatermarkPreview,
   normalizeSceneWatermark,
 } from './watermark-utils';
 
@@ -120,5 +121,26 @@ describe('watermark utils', () => {
         y: 300,
       },
     ]);
+  });
+
+  it('describes the current watermark preview in compact mobile-friendly language', () => {
+    expect(
+      describeSceneWatermarkPreview({
+        ...createDefaultSceneWatermark(),
+        mode: 'corner',
+        corner: 'bottom-right',
+        opacity: 50,
+        size: 12,
+      }),
+    ).toBe('Corner mark, bottom right, 12px, 50%');
+
+    expect(
+      describeSceneWatermarkPreview({
+        ...createDefaultSceneWatermark(),
+        mode: 'tile',
+        rotation: 35,
+        size: 40,
+      }),
+    ).toBe('Tiled text, 40px, 35deg, 50%');
   });
 });

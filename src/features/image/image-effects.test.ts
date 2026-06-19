@@ -1,4 +1,5 @@
 import {
+  applySceneImageAdjustmentsToImageData,
   applySceneEffectStackToImageData,
   applySceneEffectToImageData,
   buildAdjustmentCanvasFilter,
@@ -214,5 +215,46 @@ describe('scene image effect helpers', () => {
       57, 113, 142, 255,
       57, 113, 142, 255,
     ]);
+  });
+
+  it('applies blur through raster pixel changes without relying on canvas filters', () => {
+    const image = {
+      width: 3,
+      height: 1,
+      data: new Uint8ClampedArray([
+        0, 0, 0, 255,
+        90, 90, 90, 255,
+        180, 180, 180, 255,
+      ]),
+    };
+
+    applySceneEffectToImageData(image, { id: 'blur', kind: 'blur', value: 4 });
+
+    expect(Array.from(image.data)).toEqual([
+      45, 45, 45, 255,
+      90, 90, 90, 255,
+      135, 135, 135, 255,
+    ]);
+  });
+
+  it('applies scene adjustments through raster pixel changes without relying on canvas filters', () => {
+    const image = {
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray([100, 150, 200, 255]),
+    };
+
+    applySceneImageAdjustmentsToImageData(image, {
+      brightness: 120,
+      contrast: 90,
+      saturation: 0,
+      hue: 0,
+      grayscale: false,
+      includeText: false,
+      sepia: false,
+      invert: true,
+    });
+
+    expect(Array.from(image.data)).toEqual([80, 80, 80, 255]);
   });
 });

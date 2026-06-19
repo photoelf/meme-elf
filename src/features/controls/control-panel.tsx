@@ -21,6 +21,7 @@ import type {
 } from '../../app/types';
 import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
 import type { SceneImageStackTransform } from '../image/scene-image-stack-utils';
+import { describeSceneWatermarkPreview } from '../image/watermark-utils';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -34,6 +35,7 @@ type ControlPanelProps = {
   activeTab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
+  shellMode: 'desktop' | 'small-tablet' | 'phone';
   isImportModalOpen: boolean;
   layers: EditorLayer[];
   showLocalOnlyTabs: boolean;
@@ -125,6 +127,7 @@ export function ControlPanel({
   activeTab,
   activeSceneBoundsMode,
   activeLayerId,
+  shellMode,
   isImportModalOpen,
   layers,
   showLocalOnlyTabs,
@@ -210,7 +213,9 @@ export function ControlPanel({
     sceneExpandDraft.right !== 0 ||
     sceneExpandDraft.top !== 0 ||
     sceneExpandDraft.bottom !== 0;
+  const isCompactMobileCropLayout = shellMode === 'phone';
   const drawLayers = layers.filter(isDrawLayer);
+  const watermarkPreviewLabel = describeSceneWatermarkPreview(sceneWatermark);
 
   return (
     <aside
@@ -317,6 +322,8 @@ export function ControlPanel({
             <div className="layer-stack">
               {layers.map((layer, index) => {
                 const isSettingsOpen = resolvedOpenLayerIds.includes(layer.id);
+                const canMoveEarlier = index > 0;
+                const canMoveLater = index < layers.length - 1;
 
                 return (
                   <div
@@ -386,6 +393,7 @@ export function ControlPanel({
                         <LayerRowActions
                           isSettingsOpen={isSettingsOpen}
                           layer={layer}
+                          shellMode={shellMode}
                           onDragStateChange={(isDragging) => {
                             if (!isDragging) {
                               setDraggingLayerId(null);
@@ -406,6 +414,16 @@ export function ControlPanel({
                                 : [...currentLayerIds, layer.id],
                             );
                           }}
+                          onMoveEarlier={
+                            canMoveEarlier
+                              ? () => onReorderLayers(layer.id, layers[index - 1]!.id, 'before')
+                              : undefined
+                          }
+                          onMoveLater={
+                            canMoveLater
+                              ? () => onReorderLayers(layer.id, layers[index + 1]!.id, 'after')
+                              : undefined
+                          }
                         >
                           <input
                             className="layer-swatch"
@@ -452,6 +470,7 @@ export function ControlPanel({
                         <LayerRowActions
                           isSettingsOpen={isSettingsOpen}
                           layer={layer}
+                          shellMode={shellMode}
                           onDragStateChange={(isDragging) => {
                             if (!isDragging) {
                               setDraggingLayerId(null);
@@ -472,6 +491,16 @@ export function ControlPanel({
                                 : [...currentLayerIds, layer.id],
                             );
                           }}
+                          onMoveEarlier={
+                            canMoveEarlier
+                              ? () => onReorderLayers(layer.id, layers[index - 1]!.id, 'before')
+                              : undefined
+                          }
+                          onMoveLater={
+                            canMoveLater
+                              ? () => onReorderLayers(layer.id, layers[index + 1]!.id, 'after')
+                              : undefined
+                          }
                         />
                       </div>
                     ) : (
@@ -499,6 +528,7 @@ export function ControlPanel({
                         <LayerRowActions
                           isSettingsOpen={isSettingsOpen}
                           layer={layer}
+                          shellMode={shellMode}
                           onDragStateChange={(isDragging) => {
                             if (!isDragging) {
                               setDraggingLayerId(null);
@@ -519,6 +549,16 @@ export function ControlPanel({
                                 : [...currentLayerIds, layer.id],
                             );
                           }}
+                          onMoveEarlier={
+                            canMoveEarlier
+                              ? () => onReorderLayers(layer.id, layers[index - 1]!.id, 'before')
+                              : undefined
+                          }
+                          onMoveLater={
+                            canMoveLater
+                              ? () => onReorderLayers(layer.id, layers[index + 1]!.id, 'after')
+                              : undefined
+                          }
                         />
                       </div>
                     )}
@@ -634,6 +674,9 @@ export function ControlPanel({
               {drawLayers.length > 0 ? (
                 drawLayers.map((layer) => {
                   const isSettingsOpen = resolvedOpenLayerIds.includes(layer.id);
+                  const layerIndex = layers.findIndex((candidate) => candidate.id === layer.id);
+                  const canMoveEarlier = layerIndex > 0;
+                  const canMoveLater = layerIndex > -1 && layerIndex < layers.length - 1;
 
                   return (
                     <div key={layer.id} className={`layer-card${layer.id === activeLayerId ? ' layer-card-active' : ''}`}>
@@ -658,6 +701,7 @@ export function ControlPanel({
                         <LayerRowActions
                           isSettingsOpen={isSettingsOpen}
                           layer={layer}
+                          shellMode={shellMode}
                           onDragStateChange={() => {}}
                           onSettingsClick={() => {
                             onActiveLayerChange(layer.id);
@@ -667,6 +711,16 @@ export function ControlPanel({
                                 : [...currentLayerIds, layer.id],
                             );
                           }}
+                          onMoveEarlier={
+                            canMoveEarlier
+                              ? () => onReorderLayers(layer.id, layers[layerIndex - 1]!.id, 'before')
+                              : undefined
+                          }
+                          onMoveLater={
+                            canMoveLater
+                              ? () => onReorderLayers(layer.id, layers[layerIndex + 1]!.id, 'after')
+                              : undefined
+                          }
                         />
                       </div>
                       {isSettingsOpen ? (
@@ -714,6 +768,11 @@ export function ControlPanel({
               </div>
             </div>
             <div className="section-subgroup">
+              {isCompactMobileCropLayout ? (
+                <div className="section-heading-stack">
+                  <h3 className="section-subtitle">Scene transforms</h3>
+                </div>
+              ) : null}
               <div className="settings-actions bounds-actions">
                 <button type="button" className="mini-action-button" onClick={() => onSceneImageStackTransform('rotate-clockwise')}>
                   Rotate 90 clockwise
@@ -730,6 +789,11 @@ export function ControlPanel({
               </div>
             </div>
             <div className="section-subgroup">
+              {isCompactMobileCropLayout ? (
+                <div className="section-heading-stack">
+                  <h3 className="section-subtitle">Canvas expand</h3>
+                </div>
+              ) : null}
               <div className="control-grid control-grid-compact bounds-grid">
                 <div className="field-stack">
                   <label className="field-label" htmlFor="scene-expand-left">Expand left</label>
@@ -792,50 +856,63 @@ export function ControlPanel({
                 <p className="section-copy">Narrow retouch tools outside the default meme path</p>
               </div>
             </div>
-            <div className="settings-actions bounds-actions">
-              <button
-                type="button"
-                className={`mini-action-button${retouchMode === 'clone-stamp' ? ' settings-button-active' : ''}`}
-                onClick={() => onRetouchModeChange(retouchMode === 'clone-stamp' ? 'idle' : 'clone-stamp')}
-              >
-                Clone Stamp
-              </button>
-            </div>
-            <div className="control-grid control-grid-compact">
-              <RangeField
-                id="clone-stamp-brush-size"
-                label="Brush size"
-                max={128}
-                min={1}
-                step={1}
-                unit="px"
-                value={retouchBrush.size}
-                onChange={(value) => onRetouchBrushChange({ size: value })}
-              />
-              <RangeField
-                id="clone-stamp-brush-opacity"
-                label="Brush opacity"
-                max={100}
-                min={1}
-                step={1}
-                unit="%"
-                value={Math.round(retouchBrush.opacity * 100)}
-                onChange={(value) => onRetouchBrushChange({ opacity: value / 100 })}
-              />
-            </div>
-            <div className="toggle-row">
-              <CheckToggle
-                checked={retouchBrush.softEdge}
-                label="Soft edge"
-                onChange={(checked) => onRetouchBrushChange({ softEdge: checked })}
-              />
-            </div>
-            <p className="section-copy">Alt+click to set source</p>
-            <p className="section-copy">
-              {cloneStampSourcePoint && cloneStampSourceTargetId
-                ? `Source set`
-                : 'No source selected'}
-            </p>
+            {shellMode === 'phone' ? (
+              <>
+                <p className="section-copy">
+                  Experimental retouch stays desktop-only on phone for now.
+                </p>
+                <p className="section-copy">
+                  Use desktop to set clone sources and stamp precisely without fighting touch gestures.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="settings-actions bounds-actions">
+                  <button
+                    type="button"
+                    className={`mini-action-button${retouchMode === 'clone-stamp' ? ' settings-button-active' : ''}`}
+                    onClick={() => onRetouchModeChange(retouchMode === 'clone-stamp' ? 'idle' : 'clone-stamp')}
+                  >
+                    Clone Stamp
+                  </button>
+                </div>
+                <div className="control-grid control-grid-compact">
+                  <RangeField
+                    id="clone-stamp-brush-size"
+                    label="Brush size"
+                    max={128}
+                    min={1}
+                    step={1}
+                    unit="px"
+                    value={retouchBrush.size}
+                    onChange={(value) => onRetouchBrushChange({ size: value })}
+                  />
+                  <RangeField
+                    id="clone-stamp-brush-opacity"
+                    label="Brush opacity"
+                    max={100}
+                    min={1}
+                    step={1}
+                    unit="%"
+                    value={Math.round(retouchBrush.opacity * 100)}
+                    onChange={(value) => onRetouchBrushChange({ opacity: value / 100 })}
+                  />
+                </div>
+                <div className="toggle-row">
+                  <CheckToggle
+                    checked={retouchBrush.softEdge}
+                    label="Soft edge"
+                    onChange={(checked) => onRetouchBrushChange({ softEdge: checked })}
+                  />
+                </div>
+                <p className="section-copy">Alt+click to set source</p>
+                <p className="section-copy">
+                  {cloneStampSourcePoint && cloneStampSourceTargetId
+                    ? `Source set`
+                    : 'No source selected'}
+                </p>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -873,7 +950,7 @@ export function ControlPanel({
               <h2 className="section-title">EFFECTS</h2>
             </div>
             <div className="effect-card-stack">
-              {sceneEffectStack.map((effect) => (
+              {sceneEffectStack.map((effect, index) => (
                 <div
                   key={effect.id}
                   className={`effect-card${
@@ -921,43 +998,101 @@ export function ControlPanel({
                     );
                   }}
                 >
-                  <div className="effect-card-head">
-                    <div className="effect-card-title-group">
-                      <span className="effect-card-title">{getSceneEffectLabel(effect.kind)}</span>
-                      <span className="effect-value">
-                        {effect.value}
-                        {getSceneEffectUnit(effect.kind)}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="layer-order-handle"
-                      draggable
-                      aria-label={`Reorder ${getSceneEffectLabel(effect.kind)} effect`}
-                      onDragStart={(event) => {
-                        setDraggingEffectId(effect.id);
-                        setEffectDropIndicator(null);
-                        event.dataTransfer.setData('application/x-meme-elf-effect-id', effect.id);
-                      }}
-                      onDragEnd={() => {
-                        setDraggingEffectId(null);
-                        setEffectDropIndicator(null);
-                      }}
-                    >
-                      ⋮⋮
-                    </button>
+                    <div className="effect-card-head">
+                      <div className="effect-card-title-group">
+                        <span className="effect-card-title">{getSceneEffectLabel(effect.kind)}</span>
+                        <span className="effect-value">
+                          {effect.value}
+                          {getSceneEffectUnit(effect.kind)}
+                        </span>
+                      </div>
+                      {shellMode === 'phone' ? null : (
+                        <button
+                          type="button"
+                          className="layer-order-handle"
+                          draggable
+                          aria-label={`Reorder ${getSceneEffectLabel(effect.kind)} effect`}
+                          onDragStart={(event) => {
+                            setDraggingEffectId(effect.id);
+                            setEffectDropIndicator(null);
+                            event.dataTransfer.setData('application/x-meme-elf-effect-id', effect.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggingEffectId(null);
+                            setEffectDropIndicator(null);
+                          }}
+                        >
+                          ⋮⋮
+                        </button>
+                      )}
                   </div>
-                  <input
-                    id={`scene-effect-${effect.id}`}
-                    className="range-input"
-                    type="range"
-                    min={0}
-                    max={effect.kind === 'blur' ? 24 : 100}
-                    step={1}
-                    value={effect.value}
-                    aria-label={getSceneEffectLabel(effect.kind)}
-                    onChange={(event) => onSceneEffectValueChange(effect.id, Number(event.target.value))}
-                  />
+                  {shellMode === 'phone' ? (
+                    <div className="effect-card-mobile-row">
+                      <input
+                        id={`scene-effect-${effect.id}`}
+                        className="range-input effect-range-input"
+                        type="range"
+                        min={0}
+                        max={effect.kind === 'blur' ? 24 : 100}
+                        step={1}
+                        value={effect.value}
+                        aria-label={getSceneEffectLabel(effect.kind)}
+                        onChange={(event) => onSceneEffectValueChange(effect.id, Number(event.target.value))}
+                      />
+                      <div className="effect-order-actions" aria-label={`${getSceneEffectLabel(effect.kind)} ordering`}>
+                          <button
+                            type="button"
+                            className="layer-order-button"
+                            aria-label={`Move ${getSceneEffectLabel(effect.kind)} earlier`}
+                            disabled={index === 0}
+                            onClick={() => {
+                              if (index === 0) {
+                                return;
+                              }
+
+                              onReorderSceneEffects(
+                                effect.id,
+                                sceneEffectStack[index - 1]!.id,
+                                'before',
+                              );
+                            }}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="layer-order-button"
+                            aria-label={`Move ${getSceneEffectLabel(effect.kind)} later`}
+                            disabled={index === sceneEffectStack.length - 1}
+                            onClick={() => {
+                              if (index === sceneEffectStack.length - 1) {
+                                return;
+                              }
+
+                              onReorderSceneEffects(
+                                effect.id,
+                                sceneEffectStack[index + 1]!.id,
+                                'after',
+                              );
+                            }}
+                          >
+                            ↓
+                          </button>
+                        </div>
+                    </div>
+                  ) : (
+                    <input
+                      id={`scene-effect-${effect.id}`}
+                      className="range-input"
+                      type="range"
+                      min={0}
+                      max={effect.kind === 'blur' ? 24 : 100}
+                      step={1}
+                      value={effect.value}
+                      aria-label={getSceneEffectLabel(effect.kind)}
+                      onChange={(event) => onSceneEffectValueChange(effect.id, Number(event.target.value))}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -974,6 +1109,12 @@ export function ControlPanel({
             <div className="section-heading">
               <h2 className="section-title">WATERMARK</h2>
             </div>
+            {shellMode === 'phone' ? (
+              <div className="watermark-preview-summary" aria-label="Watermark preview summary">
+                <span className="watermark-preview-summary-label">Preview</span>
+                <span className="watermark-preview-summary-copy">{watermarkPreviewLabel}</span>
+              </div>
+            ) : null}
             <div className="toggle-row">
               <CheckToggle
                 checked={sceneWatermark.enabled}
@@ -1020,24 +1161,26 @@ export function ControlPanel({
                   <option value="diagonal">Diagonal</option>
                 </select>
               </div>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="scene-watermark-corner">
-                  Watermark corner
-                </label>
-                <select
-                  id="scene-watermark-corner"
-                  className="select-input"
-                  value={sceneWatermark.corner}
-                  onChange={(event) =>
-                    onSceneWatermarkChange({ corner: event.target.value as SceneWatermarkCorner })
-                  }
-                >
-                  <option value="top-left">Top left</option>
-                  <option value="top-right">Top right</option>
-                  <option value="bottom-left">Bottom left</option>
-                  <option value="bottom-right">Bottom right</option>
-                </select>
-              </div>
+              {sceneWatermark.mode === 'corner' ? (
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="scene-watermark-corner">
+                    Watermark corner
+                  </label>
+                  <select
+                    id="scene-watermark-corner"
+                    className="select-input"
+                    value={sceneWatermark.corner}
+                    onChange={(event) =>
+                      onSceneWatermarkChange({ corner: event.target.value as SceneWatermarkCorner })
+                    }
+                  >
+                    <option value="top-left">Top left</option>
+                    <option value="top-right">Top right</option>
+                    <option value="bottom-left">Bottom left</option>
+                    <option value="bottom-right">Bottom right</option>
+                  </select>
+                </div>
+              ) : null}
             </div>
             <div className="control-grid control-grid-compact">
               <div className="field-stack">
@@ -1075,18 +1218,20 @@ export function ControlPanel({
                 onChange={(value) => onSceneWatermarkChange({ size: value })}
               />
             </div>
-            <div className="control-grid control-grid-compact">
-              <RangeField
-                id="scene-watermark-rotation"
-                label="Tile rotation"
-                max={180}
-                min={0}
-                step={1}
-                unit="deg"
-                value={sceneWatermark.rotation}
-                onChange={(value) => onSceneWatermarkChange({ rotation: value })}
-              />
-            </div>
+            {sceneWatermark.mode === 'tile' ? (
+              <div className="control-grid control-grid-compact">
+                <RangeField
+                  id="scene-watermark-rotation"
+                  label="Tile rotation"
+                  max={180}
+                  min={0}
+                  step={1}
+                  unit="deg"
+                  value={sceneWatermark.rotation}
+                  onChange={(value) => onSceneWatermarkChange({ rotation: value })}
+                />
+              </div>
+            ) : null}
             <div className="settings-actions">
               <button type="button" className="mini-action-button" onClick={onResetSceneWatermark}>
                 Reset watermark
@@ -1227,16 +1372,22 @@ type LayerRowActionsProps = {
   children?: ReactNode;
   isSettingsOpen: boolean;
   layer: EditorLayer;
+  shellMode: 'desktop' | 'small-tablet' | 'phone';
   onDragStateChange: (isDragging: boolean) => void;
   onSettingsClick: () => void;
+  onMoveEarlier?: () => void;
+  onMoveLater?: () => void;
 };
 
 function LayerRowActions({
   children,
   isSettingsOpen,
   layer,
+  shellMode,
   onDragStateChange,
   onSettingsClick,
+  onMoveEarlier,
+  onMoveLater,
 }: LayerRowActionsProps) {
   return (
     <div className="layer-row-swatches">
@@ -1249,28 +1400,51 @@ function LayerRowActions({
       >
         ⚙
       </button>
-      <button
-        type="button"
-        className="layer-order-handle"
-        draggable
-        aria-label={`Reorder ${layer.name}`}
-        onDragStart={(event) => {
-          onDragStateChange(true);
-          event.dataTransfer.setData('application/x-meme-elf-layer-id', layer.id);
-          const row = event.currentTarget.closest('.layer-row');
+      {shellMode === 'phone' ? (
+        <div className="layer-order-actions" aria-label={`${layer.name} ordering`}>
+          <button
+            type="button"
+            className="layer-order-button"
+            aria-label={`Move ${layer.name} earlier`}
+            disabled={!onMoveEarlier}
+            onClick={() => onMoveEarlier?.()}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="layer-order-button"
+            aria-label={`Move ${layer.name} later`}
+            disabled={!onMoveLater}
+            onClick={() => onMoveLater?.()}
+          >
+            ↓
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="layer-order-handle"
+          draggable
+          aria-label={`Reorder ${layer.name}`}
+          onDragStart={(event) => {
+            onDragStateChange(true);
+            event.dataTransfer.setData('application/x-meme-elf-layer-id', layer.id);
+            const row = event.currentTarget.closest('.layer-row');
 
-          if (row instanceof HTMLElement) {
-            const rowRect = row.getBoundingClientRect();
-            const handleRect = event.currentTarget.getBoundingClientRect();
-            const offsetX = handleRect.left - rowRect.left + handleRect.width / 2;
-            const offsetY = handleRect.top - rowRect.top + handleRect.height / 2;
-            event.dataTransfer.setDragImage(row, offsetX, offsetY);
-          }
-        }}
-        onDragEnd={() => onDragStateChange(false)}
-      >
-        ⋮⋮
-      </button>
+            if (row instanceof HTMLElement) {
+              const rowRect = row.getBoundingClientRect();
+              const handleRect = event.currentTarget.getBoundingClientRect();
+              const offsetX = handleRect.left - rowRect.left + handleRect.width / 2;
+              const offsetY = handleRect.top - rowRect.top + handleRect.height / 2;
+              event.dataTransfer.setDragImage(row, offsetX, offsetY);
+            }
+          }}
+          onDragEnd={() => onDragStateChange(false)}
+        >
+          ⋮⋮
+        </button>
+      )}
     </div>
   );
 }

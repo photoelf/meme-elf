@@ -666,7 +666,8 @@ describe('renderPreview', () => {
     expect(filteredSurface.width).toBe(800);
     expect(filteredSurface.height).toBe(450);
     expect(filteredContext.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 800, 450);
-    expect(filteredContext.filter).toBe('blur(4px)');
+    expect(filteredContext.putImageData).toHaveBeenCalledTimes(2);
+    expect(filteredContext.filter).toBeUndefined();
     expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
   });
 

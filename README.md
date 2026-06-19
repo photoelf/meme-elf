@@ -41,6 +41,8 @@ Current repo state:
 - mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership
 - explicit preview touch scroll suppression so active canvas gestures stay on the canvas instead of turning into page scroll on phone
 - touch-oriented focus cues with a mobile summary banner for active tool / target state, larger preview handles for crop and transform work, and a coarse-pointer fallback that hides pre-insert `Crop mode` until touch-safe parity is in place
+- phone retouch session bars that move `Draw`, `Erase`, `Pick color`, `Select`, and selection extraction actions to the bottom edge while keeping brush settings in the `Draw` tab
+- experimental retouch now has an explicit phone fallback posture: clone stamp stays desktop-only on phone instead of exposing a brittle touch flow
 - mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and phone copy fallback that opens a long-press-ready finished-image modal with bottom-edge download and close icon actions when direct clipboard image write is unavailable or blocked
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download

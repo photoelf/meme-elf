@@ -130,6 +130,29 @@ export function buildWatermarkLayout(input: {
   return items;
 }
 
+export function describeSceneWatermarkPreview(input: SceneWatermark) {
+  if (!input.enabled) {
+    return 'Disabled';
+  }
+
+  const sizeLabel = `${input.size}px`;
+  const opacityLabel = `${input.opacity}%`;
+
+  if (input.mode === 'corner') {
+    return `Corner mark, ${formatCornerLabel(input.corner)}, ${sizeLabel}, ${opacityLabel}`;
+  }
+
+  if (input.mode === 'tile') {
+    return `Tiled text, ${sizeLabel}, ${input.rotation}deg, ${opacityLabel}`;
+  }
+
+  if (input.mode === 'diagonal') {
+    return `Diagonal, ${sizeLabel}, ${opacityLabel}`;
+  }
+
+  return `Centered word, ${sizeLabel}, ${opacityLabel}`;
+}
+
 function clampOpacity(value: number) {
   if (!Number.isFinite(value)) {
     return 0;
@@ -172,4 +195,17 @@ function normalizeColor(value: string) {
   }
 
   return '#808080';
+}
+
+function formatCornerLabel(value: SceneWatermarkCorner) {
+  switch (value) {
+    case 'top-left':
+      return 'top left';
+    case 'top-right':
+      return 'top right';
+    case 'bottom-right':
+      return 'bottom right';
+    default:
+      return 'bottom left';
+  }
 }

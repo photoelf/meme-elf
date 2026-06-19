@@ -462,6 +462,79 @@ describe('preview-canvas helpers', () => {
     expect(handle?.style.height).toBe('44px');
   });
 
+  it('clamps a scene crop that starts from zoom overflow back into image bounds', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onSceneCropDraftChange = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isSceneCropMode: true,
+        isStageHovered: true,
+        layers: [],
+        mobileInteraction: {
+          activeGestureOwner: 'crop',
+          activeTargetId: null,
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        onSceneCropDraftChange,
+        previewZoomFactor: 2,
+        sceneCropDraft: null,
+        width: 800,
+      }),
+    );
+
+    const viewport = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 950,
+      height: 900,
+      left: 100,
+      right: 1700,
+      top: 50,
+      width: 1600,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.mouseDown(viewport, {
+      button: 0,
+      clientX: 40,
+      clientY: 10,
+    });
+    fireEvent.mouseMove(window, {
+      clientX: 500,
+      clientY: 250,
+    });
+
+    expect(onSceneCropDraftChange).toHaveBeenLastCalledWith({
+      endX: 200,
+      endY: 100,
+      startX: 0,
+      startY: 0,
+    });
+  });
+
   it('disables native touch scrolling on the preview surface', () => {
     const context = {
       clearRect: vi.fn(),
@@ -693,6 +766,85 @@ describe('preview-canvas helpers', () => {
     });
 
     expect(onActiveLayerClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes touch draw gestures through the retouch path instead of preview pan', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onDraftStrokeChange = vi.fn();
+    const onDraftStrokeCommit = vi.fn();
+    const onPreviewPanStart = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: null,
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onDraftStrokeChange,
+        onDraftStrokeCommit,
+        onLayerChange: vi.fn(),
+        onPreviewPanStart,
+        retouchMode: 'draw',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      clientX: 50,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 90,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onDraftStrokeChange).toHaveBeenCalled();
+    expect(onDraftStrokeCommit).toHaveBeenCalledTimes(1);
+    expect(onPreviewPanStart).not.toHaveBeenCalled();
   });
 
 });

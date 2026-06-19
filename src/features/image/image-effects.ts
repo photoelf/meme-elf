@@ -188,6 +188,68 @@ export function hasActiveSceneEffectStack(input: SceneEffectStackItem[]) {
   return normalizeSceneEffectStack(input).some((effect) => effect.value > 0);
 }
 
+export function applySceneImageAdjustmentsToImageData(
+  imageData: RasterImageDataLike,
+  input: Partial<SceneImageAdjustments>,
+) {
+  const adjustments = normalizeSceneImageAdjustments(input);
+
+  if (!hasActiveSceneImageAdjustments(adjustments)) {
+    return;
+  }
+
+  const brightnessFactor = adjustments.brightness / 100;
+  const contrastFactor = adjustments.contrast / 100;
+  const saturationFactor = adjustments.saturation / 100;
+  const hueRotation = adjustments.hue / 360;
+  const { data } = imageData;
+
+  for (let index = 0; index < data.length; index += 4) {
+    let red = data[index] ?? 0;
+    let green = data[index + 1] ?? 0;
+    let blue = data[index + 2] ?? 0;
+
+    red *= brightnessFactor;
+    green *= brightnessFactor;
+    blue *= brightnessFactor;
+
+    red = (red - 128) * contrastFactor + 128;
+    green = (green - 128) * contrastFactor + 128;
+    blue = (blue - 128) * contrastFactor + 128;
+
+    let [hue, saturation, lightness] = rgbToHsl(red, green, blue);
+    hue = normalizeHue(hue + hueRotation);
+    saturation = clampUnit(saturation * saturationFactor);
+    [red, green, blue] = hslToRgb(hue, saturation, lightness);
+
+    if (adjustments.grayscale) {
+      const luminance = 0.299 * red + 0.587 * green + 0.114 * blue;
+      red = luminance;
+      green = luminance;
+      blue = luminance;
+    }
+
+    if (adjustments.sepia) {
+      const nextRed = red * 0.393 + green * 0.769 + blue * 0.189;
+      const nextGreen = red * 0.349 + green * 0.686 + blue * 0.168;
+      const nextBlue = red * 0.272 + green * 0.534 + blue * 0.131;
+      red = nextRed;
+      green = nextGreen;
+      blue = nextBlue;
+    }
+
+    if (adjustments.invert) {
+      red = 255 - red;
+      green = 255 - green;
+      blue = 255 - blue;
+    }
+
+    data[index] = clampChannel(red);
+    data[index + 1] = clampChannel(green);
+    data[index + 2] = clampChannel(blue);
+  }
+}
+
 export function applySceneEffectToImageData(
   imageData: RasterImageDataLike,
   effect: SceneEffectStackItem,
@@ -200,6 +262,9 @@ export function applySceneEffectToImageData(
   }
 
   switch (effect.kind) {
+    case 'blur':
+      applyBlur(imageData, value);
+      return;
     case 'sharpen':
       applySharpen(imageData, value / 100);
       return;
@@ -221,8 +286,6 @@ export function applySceneEffectToImageData(
     case 'jpeg':
       applyJpegDegradation(imageData, value);
       return;
-    case 'blur':
-      return;
   }
 }
 
@@ -237,7 +300,7 @@ export function applySceneEffectStackToImageData(
 }
 
 export function isRasterSceneEffectKind(kind: SceneEffectStackKind) {
-  return kind !== 'blur';
+  return true;
 }
 
 function clampRounded(value: number, min: number, max: number) {
@@ -310,6 +373,68 @@ function applyPixelate(imageData: RasterImageDataLike, pixelateAmount: number) {
           data[index + 2] = nextBlue;
           data[index + 3] = nextAlpha;
         }
+      }
+    }
+  }
+}
+
+function applyBlur(imageData: RasterImageDataLike, blurAmount: number) {
+  const radius = Math.max(1, Math.round(blurAmount / 4));
+
+  if (radius <= 0) {
+    return;
+  }
+
+  const { data, width, height } = imageData;
+  const source = new Uint8ClampedArray(data);
+  const horizontalPass = new Uint8ClampedArray(data.length);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const targetIndex = (y * width + x) * 4;
+
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+        let samples = 0;
+
+        for (let offset = -radius; offset <= radius; offset += 1) {
+          const sampleX = x + offset;
+
+          if (sampleX < 0 || sampleX >= width) {
+            continue;
+          }
+
+          const sampleIndex = (y * width + sampleX) * 4 + channel;
+          sum += source[sampleIndex] ?? 0;
+          samples += 1;
+        }
+
+        horizontalPass[targetIndex + channel] = clampChannel(sum / Math.max(1, samples));
+      }
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const targetIndex = (y * width + x) * 4;
+
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+        let samples = 0;
+
+        for (let offset = -radius; offset <= radius; offset += 1) {
+          const sampleY = y + offset;
+
+          if (sampleY < 0 || sampleY >= height) {
+            continue;
+          }
+
+          const sampleIndex = (sampleY * width + x) * 4 + channel;
+          sum += horizontalPass[sampleIndex] ?? 0;
+          samples += 1;
+        }
+
+        data[targetIndex + channel] = clampChannel(sum / Math.max(1, samples));
       }
     }
   }
@@ -401,4 +526,99 @@ function applySharpen(imageData: RasterImageDataLike, amount: number) {
 
 function clampChannel(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function clampUnit(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeHue(value: number) {
+  let nextValue = value;
+
+  while (nextValue < 0) {
+    nextValue += 1;
+  }
+
+  while (nextValue > 1) {
+    nextValue -= 1;
+  }
+
+  return nextValue;
+}
+
+function rgbToHsl(red: number, green: number, blue: number) {
+  const r = clampChannel(red) / 255;
+  const g = clampChannel(green) / 255;
+  const b = clampChannel(blue) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+
+  if (max === min) {
+    return [0, 0, lightness] as const;
+  }
+
+  const delta = max - min;
+  const saturation =
+    lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  let hue = 0;
+
+  switch (max) {
+    case r:
+      hue = (g - b) / delta + (g < b ? 6 : 0);
+      break;
+    case g:
+      hue = (b - r) / delta + 2;
+      break;
+    default:
+      hue = (r - g) / delta + 4;
+      break;
+  }
+
+  return [hue / 6, saturation, lightness] as const;
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number) {
+  if (saturation === 0) {
+    const value = lightness * 255;
+    return [value, value, value] as const;
+  }
+
+  const q =
+    lightness < 0.5
+      ? lightness * (1 + saturation)
+      : lightness + saturation - lightness * saturation;
+  const p = 2 * lightness - q;
+
+  return [
+    hueToRgb(p, q, hue + 1 / 3) * 255,
+    hueToRgb(p, q, hue) * 255,
+    hueToRgb(p, q, hue - 1 / 3) * 255,
+  ] as const;
+}
+
+function hueToRgb(p: number, q: number, value: number) {
+  let nextValue = value;
+
+  if (nextValue < 0) {
+    nextValue += 1;
+  }
+
+  if (nextValue > 1) {
+    nextValue -= 1;
+  }
+
+  if (nextValue < 1 / 6) {
+    return p + (q - p) * 6 * nextValue;
+  }
+
+  if (nextValue < 1 / 2) {
+    return q;
+  }
+
+  if (nextValue < 2 / 3) {
+    return p + (q - p) * (2 / 3 - nextValue) * 6;
+  }
+
+  return p;
 }

@@ -788,7 +788,7 @@ describe('App', () => {
     expect(screen.getByRole('combobox', { name: /watermark corner/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /watermark opacity/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /watermark size/i })).toBeInTheDocument();
-    expect(screen.getByRole('slider', { name: /tile rotation/i })).toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /tile rotation/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/watermark color/i)).toBeInTheDocument();
 
     openAdjustmentsTab();
@@ -806,18 +806,17 @@ describe('App', () => {
     });
 
     await waitFor(() => {
-      expect(context.filter).toBe(
-        'brightness(125%) contrast(90%) saturate(140%) hue-rotate(-30deg) grayscale(0%) sepia(0%) invert(0%)',
-      );
+      expect(context.putImageData).toHaveBeenCalled();
     });
 
     openEffectsTab();
+    const blurRenderCountBefore = context.putImageData.mock.calls.length;
     fireEvent.change(screen.getByRole('slider', { name: /blur/i }), {
       target: { value: '4' },
     });
 
     await waitFor(() => {
-      expect(context.filter).toBe('blur(4px)');
+      expect(context.putImageData.mock.calls.length).toBeGreaterThan(blurRenderCountBefore);
     });
   });
 
@@ -851,7 +850,7 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('slider', { name: /jpeg degrade/i }), { target: { value: '40' } });
 
     await waitFor(() => {
-      expect(context.filter).toBe('blur(6px)');
+      expect(context.putImageData).toHaveBeenCalled();
     });
 
     openAdjustmentsTab();
@@ -908,6 +907,7 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /watermark mode/i }), {
       target: { value: 'tile' },
     });
+    expect(screen.getByRole('slider', { name: /tile rotation/i })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('slider', { name: /tile rotation/i }), {
       target: { value: '35' },
     });
@@ -934,7 +934,7 @@ describe('App', () => {
       expect(screen.getByRole('combobox', { name: /watermark corner/i })).toHaveValue('bottom-left');
       expect(screen.getByRole('slider', { name: /watermark opacity/i })).toHaveValue('50');
       expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('12');
-      expect(screen.getByRole('slider', { name: /tile rotation/i })).toHaveValue('0');
+      expect(screen.queryByRole('slider', { name: /tile rotation/i })).not.toBeInTheDocument();
       expect(screen.getByLabelText(/watermark color/i)).toHaveValue('#808080');
     });
   });
@@ -962,6 +962,35 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('slider', { name: /watermark size/i })).toHaveValue('12');
     });
+  });
+
+  it('keeps phone watermark controls compact and surfaces a preview summary', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openWatermarkTab();
+
+    expect(screen.getByLabelText(/watermark preview summary/i)).toHaveTextContent(
+      /preview\s*corner mark, bottom left, 12px, 50%/i,
+    );
+    expect(screen.queryByText(/watermark: corner mark, bottom left, 12px, 50%/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /watermark corner/i })).toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /tile rotation/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: /watermark mode/i }), {
+      target: { value: 'tile' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/watermark preview summary/i)).toHaveTextContent(
+        /preview\s*tiled text, 12px, 0deg, 50%/i,
+      );
+    });
+
+    expect(screen.queryByRole('combobox', { name: /watermark corner/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /tile rotation/i })).toBeInTheDocument();
   });
 
   it('reorders scene effects in the image rail by drag and drop', async () => {
@@ -1027,6 +1056,84 @@ describe('App', () => {
       'Noise',
       'JPEG degrade',
     ]);
+  });
+
+  it('reorders layers on phone with explicit move controls instead of drag-only affordances', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add text/i }));
+
+    const getTextLayerOrder = () =>
+      screen
+        .getAllByRole('textbox')
+        .map((field) => field.getAttribute('aria-label'))
+        .filter((label): label is string => Boolean(label));
+
+    expect(getTextLayerOrder()).toEqual(['Top text', 'Bottom text', 'Text 3']);
+
+    fireEvent.click(screen.getByRole('button', { name: /move top text later/i }));
+
+    await waitFor(() => {
+      expect(getTextLayerOrder()).toEqual(['Bottom text', 'Top text', 'Text 3']);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /move text 3 earlier/i }));
+
+    await waitFor(() => {
+      expect(getTextLayerOrder()).toEqual(['Bottom text', 'Text 3', 'Top text']);
+    });
+  });
+
+  it('reorders effects on phone with explicit move controls', async () => {
+    window.innerWidth = 680;
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openEffectsTab();
+
+    const getEffectOrder = () =>
+      Array.from(container.querySelectorAll('.effect-card-title')).map((node) => node.textContent);
+
+    expect(getEffectOrder()).toEqual([
+      'Blur',
+      'Sharpen',
+      'Threshold',
+      'Pixelate',
+      'Noise',
+      'Grain',
+      'Posterize',
+      'JPEG degrade',
+    ]);
+
+    const blurCard = screen.getByText('Blur').closest('.effect-card') as HTMLDivElement;
+    const mobileControlRow = blurCard.querySelector('.effect-card-mobile-row');
+    expect(mobileControlRow).not.toBeNull();
+    expect(mobileControlRow?.querySelector('input[type="range"]')).not.toBeNull();
+    expect(
+      within(mobileControlRow as HTMLElement).getByRole('button', { name: /move blur earlier/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(mobileControlRow as HTMLElement).getByRole('button', { name: /move blur later/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /move noise earlier/i }));
+
+    await waitFor(() => {
+      expect(getEffectOrder()).toEqual([
+        'Blur',
+        'Sharpen',
+        'Threshold',
+        'Noise',
+        'Pixelate',
+        'Grain',
+        'Posterize',
+        'JPEG degrade',
+      ]);
+    });
   });
 
   it('removes image layers without reusing ids or disturbing remaining layer order', async () => {
@@ -1261,7 +1368,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
     fireEvent.click(await screen.findByRole('tab', { name: /draw/i }));
     fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+    clickInspectorDrawModeButton();
 
     const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
     vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
@@ -1319,7 +1426,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
     fireEvent.click(await screen.findByRole('tab', { name: /draw/i }));
     fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^draw$/i }));
+    clickInspectorDrawModeButton();
 
     const statusStrip = screen.getByLabelText(/editor status/i);
 
@@ -2431,6 +2538,183 @@ describe('App', () => {
     expect(screen.queryByText(/scene cropped/i)).not.toBeInTheDocument();
   });
 
+  it('keeps phone crop session actions reachable once a crop session starts', async () => {
+    window.innerWidth = 680;
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    const { container } = render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openCropTab();
+    fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
+
+    const sessionToolbar = screen.getByRole('toolbar', { name: /scene transform session/i });
+    expect(within(sessionToolbar).getByRole('button', { name: /apply crop/i })).toBeDisabled();
+    expect(within(sessionToolbar).getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 900,
+      top: 0,
+      width: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, {
+      button: 0,
+      clientX: 100,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 700,
+      clientY: 360,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    await waitFor(() => {
+      expect(within(sessionToolbar).getByRole('button', { name: /apply crop/i })).toBeEnabled();
+    });
+  });
+
+  it('shows compact mobile scene transform sections in the crop inspector', async () => {
+    window.innerWidth = 680;
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openCropTab();
+
+    expect(screen.getByText(/scene transforms/i)).toBeInTheDocument();
+    expect(screen.getByText(/canvas expand/i)).toBeInTheDocument();
+  });
+
+  it('replaces sticky phone primary actions with the active scene session while zoomed on a short viewport', async () => {
+    window.innerWidth = 680;
+    window.innerHeight = 520;
+    const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 900));
+
+    render(<App />);
+    await uploadBaseImage(baseFile, 900);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openCropTab();
+    fireEvent.click(screen.getByRole('button', { name: /crop scene/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+
+    expect(screen.queryByRole('toolbar', { name: /mobile primary actions/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('toolbar', { name: /scene transform session/i })).toBeInTheDocument();
+  });
+
+  it('shows a phone retouch session bar for draw tools and replaces sticky mobile actions', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openDrawTab();
+
+    const sessionToolbar = screen.getByRole('toolbar', { name: /retouch session/i });
+    expect(within(sessionToolbar).getByRole('button', { name: /activate draw mode/i })).toBeInTheDocument();
+    expect(within(sessionToolbar).getByRole('button', { name: /pick color/i })).toBeInTheDocument();
+    expect(within(sessionToolbar).getByRole('button', { name: /select area/i })).toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: /mobile primary actions/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps selection extraction actions in the phone retouch session bar', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    openDrawTab();
+    fireEvent.click(screen.getByRole('button', { name: /new draw layer/i }));
+    clickInspectorDrawModeButton();
+
+    const previewSurface = document.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(previewSurface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(previewSurface, {
+      button: 0,
+      clientX: 80,
+      clientY: 80,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 180,
+      clientY: 140,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /select area/i }));
+    fireEvent.pointerDown(previewSurface, {
+      button: 0,
+      clientX: 70,
+      clientY: 70,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 190,
+      clientY: 150,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    const sessionToolbar = screen.getByRole('toolbar', { name: /retouch session/i });
+    expect(within(sessionToolbar).getByRole('button', { name: /copy selection to new layer/i })).toBeInTheDocument();
+    expect(within(sessionToolbar).getByRole('button', { name: /cut selection to new layer/i })).toBeInTheDocument();
+    expect(within(sessionToolbar).getByRole('button', { name: /cancel selection/i })).toBeInTheDocument();
+    expect(
+      Array.from(within(sessionToolbar).getAllByRole('button')).map((button) =>
+        button.getAttribute('aria-label') ?? button.textContent ?? '',
+      ).slice(0, 3),
+    ).toEqual(['Copy selection to new layer', 'Cut selection to new layer', 'Cancel selection']);
+    expect(screen.queryByRole('toolbar', { name: /mobile primary actions/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an explicit phone fallback for experimental retouch instead of enabling clone stamp directly', () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+
+    expect(screen.queryByRole('button', { name: /clone stamp/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/experimental retouch stays desktop-only on phone for now/i)).toBeInTheDocument();
+  });
+
   it('expands the scene from the left without scaling content before apply', async () => {
     const baseFile = new File(['base-image'], 'base.png', { type: 'image/png' });
     mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(800, 450));
@@ -3189,6 +3473,16 @@ async function uploadBaseImage(file: File, expectedCanvasWidth?: number) {
 
 function openCropTab() {
   fireEvent.click(screen.getByRole('tab', { name: /crop/i }));
+}
+
+function openDrawTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+}
+
+function clickInspectorDrawModeButton() {
+  fireEvent.click(
+    within(screen.getByLabelText(/controls/i)).getByRole('button', { name: /^draw$/i }),
+  );
 }
 
 function openAdjustmentsTab() {

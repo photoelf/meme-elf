@@ -95,6 +95,7 @@ import type {
   LayerId,
   RasterSelectionTargetId,
   SceneEffectStackItem,
+  SceneExpandDraft,
   SceneImageAdjustments,
   SelectionDraftRect,
   SelectionRect,
@@ -347,6 +348,24 @@ export function App() {
   const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
   const isInspectorVisible =
     mobileShellLayout.inspectorMode !== 'collapsed' || isPhoneInspectorOpen;
+  const hasPhoneSelectionSession = Boolean(
+    appState.retouch.selection.rect || appState.retouch.selection.draftRect,
+  );
+  const hasDrawLayers = appState.layers.some((layer) => isDrawLayer(layer));
+  const isPhoneSceneSession =
+    mobileShellLayout.shellMode === 'phone' &&
+    (appState.activeSceneBoundsMode === 'crop' || appState.activeSceneBoundsMode === 'expand');
+  const isPhoneRetouchSession =
+    mobileShellLayout.shellMode === 'phone' &&
+    !isPhoneSceneSession &&
+    (
+      activeInspectorTab === 'draw' ||
+      appState.retouch.mode === 'draw' ||
+      appState.retouch.mode === 'erase' ||
+      appState.retouch.mode === 'eyedropper' ||
+      appState.retouch.mode === 'select' ||
+      hasPhoneSelectionSession
+    );
   const toolToggleLabel = isInspectorVisible ? 'Hide tools' : 'Show tools';
   const previewPanSessionRef = useRef<{
     pointerId: number | null;
@@ -805,6 +824,16 @@ export function App() {
       };
     });
     setStatusMessage('Scene cropped.');
+  }
+
+  function startSceneCropSession() {
+    setAppState((currentState) => ({
+      ...currentState,
+      activeSceneBoundsMode: 'crop',
+      sceneBoundsDraft: {
+        ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
+      },
+    }));
   }
 
   function openPreInsertModal(
@@ -2493,13 +2522,14 @@ export function App() {
                 className={`mini-action-button preview-toolbar-button${appState.retouch.mode === 'select' ? ' settings-button-active' : ''}`}
                 aria-label="Select area"
                 title="Select area"
+                style={isPhoneRetouchSession ? { display: 'none' } : undefined}
                 onClick={() =>
                   setAppState((currentState) => applyRetouchModeChange(currentState, 'select'))
                 }
               >
                 ☐
               </button>
-              {(appState.retouch.selection.rect || appState.retouch.selection.draftRect) ? (
+              {!isPhoneRetouchSession && (appState.retouch.selection.rect || appState.retouch.selection.draftRect) ? (
                 <button
                   type="button"
                   className="mini-action-button preview-toolbar-button"
@@ -2510,7 +2540,7 @@ export function App() {
                   ✕
                 </button>
               ) : null}
-              {appState.retouch.selection.rect ? (
+              {!isPhoneRetouchSession && appState.retouch.selection.rect ? (
                 <>
                   <button
                     type="button"
@@ -2660,6 +2690,7 @@ export function App() {
             activeTab={activeInspectorTab}
             activeSceneBoundsMode={appState.activeSceneBoundsMode}
             activeLayerId={appState.activeLayerId}
+            shellMode={mobileShellLayout.shellMode}
             isImportModalOpen={preInsertDraft !== null}
             layers={appState.layers}
             showLocalOnlyTabs={showLocalOnlyTabs}
@@ -2728,15 +2759,7 @@ export function App() {
             onSceneBoundsPreset={applySceneBoundsPreset}
             onSceneImageStackTransform={applySceneImageTransform}
             onSceneExpandDraftChange={updateSceneExpandDraft}
-            onStartSceneCrop={() =>
-              setAppState((currentState) => ({
-                ...currentState,
-                activeSceneBoundsMode: 'crop',
-                sceneBoundsDraft: {
-                  ...createResetSceneBoundsDraft(currentState.sceneBoundsDraft),
-                },
-              }))
-            }
+            onStartSceneCrop={startSceneCropSession}
             onTextLayerChange={updateTextLayer}
             onTextEditSessionStart={() => handleTextEditSessionStart('inspector')}
             onTextEditSessionEnd={handleTextEditSessionEnd}
@@ -2763,7 +2786,98 @@ export function App() {
           />
         ) : null}
       </section>
-      {topbarActionLayout.sticky.length > 0 ? (
+      {isPhoneSceneSession ? (
+        <div className="mobile-session-actions" role="toolbar" aria-label="Scene transform session">
+          <span className="mobile-session-label">
+            {appState.activeSceneBoundsMode === 'crop' ? 'Crop session' : 'Canvas expand session'}
+          </span>
+          <button
+            type="button"
+            className="mini-action-button"
+            disabled={
+              appState.activeSceneBoundsMode === 'crop'
+                ? !appState.sceneBoundsDraft.cropRect
+                : !hasPendingSceneExpand(appState.sceneBoundsDraft.expand)
+            }
+            onClick={
+              appState.activeSceneBoundsMode === 'crop'
+                ? applySceneCropCommit
+                : applySceneExpandCommit
+            }
+          >
+            {appState.activeSceneBoundsMode === 'crop' ? 'Apply crop' : 'Apply bounds'}
+          </button>
+          <button type="button" className="mini-action-button" onClick={cancelSceneBounds}>
+            Cancel
+          </button>
+        </div>
+      ) : isPhoneRetouchSession ? (
+        <div className="mobile-session-actions mobile-session-actions-retouch" role="toolbar" aria-label="Retouch session">
+          <span className="mobile-session-label">
+            {hasPhoneSelectionSession ? 'Selection session' : 'Retouch session'}
+          </span>
+          {appState.retouch.selection.rect ? (
+            <>
+              <SessionIconButton
+                icon={<CopyIcon />}
+                label="Copy selection to new layer"
+                onClick={copySelectionToLayer}
+              />
+              <SessionIconButton
+                icon={<CutIcon />}
+                label="Cut selection to new layer"
+                onClick={cutSelectionToLayer}
+              />
+            </>
+          ) : null}
+          {hasPhoneSelectionSession ? (
+            <SessionIconButton
+              icon={<CloseIcon />}
+              label="Cancel selection"
+              onClick={handleCancelSelection}
+            />
+          ) : null}
+          <SessionIconButton
+            isActive={appState.retouch.mode === 'draw'}
+            icon={<DrawModeIcon />}
+            label="Activate draw mode"
+            onClick={() =>
+              setAppState((currentState) => applyRetouchModeChange(currentState, 'draw'))
+            }
+          />
+          {hasDrawLayers ? (
+            <SessionIconButton
+              isActive={appState.retouch.mode === 'erase'}
+              icon={<EraseIcon />}
+              label="Activate erase mode"
+              onClick={() =>
+                setAppState((currentState) => applyRetouchModeChange(currentState, 'erase'))
+              }
+            />
+          ) : null}
+          <SessionIconButton
+            isActive={appState.retouch.mode === 'eyedropper'}
+            icon={<EyedropperIcon />}
+            label="Pick color"
+            onClick={() =>
+              setAppState((currentState) => applyRetouchModeChange(currentState, 'eyedropper'))
+            }
+          />
+          <SessionIconButton
+            isActive={appState.retouch.mode === 'select'}
+            icon={<SelectIcon />}
+            label="Select area"
+            onClick={() =>
+              setAppState((currentState) => applyRetouchModeChange(currentState, 'select'))
+            }
+          />
+          <SessionIconButton
+            icon={<ToolsIcon />}
+            label={toolToggleLabel}
+            onClick={() => setIsPhoneInspectorOpen((current) => !current)}
+          />
+        </div>
+      ) : topbarActionLayout.sticky.length > 0 ? (
         <div className="mobile-primary-actions" role="toolbar" aria-label="Mobile primary actions">
           {topbarActionLayout.sticky.map((actionId) => renderToolbarAction(actionId))}
         </div>
@@ -2926,6 +3040,37 @@ function ToolbarIconButton({
   );
 }
 
+function SessionIconButton({
+  icon,
+  isActive = false,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  isActive?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`mini-action-button icon-button-with-tooltip${isActive ? ' settings-button-active' : ''}`}
+      aria-label={label}
+      title={label}
+      data-tooltip={label}
+      onPointerDown={handleTooltipTouchPointerDown}
+      onTouchStart={handleTooltipTouchStart}
+      onFocus={handleTooltipTouchFocus}
+      onClick={(event) => {
+        handleTooltipTouchClick(event);
+        onClick();
+      }}
+    >
+      {icon}
+    </button>
+  );
+}
+
 function IconBase({ children, viewBox = '0 0 20 20' }: { children: ReactNode; viewBox?: string }) {
   return (
     <svg aria-hidden="true" className="toolbar-icon-svg" viewBox={viewBox} fill="none">
@@ -3006,6 +3151,96 @@ function ToolsIcon() {
         strokeWidth="1.6"
         strokeLinecap="round"
       />
+    </IconBase>
+  );
+}
+
+function DrawModeIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M5 14.8 6.8 11l5.9-5.9a1.4 1.4 0 0 1 2 2L8.8 13 5 14.8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10.8 7l2.2 2.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function EraseIcon() {
+  return (
+    <IconBase>
+      <path
+        d="m6 12.8 4.8-6a1.6 1.6 0 0 1 2.5-.1l2 2.4a1.6 1.6 0 0 1 0 2.1l-3.2 3.6H8.4L6 12.8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M4.8 14.8h8.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function EyedropperIcon() {
+  return (
+    <IconBase>
+      <path
+        d="m12.8 4.8 2.4 2.4M8.5 9.1l4.7-4.7a1.4 1.4 0 0 1 2 0l.4.4a1.4 1.4 0 0 1 0 2L11 11.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m9.2 10.8-3.9 3.9-.3 1.1 1.1-.3 3.9-3.9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconBase>
+  );
+}
+
+function SelectIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M5 7V5h2M13 5h2v2M15 13v2h-2M7 15H5v-2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 5H12.5M15 7.5V12.5M12.5 15H7.5M5 12.5V7.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeDasharray="1.8 2.2"
+      />
+    </IconBase>
+  );
+}
+
+function CutIcon() {
+  return (
+    <IconBase>
+      <circle cx="6.2" cy="6.2" r="1.7" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="6.2" cy="13.8" r="1.7" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 7.4 15 3.8M8 12.6 15 16.2M8 8.6l3 2.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <IconBase>
+      <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </IconBase>
   );
 }
@@ -3171,6 +3406,10 @@ function createResetSceneBoundsDraft(
     fillMode: draft.fillMode,
     fillColor: draft.fillColor,
   };
+}
+
+function hasPendingSceneExpand(expand: SceneExpandDraft) {
+  return expand.left !== 0 || expand.right !== 0 || expand.top !== 0 || expand.bottom !== 0;
 }
 
 function cloneLayers(layers: EditorLayer[]) {
