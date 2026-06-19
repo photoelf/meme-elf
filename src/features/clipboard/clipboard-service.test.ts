@@ -11,8 +11,14 @@ const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObje
 const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
 const originalImage = globalThis.Image;
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+const originalIsSecureContext = Object.getOwnPropertyDescriptor(globalThis, 'isSecureContext');
 
 beforeEach(() => {
+  Object.defineProperty(globalThis, 'isSecureContext', {
+    configurable: true,
+    writable: true,
+    value: true,
+  });
   Object.defineProperty(URL, 'createObjectURL', {
     configurable: true,
     writable: true,
@@ -39,6 +45,10 @@ afterEach(() => {
 
   if (originalNavigator) {
     Object.defineProperty(globalThis, 'navigator', originalNavigator);
+  }
+
+  if (originalIsSecureContext) {
+    Object.defineProperty(globalThis, 'isSecureContext', originalIsSecureContext);
   }
 
   globalThis.Image = originalImage;
@@ -69,6 +79,26 @@ describe('readImageFromClipboard', () => {
     await expect(readImageFromClipboardResult()).resolves.toEqual({
       image: null,
       reason: 'unsupported',
+    });
+  });
+
+  it('returns a secure-context-required reason when async clipboard read is unavailable on an insecure page', async () => {
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      writable: true,
+      value: {
+        clipboard: { read: vi.fn() },
+      },
+    });
+    Object.defineProperty(globalThis, 'isSecureContext', {
+      configurable: true,
+      writable: true,
+      value: false,
+    });
+
+    await expect(readImageFromClipboardResult()).resolves.toEqual({
+      image: null,
+      reason: 'secure-context-required',
     });
   });
 
@@ -249,6 +279,9 @@ describe('resolveClipboardReadFailureMessage', () => {
   it('maps clipboard read failures to actionable base import guidance', () => {
     expect(resolveClipboardReadFailureMessage('unsupported', 'base-import')).toBe(
       'This browser cannot read images from the clipboard here. Use Upload Image instead.',
+    );
+    expect(resolveClipboardReadFailureMessage('secure-context-required', 'base-import')).toBe(
+      'Clipboard image paste needs HTTPS or another secure context here. Use Upload Image instead.',
     );
     expect(resolveClipboardReadFailureMessage('permission-denied', 'base-import')).toBe(
       'Clipboard access was blocked. Try again or use upload image instead.',

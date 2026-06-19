@@ -8,6 +8,7 @@ import {
   renderPreview,
   resetPreviewRenderSurfacesForTests,
 } from './canvas-renderer';
+import { createInactivePreviewGuardrails } from './mobile-preview-guardrails';
 import { PreviewCanvas } from '../preview/preview-canvas';
 import {
   createDefaultSceneEffectStack,
@@ -758,6 +759,44 @@ describe('renderPreview', () => {
     expect(filteredContext.getImageData).toHaveBeenCalledWith(0, 0, 800, 450);
     expect(filteredContext.putImageData).toHaveBeenCalledTimes(1);
     expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 800, 450);
+  });
+
+  it('uses guarded offscreen dimensions for expensive mobile preview passes while keeping the final preview size intact', () => {
+    const context = createContextStub();
+    const sourceSurface = document.createElement('canvas');
+    const filteredSurface = document.createElement('canvas');
+    const filteredContext = createContextStub();
+    vi.spyOn(filteredSurface, 'getContext').mockReturnValue(filteredContext);
+    const originalCreateElement = document.createElement.bind(document);
+    const createElementSpy = vi.spyOn(document, 'createElement');
+    let canvasCallCount = 0;
+    createElementSpy.mockImplementation((tagName: string) => {
+      if (tagName === 'canvas') {
+        canvasCallCount += 1;
+        return canvasCallCount === 1 ? sourceSurface : filteredSurface;
+      }
+
+      return originalCreateElement(tagName);
+    });
+
+    renderPreview(
+      context,
+      {} as CanvasImageSource,
+      { width: 1200, height: 900 },
+      [],
+      createDefaultSceneImageAdjustments(),
+      [{ id: 'blur', kind: 'blur', value: 4 }],
+      createDefaultSceneWatermark(),
+      {
+        active: true,
+        guardedRenderSize: { width: 800, height: 600 },
+        message: 'Preview quality reduced on this phone to keep editing responsive.',
+        reason: 'mobile-raster-effects',
+      },
+    );
+
+    expect(filteredContext.getImageData).toHaveBeenCalledWith(0, 0, 800, 600);
+    expect(context.drawImage).toHaveBeenCalledWith(filteredSurface, 0, 0, 1200, 900);
   });
 
   it('renders a tiled watermark with clockwise rotation above the processed scene', () => {

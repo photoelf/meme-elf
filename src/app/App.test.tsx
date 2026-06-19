@@ -7,6 +7,7 @@ import { resetPreviewRenderSurfacesForTests } from '../features/canvas/canvas-re
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
   loadImageElementFromFile: vi.fn(),
+  loadImageElementFromUrl: vi.fn(),
   readImageFromClipboard: vi.fn(),
   readImageFromClipboardResult: vi.fn(),
   revokeLoadedImageObjectUrl: vi.fn(),
@@ -17,7 +18,12 @@ vi.mock('../features/clipboard/clipboard-service', () => ({
   readImageFromClipboard: mocks.readImageFromClipboard,
   readImageFromClipboardResult: mocks.readImageFromClipboardResult,
   resolveClipboardReadFailureMessage: (
-    reason: 'unsupported' | 'permission-denied' | 'no-image' | 'load-failed',
+    reason:
+      | 'unsupported'
+      | 'secure-context-required'
+      | 'permission-denied'
+      | 'no-image'
+      | 'load-failed',
     target: 'base-import' | 'advanced-import',
   ) => {
     const fallbackAction =
@@ -28,6 +34,8 @@ vi.mock('../features/clipboard/clipboard-service', () => ({
     switch (reason) {
       case 'unsupported':
         return `This browser cannot read images from the clipboard here. ${fallbackAction}`;
+      case 'secure-context-required':
+        return `Clipboard image paste needs HTTPS or another secure context here. ${fallbackAction}`;
       case 'permission-denied':
         return `Clipboard access was blocked. Try again or ${fallbackAction.toLowerCase()}`;
       case 'no-image':
@@ -40,6 +48,7 @@ vi.mock('../features/clipboard/clipboard-service', () => ({
 
 vi.mock('../features/image/image-loader', () => ({
   loadImageElementFromFile: mocks.loadImageElementFromFile,
+  loadImageElementFromUrl: mocks.loadImageElementFromUrl,
   revokeLoadedImageObjectUrl: mocks.revokeLoadedImageObjectUrl,
 }));
 
@@ -69,6 +78,8 @@ function mockHostname(hostname: string) {
   });
 }
 
+const MOBILE_RECOVERY_STORAGE_KEY = 'meme-elf.mobile-recovery';
+
 describe('App', () => {
   beforeEach(() => {
     resetPreviewRenderSurfacesForTests();
@@ -86,12 +97,19 @@ describe('App', () => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      writable: true,
+      value: true,
+    });
     mockHostname('localhost');
+    window.sessionStorage.clear();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
     mocks.readImageFromClipboardResult.mockImplementation(async () => {
       const image = await mocks.readImageFromClipboard();
       return image ? { image, reason: null } : { image: null, reason: 'no-image' };
     });
+    mocks.loadImageElementFromUrl.mockReset();
   });
 
   it('renders the meme-elf heading, editor toolbar, and inspector fields', () => {
@@ -1294,7 +1312,7 @@ describe('App', () => {
       toJSON: () => ({}),
     });
 
-    await uploadBaseImage(file, 960);
+    await uploadBaseImage(file, 5000);
 
     const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
     await waitFor(() => {
@@ -1358,6 +1376,283 @@ describe('App', () => {
       expect(previewSurface.style.width).toBe('320px');
       expect(previewSurface.style.height).toBe('160px');
     });
+  });
+
+  it('downscales oversized phone imports with explicit recovery messaging instead of silently capping them', async () => {
+    window.innerWidth = 680;
+
+    const file = new File(['base-image'], 'phone-wide.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(5000, 2500));
+
+    const { container } = render(<App />);
+
+    await uploadBaseImage(file);
+
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    await waitFor(() => {
+      expect(previewCanvas.width).toBe(1600);
+      expect(previewCanvas.height).toBe(800);
+    });
+
+    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(
+      /phone-wide\.png loaded\..*working canvas was reduced to 1600 x 800 so this phone session stays responsive\./i,
+    );
+  });
+
+  it('adds a stronger warning for extreme tall phone imports after mobile downscaling', async () => {
+    window.innerWidth = 680;
+
+    const file = new File(['base-image'], 'phone-tall.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(1800, 7200));
+
+    render(<App />);
+
+    await uploadBaseImage(file);
+
+    expect(
+      await screen.findByText(
+        /working canvas was reduced to 400 x 1600 so this phone session stays responsive\..*crop the source image or import a smaller version\./i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('stores a raster mobile recovery snapshot plus editable text layers on pagehide', async () => {
+    window.innerWidth = 680;
+
+    const file = new File(['base-image'], 'phone-recovery.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(1200, 800));
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,recovery');
+
+    render(<App />);
+
+    await uploadBaseImage(file);
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /top text/i }), {
+      target: { value: 'RECOVER ME' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: /bottom text/i }), {
+      target: { value: 'STILL EDITABLE' },
+    });
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(JSON.parse(window.sessionStorage.getItem(MOBILE_RECOVERY_STORAGE_KEY) ?? 'null')).toEqual({
+      canvasSize: { height: 800, width: 1200 },
+      imageDataUrl: 'data:image/png;base64,recovery',
+      version: 1,
+      width: 1200,
+      height: 800,
+      textLayers: [
+        expect.objectContaining({
+          kind: 'text',
+          name: 'Top text',
+          text: 'RECOVER ME',
+        }),
+        expect.objectContaining({
+          kind: 'text',
+          name: 'Bottom text',
+          text: 'STILL EDITABLE',
+        }),
+      ],
+    });
+  });
+
+  it('scales the raster mobile recovery snapshot down before giving up when phone session storage is tight', async () => {
+    window.innerWidth = 680;
+
+    const file = new File(['base-image'], 'phone-recovery.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(1200, 800));
+    const toDataUrlSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockImplementation(function toDataUrlForRecovery(this: HTMLCanvasElement) {
+        return `data:image/png;base64,${'x'.repeat(Math.round(this.width * 4))}`;
+      });
+    const originalSetItem = window.sessionStorage.setItem.bind(window.sessionStorage);
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function setItemWithQuota(
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key === MOBILE_RECOVERY_STORAGE_KEY && value.length > 2600) {
+        throw new DOMException('Quota exceeded.', 'QuotaExceededError');
+      }
+
+      return originalSetItem(key, value);
+    });
+
+    render(<App />);
+
+    await uploadBaseImage(file);
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /top text/i }), {
+      target: { value: 'RECOVER ME' },
+    });
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    const storedSnapshot = JSON.parse(
+      window.sessionStorage.getItem(MOBILE_RECOVERY_STORAGE_KEY) ?? 'null',
+    );
+
+    const recoverySetItemCalls = setItemSpy.mock.calls.filter(
+      ([key]) => key === MOBILE_RECOVERY_STORAGE_KEY,
+    );
+
+    expect(recoverySetItemCalls.length).toBeGreaterThanOrEqual(3);
+    expect(storedSnapshot).toEqual(
+      expect.objectContaining({
+        canvasSize: { height: 800, width: 1200 },
+        imageDataUrl: expect.any(String),
+        textLayers: [
+          expect.objectContaining({
+            kind: 'text',
+            text: 'RECOVER ME',
+          }),
+          expect.any(Object),
+        ],
+      }),
+    );
+    expect(storedSnapshot.imageDataUrl.length).toBeLessThanOrEqual(2600);
+
+    toDataUrlSpy.mockRestore();
+    setItemSpy.mockRestore();
+  });
+
+  it('restores editable text layers on top of the recovered raster mobile draft', async () => {
+    window.innerWidth = 680;
+    window.sessionStorage.setItem(
+      MOBILE_RECOVERY_STORAGE_KEY,
+      JSON.stringify({
+        canvasSize: { width: 1200, height: 800 },
+        imageDataUrl: 'data:image/png;base64,recovery',
+        version: 1,
+        width: 1200,
+        height: 800,
+        textLayers: [
+          {
+            allCaps: true,
+            bold: false,
+            box: { x: 24, y: 0, width: 1128, height: 196, rotation: 0 },
+            effect: 'outline',
+            fillStyle: '#ffffff',
+            fontFamily: 'Impact',
+            fontSize: 120,
+            id: 'top',
+            italic: false,
+            kind: 'text',
+            name: 'Top text',
+            opacity: 1,
+            outlineWidth: 6,
+            strokeStyle: '#000000',
+            text: 'RECOVER ME',
+            textAlign: 'center',
+            verticalAlign: 'top',
+          },
+          {
+            allCaps: true,
+            bold: false,
+            box: { x: 24, y: 604, width: 1128, height: 196, rotation: 0 },
+            effect: 'outline',
+            fillStyle: '#ffffff',
+            fontFamily: 'Impact',
+            fontSize: 120,
+            id: 'bottom',
+            italic: false,
+            kind: 'text',
+            name: 'Bottom text',
+            opacity: 1,
+            outlineWidth: 6,
+            strokeStyle: '#000000',
+            text: 'STILL EDITABLE',
+            textAlign: 'center',
+            verticalAlign: 'bottom',
+          },
+        ],
+      }),
+    );
+    mocks.loadImageElementFromUrl.mockResolvedValue(createImageStub(1200, 800));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(
+        /recovered the last mobile draft with editable text layers after the previous session was interrupted\./i,
+      );
+    });
+
+    expect((screen.getByLabelText(/meme preview canvas/i) as HTMLCanvasElement).width).toBe(1200);
+    expect((screen.getByLabelText(/meme preview canvas/i) as HTMLCanvasElement).height).toBe(800);
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('RECOVER ME');
+    expect(screen.getByRole('textbox', { name: /bottom text/i })).toHaveValue('STILL EDITABLE');
+  });
+
+  it('restores text-only mobile recovery snapshots when raster recovery could not fit into phone storage', async () => {
+    window.innerWidth = 680;
+    window.sessionStorage.setItem(
+      MOBILE_RECOVERY_STORAGE_KEY,
+      JSON.stringify({
+        canvasSize: { width: 1200, height: 800 },
+        version: 1,
+        width: 1200,
+        height: 800,
+        textLayers: [
+          {
+            allCaps: true,
+            bold: false,
+            box: { x: 24, y: 0, width: 1128, height: 196, rotation: 0 },
+            effect: 'outline',
+            fillStyle: '#ffffff',
+            fontFamily: 'Impact',
+            fontSize: 120,
+            id: 'top',
+            italic: false,
+            kind: 'text',
+            name: 'Top text',
+            opacity: 1,
+            outlineWidth: 6,
+            strokeStyle: '#000000',
+            text: 'RECOVER ME',
+            textAlign: 'center',
+            verticalAlign: 'top',
+          },
+          {
+            allCaps: true,
+            bold: false,
+            box: { x: 24, y: 604, width: 1128, height: 196, rotation: 0 },
+            effect: 'outline',
+            fillStyle: '#ffffff',
+            fontFamily: 'Impact',
+            fontSize: 120,
+            id: 'bottom',
+            italic: false,
+            kind: 'text',
+            name: 'Bottom text',
+            opacity: 1,
+            outlineWidth: 6,
+            strokeStyle: '#000000',
+            text: 'STILL EDITABLE',
+            textAlign: 'center',
+            verticalAlign: 'bottom',
+          },
+        ],
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(
+        /recovered the last mobile draft text after the previous session was interrupted\./i,
+      );
+    });
+
+    expect(mocks.loadImageElementFromUrl).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/meme preview canvas/i) as HTMLCanvasElement).width).toBe(1200);
+    expect((screen.getByLabelText(/meme preview canvas/i) as HTMLCanvasElement).height).toBe(800);
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+    expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('RECOVER ME');
+    expect(screen.getByRole('textbox', { name: /bottom text/i })).toHaveValue('STILL EDITABLE');
   });
 
   it('keeps touch draw gestures owned by draw mode instead of panning the preview', async () => {
@@ -2839,7 +3134,7 @@ describe('App', () => {
     const blob = new Blob(['png'], { type: 'image/png' });
 
     vi.stubGlobal('ClipboardItem', class ClipboardItemStub {
-      constructor(public items: Record<string, Blob>) {}
+      constructor(public items: Record<string, Promise<Blob>>) {}
     });
     Object.assign(navigator, {
       clipboard: {
@@ -2857,6 +3152,9 @@ describe('App', () => {
       expect(write).toHaveBeenCalledTimes(1);
       expect(screen.getByText(/image copied to the clipboard/i)).toBeInTheDocument();
     });
+
+    const clipboardItem = write.mock.calls[0]?.[0]?.[0] as { items: Record<string, Promise<Blob>> };
+    await expect(clipboardItem.items['image/png']).resolves.toEqual(blob);
   });
 
   it('copies the canvas from the native copy event when nothing editable is active', async () => {

@@ -37,6 +37,10 @@ import type {
 } from '../../app/types';
 import { getTextLayoutMetrics, renderPreview } from '../canvas/canvas-renderer';
 import {
+  createInactivePreviewGuardrails,
+  type PreviewGuardrails,
+} from '../canvas/mobile-preview-guardrails';
+import {
   resolveMobileGestureOwner,
   resolveTouchHandleSize,
 } from './mobile-gesture-policy';
@@ -55,6 +59,7 @@ type PreviewCanvasProps = {
   sceneImageAdjustments?: SceneImageAdjustments;
   sceneEffectStack?: SceneEffectStackItem[];
   sceneWatermark?: SceneWatermark;
+  previewGuardrails?: PreviewGuardrails;
   isSceneCropMode?: boolean;
   sceneCropDraft?: SceneCropDraftRect | null;
   onDocumentInteractionEnd?: () => void;
@@ -170,6 +175,7 @@ export function PreviewCanvas({
   sceneImageAdjustments = createDefaultSceneImageAdjustments(),
   sceneEffectStack = createDefaultSceneEffectStack(),
   sceneWatermark = createDefaultSceneWatermark(),
+  previewGuardrails = createInactivePreviewGuardrails(),
   isSceneCropMode = false,
   sceneCropDraft = null,
   onDocumentInteractionEnd,
@@ -391,6 +397,7 @@ export function PreviewCanvas({
       sceneImageAdjustments,
       sceneEffectStack,
       sceneWatermark,
+      previewGuardrails,
     );
   }, [
     editingLayerId,
@@ -400,6 +407,7 @@ export function PreviewCanvas({
     resolvedCanvasRef,
     sceneEffectStack,
     sceneImageAdjustments,
+    previewGuardrails,
     sceneWatermark,
     width,
   ]);

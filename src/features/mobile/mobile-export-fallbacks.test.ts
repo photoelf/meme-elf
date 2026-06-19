@@ -11,6 +11,7 @@ describe('mobile-export-fallbacks', () => {
       canCopyImageToClipboard({
         hasClipboardItem: true,
         hasClipboardWrite: true,
+        isSecureContext: true,
       }),
     ).toBe(true);
 
@@ -18,6 +19,7 @@ describe('mobile-export-fallbacks', () => {
       canCopyImageToClipboard({
         hasClipboardItem: false,
         hasClipboardWrite: true,
+        isSecureContext: true,
       }),
     ).toBe(false);
 
@@ -25,6 +27,15 @@ describe('mobile-export-fallbacks', () => {
       canCopyImageToClipboard({
         hasClipboardItem: true,
         hasClipboardWrite: false,
+        isSecureContext: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      canCopyImageToClipboard({
+        hasClipboardItem: true,
+        hasClipboardWrite: true,
+        isSecureContext: false,
       }),
     ).toBe(false);
   });
@@ -33,6 +44,9 @@ describe('mobile-export-fallbacks', () => {
     expect(resolveMobileExportMessage('copy-success')).toBe('Image copied to the clipboard.');
     expect(resolveMobileExportMessage('clipboard-unsupported')).toBe(
       'Direct image copy is not supported in this browser. Press and hold the image to save or copy it.',
+    );
+    expect(resolveMobileExportMessage('secure-context-required')).toBe(
+      'Direct image copy needs HTTPS or another secure context in this browser. Press and hold the image to save or copy it.',
     );
     expect(resolveMobileExportMessage('blob-unavailable')).toBe(
       'The image could not be copied. Press and hold the image to save or copy it.',

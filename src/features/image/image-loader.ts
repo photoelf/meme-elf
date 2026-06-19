@@ -28,6 +28,22 @@ export function loadImageElementFromFile(file: File): Promise<HTMLImageElement> 
   return loadImageElementFromBlob(file);
 }
 
+export function loadImageElementFromUrl(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => {
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      reject(new Error('Failed to load image from URL.'));
+    };
+
+    image.src = url;
+  });
+}
+
 export function revokeLoadedImageObjectUrl(image: CanvasImageSource | null) {
   if (!(image instanceof HTMLImageElement)) {
     return;

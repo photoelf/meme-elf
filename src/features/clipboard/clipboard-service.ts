@@ -9,12 +9,21 @@ export type ClipboardReadResult =
   | { image: HTMLImageElement; reason: null }
   | {
       image: null;
-      reason: 'unsupported' | 'permission-denied' | 'no-image' | 'load-failed';
+      reason:
+        | 'unsupported'
+        | 'secure-context-required'
+        | 'permission-denied'
+        | 'no-image'
+        | 'load-failed';
     };
 
 export type ClipboardReadTarget = 'base-import' | 'advanced-import';
 
 export async function readImageFromClipboardResult(): Promise<ClipboardReadResult> {
+  if (typeof isSecureContext !== 'undefined' && !isSecureContext) {
+    return { image: null, reason: 'secure-context-required' };
+  }
+
   if (!('clipboard' in navigator) || typeof navigator.clipboard.read !== 'function') {
     return { image: null, reason: 'unsupported' };
   }
@@ -65,6 +74,8 @@ export function resolveClipboardReadFailureMessage(
   switch (reason) {
     case 'unsupported':
       return `This browser cannot read images from the clipboard here. ${fallbackAction}`;
+    case 'secure-context-required':
+      return `Clipboard image paste needs HTTPS or another secure context here. ${fallbackAction}`;
     case 'permission-denied':
       return `Clipboard access was blocked. Try again or ${fallbackAction.toLowerCase()}`;
     case 'no-image':

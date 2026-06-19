@@ -26,6 +26,7 @@ import {
   createDefaultSceneWatermark,
   normalizeSceneWatermark,
 } from '../image/watermark-utils';
+import { createInactivePreviewGuardrails, type PreviewGuardrails } from './mobile-preview-guardrails';
 
 const BOX_PADDING_X = 18;
 const BOX_PADDING_Y = 12;
@@ -69,6 +70,7 @@ export function renderPreview(
   sceneImageAdjustments: SceneImageAdjustments = createDefaultSceneImageAdjustments(),
   sceneEffectStack: SceneEffectStackItem[] = createDefaultSceneEffectStack(),
   sceneWatermark: SceneWatermark = createDefaultSceneWatermark(),
+  previewGuardrails: PreviewGuardrails = createInactivePreviewGuardrails(),
 ) {
   context.clearRect(0, 0, size.width, size.height);
 
@@ -77,17 +79,18 @@ export function renderPreview(
     hasActiveSceneEffectStack(sceneEffectStack)
   ) {
     const sourceSurface = getSourcePreviewSurface(size);
-    const filteredSurface = getFilteredPreviewSurface(size);
+    const effectPassSize = previewGuardrails.guardedRenderSize ?? size;
+    const filteredSurface = getFilteredPreviewSurface(effectPassSize);
 
     if (sourceSurface && filteredSurface) {
       sourceSurface.context.clearRect(0, 0, size.width, size.height);
-      filteredSurface.context.clearRect(0, 0, size.width, size.height);
+      filteredSurface.context.clearRect(0, 0, effectPassSize.width, effectPassSize.height);
       if (sceneImageAdjustments.includeText) {
         renderSceneContent(sourceSurface.context, image, size, layers);
         drawSceneEffectsPass(
           filteredSurface.context,
           sourceSurface.canvas,
-          size,
+          effectPassSize,
           sceneImageAdjustments,
           sceneEffectStack,
         );
@@ -103,7 +106,7 @@ export function renderPreview(
       drawSceneEffectsPass(
         filteredSurface.context,
         sourceSurface.canvas,
-        size,
+        effectPassSize,
         sceneImageAdjustments,
         sceneEffectStack,
       );

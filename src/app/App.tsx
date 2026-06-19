@@ -15,7 +15,11 @@ import {
   DEFAULT_LAYER_EDGE_OFFSET,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
 } from './default-state';
-import { getContainedCanvasSize } from '../features/canvas/canvas-renderer';
+import {
+  resolveLoadedImageGuardrails,
+  resolveMobilePreviewGuardrails,
+} from '../features/canvas/mobile-preview-guardrails';
+import { renderPreview } from '../features/canvas/canvas-renderer';
 import {
   extractImageFromPasteEvent,
   readImageFromClipboardResult,
@@ -42,11 +46,14 @@ import {
 } from '../features/controls/tooltip-touch-focus';
 import {
   loadImageElementFromFile,
+  loadImageElementFromUrl,
   revokeLoadedImageObjectUrl,
 } from '../features/image/image-loader';
 import {
   createDefaultSceneEffectStack,
   createDefaultSceneImageAdjustments,
+  hasActiveSceneEffectStack,
+  hasActiveSceneImageAdjustments,
   normalizeSceneEffectStack,
   normalizeSceneImageAdjustments,
 } from '../features/image/image-effects';
@@ -103,7 +110,6 @@ import type {
   TextLayer,
 } from './types';
 
-const MAX_PREVIEW_WIDTH = 960;
 const DEFAULT_INSPECTOR_WIDTH = 24;
 const MIN_PANEL_WIDTH = 300;
 const PREVIEW_ZOOM_STEP = 0.1;
@@ -111,6 +117,7 @@ const MIN_PREVIEW_ZOOM_FACTOR = 0.1;
 const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
+const MOBILE_RECOVERY_STORAGE_KEY = 'meme-elf.mobile-recovery';
 type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
 type ImageInsertionMode =
   | 'inside-canvas'
@@ -148,7 +155,20 @@ type SelectionClipboardSnapshot = {
   };
 };
 
+type MobileRecoverySnapshot = {
+  canvasSize: {
+    width: number;
+    height: number;
+  };
+  height: number;
+  imageDataUrl?: string;
+  textLayers: TextLayer[];
+  version: 1;
+  width: number;
+};
+
 const MAX_HISTORY_STEPS = 10;
+const MOBILE_RECOVERY_SCALE_STEPS = [1, 0.75, 0.5, 0.375, 0.25] as const;
 
 function createLayersForCanvas(
   layers: EditorLayer[],
@@ -229,7 +249,7 @@ function resolveFitToWindowZoomFactor(
     return DEFAULT_PREVIEW_ZOOM_FACTOR;
   }
 
-  return clampPreviewZoom(nextZoom);
+  return Math.min(MAX_PREVIEW_ZOOM_FACTOR, nextZoom);
 }
 
 function shouldShowLocalOnlyTabs() {
@@ -287,6 +307,50 @@ function resolveClipboardRouting(
     backgroundCopyAllowed,
     modalOwnsClipboard,
   };
+}
+
+function hasVisibleSceneContent(state: ReturnType<typeof createDefaultAppState>) {
+  if (state.image) {
+    return true;
+  }
+
+  return state.layers.some((layer) => {
+    if (isTextLayer(layer)) {
+      return layer.text.trim().length > 0;
+    }
+
+    return true;
+  });
+}
+
+function readMobileRecoverySnapshot(): MobileRecoverySnapshot | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const rawSnapshot = window.sessionStorage.getItem(MOBILE_RECOVERY_STORAGE_KEY);
+
+  if (!rawSnapshot) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawSnapshot) as MobileRecoverySnapshot;
+
+    if (
+      parsed.version !== 1 ||
+      !Array.isArray(parsed.textLayers) ||
+      parsed.canvasSize?.width <= 0 ||
+      parsed.canvasSize?.height <= 0 ||
+      (parsed.imageDataUrl !== undefined && typeof parsed.imageDataUrl !== 'string')
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export function App() {
@@ -366,6 +430,13 @@ export function App() {
       appState.retouch.mode === 'select' ||
       hasPhoneSelectionSession
     );
+  const previewGuardrails = resolveMobilePreviewGuardrails({
+    canvasSize: appState.canvasSize,
+    hasRasterEffects:
+      hasActiveSceneImageAdjustments(appState.sceneImageAdjustments) ||
+      hasActiveSceneEffectStack(appState.sceneEffectStack),
+    viewportWidth,
+  });
   const toolToggleLabel = isInspectorVisible ? 'Hide tools' : 'Show tools';
   const previewPanSessionRef = useRef<{
     pointerId: number | null;
@@ -578,6 +649,77 @@ export function App() {
   }, [mobileShellLayout.shellMode]);
 
   useEffect(() => {
+    if (viewportWidth > SMALL_TABLET_MAX_WIDTH) {
+      return;
+    }
+
+    const snapshot = readMobileRecoverySnapshot();
+
+    if (!snapshot) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const applyRecoveredState = (image: HTMLImageElement | null, nextStatusMessage: string) => {
+      if (cancelled) {
+        return;
+      }
+
+      pendingAutoFitPreviewRef.current = true;
+      setAppState((currentState) => ({
+        ...currentState,
+        activeLayerId: snapshot.textLayers[0]?.id ?? null,
+        canvasSize: { ...snapshot.canvasSize },
+        errorMessage: null,
+        image,
+        layers: cloneTextLayers(snapshot.textLayers),
+        previewZoomFactor: currentState.previewZoomFactor,
+        sceneEffectStack: createDefaultSceneEffectStack(),
+        sceneImageAdjustments: createDefaultSceneImageAdjustments(),
+        sceneWatermark: {
+          ...createDefaultSceneWatermark(),
+          enabled: false,
+        },
+        status: 'idle',
+      }));
+      setPreviewPan({ x: 0, y: 0 });
+      setStatusMessage(nextStatusMessage);
+    };
+
+    if (!snapshot.imageDataUrl) {
+      applyRecoveredState(
+        null,
+        'Recovered the last mobile draft text after the previous session was interrupted. Non-text content could not be restored on this phone.',
+      );
+      return;
+    }
+
+    loadImageElementFromUrl(snapshot.imageDataUrl)
+      .then((image) => {
+        if (cancelled) {
+          return;
+        }
+
+        applyRecoveredState(
+          image,
+          'Recovered the last mobile draft with editable text layers after the previous session was interrupted. Non-text content was flattened into the base image.',
+        );
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        window.sessionStorage.removeItem(MOBILE_RECOVERY_STORAGE_KEY);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewportWidth]);
+
+  useEffect(() => {
     if (!pendingAutoFitPreviewRef.current || typeof window === 'undefined') {
       return undefined;
     }
@@ -610,6 +752,44 @@ export function App() {
   }, [appState.canvasSize, viewportHeight, viewportWidth]);
 
   useEffect(() => {
+    function persistMobileRecoverySnapshot() {
+      if (
+        typeof window === 'undefined' ||
+        viewportWidth > SMALL_TABLET_MAX_WIDTH ||
+        !hasVisibleSceneContent(appStateRef.current)
+      ) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      if (!canvas) {
+        return;
+      }
+
+      try {
+        persistMobileRecoverySnapshotToStorage(appStateRef.current, window.sessionStorage);
+      } catch {
+        // Ignore recovery snapshot failures and keep the current session running.
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        persistMobileRecoverySnapshot();
+      }
+    }
+
+    window.addEventListener('pagehide', persistMobileRecoverySnapshot);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', persistMobileRecoverySnapshot);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [viewportWidth]);
+
+  useEffect(() => {
     if (!showLocalOnlyTabs && activeInspectorTab === 'experimental') {
       setActiveInspectorTab('layers');
     }
@@ -636,14 +816,13 @@ export function App() {
 
   function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
     pendingAutoFitPreviewRef.current = true;
+    const loadedImageGuardrails = resolveLoadedImageGuardrails({
+      sourceSize: getImageSourceSize(image, appStateRef.current.canvasSize),
+      viewportWidth,
+    });
 
     applyAppStateChange((currentState) => {
-      const sourceSize = getImageSourceSize(image, currentState.canvasSize);
-      const canvasSize = getContainedCanvasSize(
-        sourceSize.width,
-        sourceSize.height,
-        MAX_PREVIEW_WIDTH,
-      );
+      const canvasSize = loadedImageGuardrails.canvasSize;
       const fitZoomFactor = resolveFitToWindowZoomFactor(canvasSize, previewFrameRef.current);
 
       return {
@@ -657,7 +836,9 @@ export function App() {
       };
     });
     setPreviewPan({ x: 0, y: 0 });
-    setStatusMessage(nextStatus);
+    setStatusMessage(
+      loadedImageGuardrails.message ? `${nextStatus} ${loadedImageGuardrails.message}` : nextStatus,
+    );
   }
 
   function cancelSceneBounds() {
@@ -1824,29 +2005,41 @@ export function App() {
       !canCopyImageToClipboard({
         hasClipboardItem: typeof ClipboardItem !== 'undefined',
         hasClipboardWrite: typeof navigator.clipboard?.write === 'function',
+        isSecureContext: typeof window === 'undefined' ? true : window.isSecureContext,
       })
     ) {
-      openCopyFallbackModal(canvas, 'clipboard-unsupported', restoreFocusTo);
-      return;
-    }
-
-    const blob = await canvasToBlob(canvas);
-
-    if (!blob) {
-      openCopyFallbackModal(canvas, 'blob-unavailable', restoreFocusTo);
+      openCopyFallbackModal(
+        canvas,
+        typeof window !== 'undefined' && !window.isSecureContext
+          ? 'secure-context-required'
+          : 'clipboard-unsupported',
+        restoreFocusTo,
+      );
       return;
     }
 
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
-          'image/png': Promise.resolve(blob),
+          'image/png': canvasToBlob(canvas).then((blob) => {
+            if (!blob) {
+              throw new Error('blob-unavailable');
+            }
+
+            return blob;
+          }),
         }),
       ]);
       setCopyFallbackModalState(null);
       setStatusMessage(resolveMobileExportMessage('copy-success'));
     } catch {
-      openCopyFallbackModal(canvas, 'clipboard-blocked', restoreFocusTo);
+      const blob = await canvasToBlob(canvas);
+
+      openCopyFallbackModal(
+        canvas,
+        blob ? 'clipboard-blocked' : 'blob-unavailable',
+        restoreFocusTo,
+      );
     }
   }
 
@@ -2613,6 +2806,7 @@ export function App() {
                 sceneImageAdjustments={appState.sceneImageAdjustments}
                 sceneEffectStack={appState.sceneEffectStack}
                 sceneWatermark={appState.sceneWatermark}
+                previewGuardrails={previewGuardrails}
                 previewPan={previewPan}
                 previewZoomFactor={appState.previewZoomFactor}
                 isSceneCropMode={appState.activeSceneBoundsMode === 'crop'}
@@ -3446,6 +3640,13 @@ function cloneLayers(layers: EditorLayer[]) {
   });
 }
 
+function cloneTextLayers(layers: TextLayer[]) {
+  return layers.map((layer) => ({
+    ...layer,
+    box: { ...layer.box },
+  }));
+}
+
 function historySnapshotsEqual(a: EditorHistorySnapshot, b: EditorHistorySnapshot) {
   if (a.image !== b.image || a.activeLayerId !== b.activeLayerId) {
     return false;
@@ -3604,6 +3805,93 @@ function insertImageLayerAboveTarget(
   }
 
   return [...layers.slice(0, targetIndex), nextLayer, ...layers.slice(targetIndex)];
+}
+
+function createMobileRecoverySnapshotBase(state: ReturnType<typeof createDefaultAppState>) {
+  return {
+    canvasSize: { ...state.canvasSize },
+    height: state.canvasSize.height,
+    textLayers: state.layers.filter(isTextLayer).map((layer) => ({
+      ...layer,
+      box: { ...layer.box },
+    })),
+    version: 1 as const,
+    width: state.canvasSize.width,
+  };
+}
+
+function createScaledRecoveryRasterDataUrl(
+  sourceCanvas: HTMLCanvasElement,
+  scale: number,
+) {
+  if (scale === 1) {
+    return sourceCanvas.toDataURL('image/png');
+  }
+
+  const scaledCanvas = document.createElement('canvas');
+  scaledCanvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+  scaledCanvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+  const scaledContext = scaledCanvas.getContext('2d');
+
+  if (!scaledContext) {
+    return null;
+  }
+
+  scaledContext.drawImage(sourceCanvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
+  return scaledCanvas.toDataURL('image/png');
+}
+
+function persistMobileRecoverySnapshotToStorage(
+  state: ReturnType<typeof createDefaultAppState>,
+  storage: Storage,
+) {
+  const recoveryCanvas = document.createElement('canvas');
+  recoveryCanvas.width = state.canvasSize.width;
+  recoveryCanvas.height = state.canvasSize.height;
+  const recoveryContext = recoveryCanvas.getContext('2d');
+
+  if (!recoveryContext) {
+    return;
+  }
+
+  renderPreview(
+    recoveryContext,
+    state.image,
+    state.canvasSize,
+    state.layers.filter((layer) => !isTextLayer(layer)),
+    state.sceneImageAdjustments,
+    state.sceneEffectStack,
+    state.sceneWatermark,
+  );
+
+  const baseSnapshot = createMobileRecoverySnapshotBase(state);
+
+  for (const scale of MOBILE_RECOVERY_SCALE_STEPS) {
+    const imageDataUrl = createScaledRecoveryRasterDataUrl(recoveryCanvas, scale);
+
+    if (!imageDataUrl) {
+      continue;
+    }
+
+    try {
+      storage.setItem(
+        MOBILE_RECOVERY_STORAGE_KEY,
+        JSON.stringify({
+          ...baseSnapshot,
+          imageDataUrl,
+        } satisfies MobileRecoverySnapshot),
+      );
+      return;
+    } catch {
+      // Try a smaller raster snapshot before giving up on non-text recovery.
+    }
+  }
+
+  try {
+    storage.setItem(MOBILE_RECOVERY_STORAGE_KEY, JSON.stringify(baseSnapshot));
+  } catch {
+    // Ignore recovery snapshot failures and keep the current session running.
+  }
 }
 
 function resolveDrawLayerTargetId(

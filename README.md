@@ -44,6 +44,9 @@ Current repo state:
 - phone retouch session bars that move `Draw`, `Erase`, `Pick color`, `Select`, and selection extraction actions to the bottom edge while keeping brush settings in the `Draw` tab
 - experimental retouch now has an explicit phone fallback posture: clone stamp stays desktop-only on phone instead of exposing a brittle touch flow
 - mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and phone copy fallback that opens a long-press-ready finished-image modal with bottom-edge download and close icon actions when direct clipboard image write is unavailable or blocked
+- mobile preview guardrails that reduce expensive raster-effect passes on phone before preview responsiveness falls off, without changing export output
+- phone image imports now downscale oversized working canvases with explicit recovery messaging instead of silently capping them
+- mobile clipboard import/export stays progressive enhancement: async clipboard actions require a secure context, phone export keeps `Download PNG` primary, and interrupted phone sessions restore the latest mobile draft as flattened non-text content with editable text preserved where recovery storage allows, falling back to text-only recovery instead of a blank session when phone storage is too tight
 - undo / redo with physical-key `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z`
 - copy to clipboard and PNG download
 - Vitest coverage for the core editor flows
@@ -54,6 +57,7 @@ Known alpha behavior:
 - effects process in the order shown in the `Effects` block; drag cards to change the pipeline order for preview, copy, and PNG export
 - watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
 - watermark defaults now start enabled with `создано в программе meme-elf` in gray `Arial` at `50%` opacity and `12px`, using the lower-left corner preset
+- if a phone browser interrupts or reloads the session, the app restores the latest mobile draft as a flattened base image rather than reconstructing the full editable layer stack
 - healing, seamless patch, and content-aware repair remain deferred research outcomes rather than shipped editor tools
 
 Current desktop layout conventions:
