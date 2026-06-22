@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   extractImageFromPasteEvent,
+  extractImageUrlFromPasteEvent,
   readImageFromClipboardResult,
   readImageFromClipboard,
   resolveClipboardReadFailureMessage,
@@ -411,5 +412,31 @@ describe('extractImageFromPasteEvent', () => {
 
     expect(image).not.toBeNull();
     expect(image?.src).toBe('blob:working-paste-image');
+  });
+});
+
+describe('extractImageUrlFromPasteEvent', () => {
+  it('returns an http image URL candidate from pasted plain text', () => {
+    const getData = vi.fn((format: string) =>
+      format === 'text/plain' ? 'https://cdn.example.com/meme.png?size=2' : '',
+    );
+    const event = {
+      clipboardData: {
+        getData,
+        items: [],
+      },
+    } as unknown as ClipboardEvent;
+
+    expect(extractImageUrlFromPasteEvent(event)).toBe('https://cdn.example.com/meme.png?size=2');
+  });
+
+  it('ignores non-http URLs', () => {
+    const javascriptEvent = {
+      clipboardData: {
+        getData: vi.fn(() => 'javascript:alert(1)'),
+        items: [],
+      },
+    } as unknown as ClipboardEvent;
+    expect(extractImageUrlFromPasteEvent(javascriptEvent)).toBeNull();
   });
 });

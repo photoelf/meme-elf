@@ -11,6 +11,7 @@ export type MobileShellLayout = {
 export type ToolbarActionId =
   | 'paste'
   | 'upload'
+  | 'url'
   | 'copy'
   | 'download'
   | 'theme'
@@ -56,7 +57,7 @@ export function resolveTopbarActionLayout(
   if (shellMode === 'phone') {
     return {
       overflow: [],
-      primary: ['paste', 'upload', 'theme'],
+      primary: ['paste', 'upload', 'url', 'theme'],
       sticky: ['copy', 'download', 'tools'],
     };
   }
@@ -64,14 +65,14 @@ export function resolveTopbarActionLayout(
   if (shellMode === 'small-tablet') {
     return {
       overflow: [],
-      primary: ['paste', 'upload', 'copy', 'download', 'theme'],
+      primary: ['paste', 'upload', 'url', 'copy', 'download', 'theme'],
       sticky: [],
     };
   }
 
   return {
     overflow: [],
-    primary: ['paste', 'upload', 'copy', 'download', 'theme'],
+    primary: ['paste', 'upload', 'url', 'copy', 'download', 'theme'],
     sticky: [],
   };
 }

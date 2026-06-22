@@ -6,6 +6,7 @@ import { resetPreviewRenderSurfacesForTests } from '../features/canvas/canvas-re
 
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
+  extractImageUrlFromPasteEvent: vi.fn(),
   loadImageElementFromFile: vi.fn(),
   loadImageElementFromUrl: vi.fn(),
   readImageFromClipboard: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../features/clipboard/clipboard-service', () => ({
   extractImageFromPasteEvent: mocks.extractImageFromPasteEvent,
+  extractImageUrlFromPasteEvent: mocks.extractImageUrlFromPasteEvent,
   readImageFromClipboard: mocks.readImageFromClipboard,
   readImageFromClipboardResult: mocks.readImageFromClipboardResult,
   resolveClipboardReadFailureMessage: (
@@ -44,7 +46,7 @@ vi.mock('../features/clipboard/clipboard-service', () => ({
         return `The clipboard image could not be loaded. ${fallbackAction}`;
     }
   },
-}));
+  }));
 
 vi.mock('../features/image/image-loader', () => ({
   loadImageElementFromFile: mocks.loadImageElementFromFile,
@@ -109,6 +111,7 @@ describe('App', () => {
       const image = await mocks.readImageFromClipboard();
       return image ? { image, reason: null } : { image: null, reason: 'no-image' };
     });
+    mocks.extractImageUrlFromPasteEvent.mockReturnValue(null);
     mocks.loadImageElementFromUrl.mockReset();
   });
 
@@ -229,6 +232,7 @@ describe('App', () => {
     const topbar = screen.getByRole('toolbar', { name: /editor actions/i });
     expect(within(topbar).getByRole('button', { name: /paste from clipboard/i })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: /upload image/i })).toBeInTheDocument();
+    expect(within(topbar).getByRole('button', { name: /paste image url/i })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: /copy image/i })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: /download png/i })).not.toBeInTheDocument();
@@ -2414,6 +2418,84 @@ describe('App', () => {
     });
 
     expect(mocks.extractImageFromPasteEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads a pasted direct image URL when the clipboard paste has no image payload', async () => {
+    const pastedUrl = 'https://cdn.example.com/meme.webp';
+    mocks.extractImageFromPasteEvent.mockResolvedValue(null);
+    mocks.extractImageUrlFromPasteEvent.mockReturnValue(pastedUrl);
+    mocks.loadImageElementFromUrl.mockResolvedValue(createImageElement(1024, 512));
+
+    render(<App />);
+    fireEvent.paste(document, new Event('paste', { bubbles: true }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /prepare image/i })).toBeInTheDocument();
+    });
+
+    expect(mocks.loadImageElementFromUrl).toHaveBeenCalledWith(pastedUrl);
+  });
+
+  it('opens URL import from the top bar', async () => {
+    mocks.loadImageElementFromUrl.mockResolvedValue(createImageElement(900, 600));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /paste image url/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /image url/i }), {
+      target: { value: 'https://cdn.example.com/topbar.png' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /load image url/i }));
+
+    await waitFor(() => {
+      expect(mocks.loadImageElementFromUrl).toHaveBeenCalledWith('https://cdn.example.com/topbar.png');
+    });
+    expect(within(dialog).getByText(/upload url/i)).toBeInTheDocument();
+  });
+
+  it('does not block normal text paste inside the URL field while the URL modal is open', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /paste image url/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+    const urlInput = within(dialog).getByRole('textbox', { name: /image url/i });
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      configurable: true,
+      value: {
+        getData: vi.fn(() => 'https://cdn.example.com/pasted.png'),
+        items: [],
+      },
+    });
+
+    const dispatchResult = urlInput.dispatchEvent(pasteEvent);
+
+    expect(dispatchResult).toBe(true);
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    expect(mocks.extractImageFromPasteEvent).not.toHaveBeenCalled();
+  });
+
+  it('opens advanced URL import from the layers panel and keeps add-layer confirmation', async () => {
+    mocks.loadImageElementFromUrl.mockResolvedValue(createImageElement(900, 600));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced import from url/i }));
+    const dialog = await screen.findByRole('dialog', { name: /prepare image/i });
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /image url/i }), {
+      target: { value: 'https://cdn.example.com/layer.png' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /load image url/i }));
+
+    await waitFor(() => {
+      expect(mocks.loadImageElementFromUrl).toHaveBeenCalledWith('https://cdn.example.com/layer.png');
+    });
+    expect(within(dialog).getByRole('button', { name: /add layer/i })).toBeInTheDocument();
+    expect(within(dialog).getByText(/advanced import url/i)).toBeInTheDocument();
   });
 
   it('does not replace the base image from paste while the upload modal is open', async () => {

@@ -4,8 +4,10 @@ export const TEXT_EFFECT_OPTIONS = ['outline', 'shadow', 'none'] as const;
 export const LAYER_KIND_OPTIONS = ['text', 'image', 'draw'] as const;
 export const MODAL_SOURCE_KIND_OPTIONS = [
   'upload-image',
+  'upload-url',
   'advanced-import-file',
   'advanced-import-clipboard',
+  'advanced-import-url',
 ] as const;
 export const ADVANCED_IMPORT_PLACEMENT_MODE_OPTIONS = [
   'inside-canvas',
@@ -152,6 +154,9 @@ export type PreInsertModalDraft = {
   flipHorizontal: boolean;
   flipVertical: boolean;
   advancedPlacementMode: AdvancedImportPlacementMode;
+  urlInputValue: string;
+  urlStatus: 'idle' | 'loading' | 'error';
+  urlErrorMessage: string | null;
 };
 
 export type BaseLayer = {

@@ -162,7 +162,7 @@ describe('PreInsertModal', () => {
 
     render(
       <PreInsertModal
-        draft={createDraft()}
+        draft={createDraft(createImageElement())}
         isCropMode={true}
         {...handlers}
       />,
@@ -305,7 +305,7 @@ describe('PreInsertModal', () => {
   it('takes focus on mount so modal shortcuts stay local', () => {
     render(
       <PreInsertModal
-        draft={createDraft()}
+        draft={createDraft(createImageElement())}
         isCropMode={false}
         onCancel={() => {}}
         onConfirm={() => {}}
@@ -323,7 +323,7 @@ describe('PreInsertModal', () => {
   it('cycles focus within the modal when tabbing forward and backward', () => {
     render(
       <PreInsertModal
-        draft={createDraft()}
+        draft={createDraft(createImageElement())}
         isCropMode={false}
         onCancel={() => {}}
         onConfirm={() => {}}
@@ -402,6 +402,9 @@ function createDraft(
     flipHorizontal: false,
     flipVertical: false,
     advancedPlacementMode,
+    urlInputValue: '',
+    urlStatus: 'idle',
+    urlErrorMessage: null,
   };
 }
 

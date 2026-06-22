@@ -22,6 +22,7 @@ import {
 import { renderPreview } from '../features/canvas/canvas-renderer';
 import {
   extractImageFromPasteEvent,
+  extractImageUrlFromPasteEvent,
   readImageFromClipboardResult,
   resolveClipboardReadFailureMessage,
 } from '../features/clipboard/clipboard-service';
@@ -129,7 +130,8 @@ type ImageInsertionMode =
   | 'outside-bottom';
 type ImportTarget =
   | { kind: 'base' }
-  | { kind: 'advanced-import-file' };
+  | { kind: 'advanced-import-file' }
+  | { kind: 'advanced-import-url' };
 type ImportRequestContext = {
   restoreFocusTo: HTMLElement | null;
   target: ImportTarget;
@@ -371,6 +373,7 @@ export function App() {
   const nextDrawLayerSequenceRef = useRef(1);
   const lastShortcutCopyAtRef = useRef(0);
   const latestExplicitClipboardRequestTokenRef = useRef(0);
+  const latestUrlImportRequestTokenRef = useRef(0);
   const pendingAutoFitPreviewRef = useRef(true);
   const selectionClipboardRef = useRef<SelectionClipboardSnapshot | null>(null);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
@@ -1022,7 +1025,12 @@ export function App() {
   function openPreInsertModal(
     image: HTMLImageElement,
     fileName: string,
-    sourceKind: 'upload-image' | 'advanced-import-file' | 'advanced-import-clipboard',
+    sourceKind:
+      | 'upload-image'
+      | 'upload-url'
+      | 'advanced-import-file'
+      | 'advanced-import-clipboard'
+      | 'advanced-import-url',
     requestContext: ImportRequestContext,
   ) {
     const sourceSize = {
@@ -1055,6 +1063,45 @@ export function App() {
         flipHorizontal: false,
         flipVertical: false,
         advancedPlacementMode: currentState.preferredAdvancedImportPlacementMode,
+        urlInputValue: '',
+        urlStatus: 'idle',
+        urlErrorMessage: null,
+      },
+      status: 'idle',
+    }));
+  }
+
+  function openUrlImportModal(
+    sourceKind: 'upload-url' | 'advanced-import-url',
+    requestContext: ImportRequestContext,
+    initialUrl = '',
+  ) {
+    preInsertSessionRef.current = {
+      pendingUploadFileName: null,
+      previousStatusMessage: statusMessage,
+      requestContext,
+    };
+    isPreInsertModalOpenRef.current = true;
+    setIsPreInsertCropMode(true);
+    setAppState((currentState) => ({
+      ...currentState,
+      preInsertModalDraft: {
+        pendingSource: {
+          image: null,
+          sourceKind,
+          sourceSize: {
+            width: 1,
+            height: 1,
+          },
+        },
+        cropBox: null,
+        rotationQuarterTurns: 0,
+        flipHorizontal: false,
+        flipVertical: false,
+        advancedPlacementMode: currentState.preferredAdvancedImportPlacementMode,
+        urlInputValue: initialUrl,
+        urlStatus: 'idle',
+        urlErrorMessage: null,
       },
       status: 'idle',
     }));
@@ -1072,6 +1119,7 @@ export function App() {
       requestContext: createImportRequestContext({ kind: 'base' }, null),
     };
     isPreInsertModalOpenRef.current = false;
+    latestUrlImportRequestTokenRef.current += 1;
     setIsPreInsertCropMode(false);
     setStatusMessage(nextStatusMessage);
     setAppState((currentState) => ({
@@ -1985,6 +2033,126 @@ export function App() {
     );
   }
 
+  function handleUrlImportClick(opener: HTMLButtonElement) {
+    openUrlImportModal('upload-url', createImportRequestContext({ kind: 'base' }, opener));
+  }
+
+  function handleAdvancedImportUrlClick(opener: HTMLButtonElement) {
+    openUrlImportModal(
+      'advanced-import-url',
+      createImportRequestContext({ kind: 'advanced-import-url' }, opener),
+    );
+  }
+
+  async function handlePreInsertUrlLoad(urlOverride?: string) {
+    const preInsertModalDraft = appStateRef.current.preInsertModalDraft;
+
+    if (!preInsertModalDraft && !urlOverride) {
+      return;
+    }
+
+    const nextUrl = (urlOverride ?? preInsertModalDraft?.urlInputValue ?? '').trim();
+
+    if (!nextUrl) {
+      setAppState((currentState) => ({
+        ...currentState,
+        preInsertModalDraft: currentState.preInsertModalDraft
+          ? {
+              ...currentState.preInsertModalDraft,
+              urlStatus: 'error',
+              urlErrorMessage: 'Paste a direct image URL first.',
+            }
+          : null,
+      }));
+      return;
+    }
+
+    latestUrlImportRequestTokenRef.current += 1;
+    const requestToken = latestUrlImportRequestTokenRef.current;
+
+    setAppState((currentState) => ({
+      ...currentState,
+      preInsertModalDraft: currentState.preInsertModalDraft
+        ? {
+            ...currentState.preInsertModalDraft,
+            urlInputValue: nextUrl,
+            urlStatus: 'loading',
+            urlErrorMessage: null,
+          }
+        : null,
+    }));
+
+    try {
+      const image = await loadImageElementFromUrl(nextUrl);
+
+      if (latestUrlImportRequestTokenRef.current !== requestToken) {
+        revokeLoadedImageObjectUrl(image);
+        return;
+      }
+
+      const sourceSize = {
+        width: image.naturalWidth || appStateRef.current.canvasSize.width,
+        height: image.naturalHeight || appStateRef.current.canvasSize.height,
+      };
+      const fileName = resolveImageUrlFileName(nextUrl);
+
+      setAppState((currentState) => {
+        const currentDraft = currentState.preInsertModalDraft;
+
+        if (!currentDraft) {
+          revokeLoadedImageObjectUrl(image);
+          return currentState;
+        }
+
+        revokeLoadedImageObjectUrl(currentDraft.pendingSource.image);
+
+        return {
+          ...currentState,
+          preInsertModalDraft: {
+            ...currentDraft,
+            pendingSource: {
+              ...currentDraft.pendingSource,
+              image,
+              sourceSize,
+            },
+            cropBox: {
+              startX: 0,
+              startY: 0,
+              endX: sourceSize.width,
+              endY: sourceSize.height,
+            },
+            rotationQuarterTurns: 0,
+            flipHorizontal: false,
+            flipVertical: false,
+            urlInputValue: nextUrl,
+            urlStatus: 'idle',
+            urlErrorMessage: null,
+          },
+        };
+      });
+      preInsertSessionRef.current = {
+        ...preInsertSessionRef.current,
+        pendingUploadFileName: fileName,
+      };
+    } catch (error) {
+      if (latestUrlImportRequestTokenRef.current !== requestToken) {
+        return;
+      }
+
+      setAppState((currentState) => ({
+        ...currentState,
+        preInsertModalDraft: currentState.preInsertModalDraft
+          ? {
+              ...currentState.preInsertModalDraft,
+              urlInputValue: nextUrl,
+              urlStatus: 'error',
+              urlErrorMessage: resolveUrlImportFailureMessage(error),
+            }
+          : null,
+      }));
+    }
+  }
+
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const [file] = Array.from(event.target.files ?? []);
 
@@ -2105,6 +2273,10 @@ export function App() {
 
   useEffect(() => {
     async function handlePasteEvent(event: ClipboardEvent) {
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
       const clipboardRouting = resolveClipboardRouting(
         event.target,
         isPreInsertModalOpenRef.current,
@@ -2118,12 +2290,25 @@ export function App() {
 
       const image = await extractImageFromPasteEvent(event);
 
-      if (!image) {
+      if (image) {
+        event.preventDefault();
+        applyLoadedImage(image, 'Image pasted from the clipboard.');
+        return;
+      }
+
+      const pastedUrl = extractImageUrlFromPasteEvent(event);
+
+      if (!pastedUrl) {
         return;
       }
 
       event.preventDefault();
-      applyLoadedImage(image, 'Image pasted from the clipboard.');
+      openUrlImportModal(
+        'upload-url',
+        createImportRequestContext({ kind: 'base' }, null),
+        pastedUrl,
+      );
+      void handlePreInsertUrlLoad(pastedUrl);
     }
 
     document.addEventListener('paste', handlePasteEvent);
@@ -2453,6 +2638,18 @@ export function App() {
             onClick={(event) => {
               dismissActiveTextFocus();
               handleUploadClick(event.currentTarget);
+            }}
+          />
+        );
+      case 'url':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Paste image URL"
+            icon={<UrlIcon />}
+            onClick={(event) => {
+              dismissActiveTextFocus();
+              handleUrlImportClick(event.currentTarget);
             }}
           />
         );
@@ -2933,6 +3130,7 @@ export function App() {
               void handleAdvancedImportClipboardClick(opener);
             }}
             onOpenAdvancedImportFile={handleAdvancedImportFileClick}
+            onOpenAdvancedImportUrl={handleAdvancedImportUrlClick}
             onBackgroundPointerDown={blurActiveEditable}
             onInterfacePointerDown={dismissActiveTextFocus}
             onApplySceneCrop={applySceneCropCommit}
@@ -3111,7 +3309,10 @@ export function App() {
       {preInsertDraft ? (
         <PreInsertModal
           confirmLabel={
-            preInsertDraft.pendingSource.sourceKind === 'upload-image' ? 'Confirm' : 'Add layer'
+            (preInsertDraft.pendingSource.sourceKind === 'upload-image' ||
+            preInsertDraft.pendingSource.sourceKind === 'upload-url')
+              ? 'Confirm'
+              : 'Add layer'
           }
           draft={preInsertDraft}
           isCropMode={isPreInsertCropMode}
@@ -3127,6 +3328,11 @@ export function App() {
 
             if (preparedImage) {
               if (requestContext.target.kind === 'advanced-import-file') {
+                addImageLayer(preparedImage, fileName, preInsertDraft.advancedPlacementMode);
+                return;
+              }
+
+              if (requestContext.target.kind === 'advanced-import-url') {
                 addImageLayer(preparedImage, fileName, preInsertDraft.advancedPlacementMode);
                 return;
               }
@@ -3199,6 +3405,22 @@ export function App() {
                 : null,
             }))
           }
+          onUrlInputChange={(urlInputValue) =>
+            setAppState((currentState) => ({
+              ...currentState,
+              preInsertModalDraft: currentState.preInsertModalDraft
+                ? {
+                    ...currentState.preInsertModalDraft,
+                    urlInputValue,
+                    urlStatus: 'idle',
+                    urlErrorMessage: null,
+                  }
+                : null,
+            }))
+          }
+          onUrlLoad={() => {
+            void handlePreInsertUrlLoad();
+          }}
           restoreFocusTo={preInsertSessionRef.current.requestContext.restoreFocusTo}
         />
       ) : null}
@@ -3310,6 +3532,20 @@ function UploadIcon() {
     <IconBase>
       <path d="M10 13V4.5M6.5 8 10 4.5 13.5 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M4.5 14.5V16h11v-1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
+function UrlIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M6.2 12.8 4.6 14.4a2.2 2.2 0 1 0 3.1 3.1l1.8-1.8M13.8 7.2l1.6-1.6a2.2 2.2 0 1 0-3.1-3.1l-1.8 1.8M7.8 12.2l4.4-4.4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </IconBase>
   );
 }
@@ -3571,6 +3807,30 @@ function createPreparedImageFromDraft(preInsertModalDraft: NonNullable<ReturnTyp
   preparedContext.restore();
 
   return preparedCanvas as unknown as HTMLImageElement;
+}
+
+function resolveImageUrlFileName(url: string) {
+  try {
+    const parsedUrl = new URL(url);
+    const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+    const lastSegment = pathSegments[pathSegments.length - 1];
+
+    if (lastSegment) {
+      return decodeURIComponent(lastSegment);
+    }
+
+    return `${parsedUrl.hostname} image`;
+  } catch {
+    return 'URL image';
+  }
+}
+
+function resolveUrlImportFailureMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'That URL could not be loaded as an image. Use a direct PNG, JPEG, or WebP URL.';
 }
 
 function createSceneCroppedImage(

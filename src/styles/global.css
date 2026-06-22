@@ -633,6 +633,83 @@ button {
   font-size: 0.76rem;
 }
 
+.template-picker {
+  min-height: 0;
+  max-height: 100%;
+  display: grid;
+  align-content: start;
+  overflow: hidden;
+}
+
+.template-picker-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+  gap: 10px;
+  align-content: start;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.template-picker-tile {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+  color: var(--text);
+  text-align: left;
+}
+
+.template-picker-tile:hover,
+.template-picker-tile:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.template-picker-preview-shell {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%),
+    var(--checker-b);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+}
+
+.template-picker-preview-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+
+.template-picker-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.template-picker-description,
+.template-picker-empty-copy {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.template-picker-empty-state {
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+}
+
 .layer-tools-card {
   display: grid;
   gap: 6px;
@@ -1464,6 +1541,20 @@ button {
   align-content: start;
   max-height: min(45vh, 360px);
   overflow: auto;
+}
+
+.pre-insert-url-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.pre-insert-url-error {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.pre-insert-url-error {
+  color: var(--danger);
 }
 
 .pre-insert-toggle-active,

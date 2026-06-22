@@ -65,6 +65,9 @@ function createDraft(
     flipHorizontal: false,
     flipVertical: false,
     advancedPlacementMode: 'outside-bottom',
+    urlInputValue: '',
+    urlStatus: 'idle',
+    urlErrorMessage: null,
     ...overrides,
   };
 }

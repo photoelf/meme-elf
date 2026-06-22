@@ -114,3 +114,23 @@ export async function extractImageFromPasteEvent(
 
   return null;
 }
+
+export function extractImageUrlFromPasteEvent(event: ClipboardEvent): string | null {
+  const pastedText = event.clipboardData?.getData('text/plain')?.trim();
+
+  if (!pastedText) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(pastedText);
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return null;
+    }
+
+    return parsedUrl.toString();
+  } catch {
+    return null;
+  }
+}

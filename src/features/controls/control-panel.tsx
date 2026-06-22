@@ -62,6 +62,7 @@ type ControlPanelProps = {
   templatePresets: readonly MelfTemplateDocument[];
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
+  onOpenAdvancedImportUrl: (opener: HTMLButtonElement) => void;
   onBackgroundPointerDown: () => void;
   onInterfacePointerDown: () => void;
   onApplySceneCrop: () => void;
@@ -151,6 +152,7 @@ export function ControlPanel({
   templatePresets,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
+  onOpenAdvancedImportUrl,
   onBackgroundPointerDown,
   onInterfacePointerDown,
   onApplySceneCrop,
@@ -320,6 +322,23 @@ export function ControlPanel({
                   }}
                 >
                   <PasteImageIcon />
+                </button>
+                <button
+                  type="button"
+                  className="mini-action-button mini-action-button-icon image-import-button icon-button-with-tooltip"
+                  aria-label="Advanced import from URL"
+                  data-tooltip="Advanced import from URL"
+                  disabled={isImportModalOpen}
+                  onPointerDown={handleTooltipTouchPointerDown}
+                  onTouchStart={handleTooltipTouchStart}
+                  onFocus={handleTooltipTouchFocus}
+                  onClick={(event) => {
+                    handleTooltipTouchClick(event);
+                    clearRetouchMode();
+                    onOpenAdvancedImportUrl(event.currentTarget);
+                  }}
+                >
+                  <UrlImageIcon />
                 </button>
               </div>
             </div>
@@ -1399,6 +1418,21 @@ function PasteImageIcon() {
     <RailIconBase>
       <rect x="5.2" y="4.8" width="9.6" height="11" rx="1.4" stroke="currentColor" strokeWidth="1.2" />
       <path d="M8 4.8v-1h4v1M7.2 8.2h5.6M7.2 11h5.6M3.8 7.2V15a1 1 0 0 0 1 1h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </RailIconBase>
+  );
+}
+
+function UrlImageIcon() {
+  return (
+    <RailIconBase>
+      <path
+        d="M6.4 12.8 4.8 14.4a2.3 2.3 0 0 0 3.2 3.2l1.8-1.8M13.6 7.2l1.6-1.6a2.3 2.3 0 1 0-3.2-3.2l-1.8 1.8M7.8 12.2l4.4-4.4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12.8 14.6h2.8M14.2 13.2V16" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </RailIconBase>
   );
 }

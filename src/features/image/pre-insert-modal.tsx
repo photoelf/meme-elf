@@ -24,6 +24,8 @@ type PreInsertModalProps = {
   onCropBoxChange?: (cropBox: CropDraftBox | null) => void;
   onRotateClockwise: () => void;
   onRotateCounterClockwise: () => void;
+  onUrlInputChange?: (value: string) => void;
+  onUrlLoad?: () => void;
   restoreFocusTo?: HTMLElement | null;
 };
 
@@ -53,24 +55,32 @@ export function PreInsertModal({
   onCropBoxChange,
   onRotateClockwise,
   onRotateCounterClockwise,
+  onUrlInputChange,
+  onUrlLoad,
   restoreFocusTo,
 }: PreInsertModalProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cropInteractionRef = useRef<CropInteraction | null>(null);
-  const isAdvancedImport = draft.pendingSource.sourceKind !== 'upload-image';
+  const isAdvancedImport = isAdvancedImportSourceKind(draft.pendingSource.sourceKind);
+  const isUrlImport = isUrlImportSourceKind(draft.pendingSource.sourceKind);
   const supportsCropMode = !isCoarsePointerEnvironment();
   const effectiveCropMode = supportsCropMode && isCropMode;
-  const previewSize = resolvePreparedOutputDimensions({
-    sourceSize: draft.pendingSource.sourceSize,
-    cropBox: draft.cropBox,
-    rotationQuarterTurns: draft.rotationQuarterTurns,
-  });
-  const previewCanvasSize = getPreviewCanvasSize(
-    draft.pendingSource.sourceSize,
-    draft.rotationQuarterTurns,
-  );
+  const hasLoadedImage = Boolean(draft.pendingSource.image);
+  const previewSize = hasLoadedImage
+    ? resolvePreparedOutputDimensions({
+        sourceSize: draft.pendingSource.sourceSize,
+        cropBox: draft.cropBox,
+        rotationQuarterTurns: draft.rotationQuarterTurns,
+      })
+    : null;
+  const previewCanvasSize = hasLoadedImage
+    ? getPreviewCanvasSize(
+        draft.pendingSource.sourceSize,
+        draft.rotationQuarterTurns,
+      )
+    : { width: 1, height: 1 };
   const cropOverlayStyle = draft.cropBox
     ? getCropOverlayStyle({
         cropBox: draft.cropBox,
@@ -302,9 +312,11 @@ export function PreInsertModal({
           <div className="pre-insert-preview-panel">
             <div className="pre-insert-preview-meta">
               <span>{draft.pendingSource.sourceKind.replace(/-/g, ' ')}</span>
-              <span>
-                {previewSize.width} x {previewSize.height}
-              </span>
+              {previewSize ? (
+                <span>
+                  {previewSize.width} x {previewSize.height}
+                </span>
+              ) : null}
             </div>
             <div
               className={`pre-insert-preview${effectiveCropMode ? ' pre-insert-preview-crop-mode' : ''}`}
@@ -438,12 +450,52 @@ export function PreInsertModal({
                   ) : null}
                 </div>
               ) : (
-                <div className="pre-insert-preview-placeholder">Preview ready</div>
+                <div className="pre-insert-preview-placeholder">
+                  {isUrlImport ? 'Paste a direct image URL to preview it here' : 'Preview ready'}
+                </div>
               )}
             </div>
           </div>
 
           <div className="pre-insert-controls">
+            {isUrlImport ? (
+              <div className="pre-insert-url-controls">
+                <div className="field-stack">
+                  <label className="field-label" htmlFor="pre-insert-image-url">
+                    Image URL
+                  </label>
+                  <input
+                    id="pre-insert-image-url"
+                    className="text-input"
+                    type="url"
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="https://example.com/meme.png"
+                    value={draft.urlInputValue}
+                    onChange={(event) => onUrlInputChange?.(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        onUrlLoad?.();
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="apply-all-button"
+                  disabled={draft.urlStatus === 'loading'}
+                  onClick={() => onUrlLoad?.()}
+                >
+                  {draft.urlStatus === 'loading' ? 'Loading URL...' : 'Load image URL'}
+                </button>
+                {draft.urlErrorMessage ? (
+                  <p className="pre-insert-url-error">{draft.urlErrorMessage}</p>
+                ) : null}
+              </div>
+            ) : null}
             {isAdvancedImport ? (
               <div className="field-stack">
                 <label className="field-label" htmlFor="pre-insert-placement-mode">
@@ -465,20 +517,21 @@ export function PreInsertModal({
                 </select>
               </div>
             ) : null}
-            <button type="button" className="apply-all-button" onClick={onRotateClockwise}>
+            <button type="button" className="apply-all-button" disabled={!hasLoadedImage} onClick={onRotateClockwise}>
               Rotate 90 clockwise
             </button>
             <button
               type="button"
               className="apply-all-button"
+              disabled={!hasLoadedImage}
               onClick={onRotateCounterClockwise}
             >
               Rotate 90 counter-clockwise
             </button>
-            <button type="button" className="apply-all-button" onClick={onFlipHorizontal}>
+            <button type="button" className="apply-all-button" disabled={!hasLoadedImage} onClick={onFlipHorizontal}>
               Flip horizontal
             </button>
-            <button type="button" className="apply-all-button" onClick={onFlipVertical}>
+            <button type="button" className="apply-all-button" disabled={!hasLoadedImage} onClick={onFlipVertical}>
               Flip vertical
             </button>
           </div>
@@ -488,7 +541,12 @@ export function PreInsertModal({
           <button type="button" className="apply-all-button" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="apply-all-button pre-insert-confirm-button" onClick={onConfirm}>
+          <button
+            type="button"
+            className="apply-all-button pre-insert-confirm-button"
+            disabled={!hasLoadedImage || draft.urlStatus === 'loading'}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </button>
         </div>
@@ -522,6 +580,14 @@ function isCoarsePointerEnvironment() {
   }
 
   return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+}
+
+function isAdvancedImportSourceKind(sourceKind: PreInsertModalDraft['pendingSource']['sourceKind']) {
+  return sourceKind === 'advanced-import-file' || sourceKind === 'advanced-import-clipboard' || sourceKind === 'advanced-import-url';
+}
+
+function isUrlImportSourceKind(sourceKind: PreInsertModalDraft['pendingSource']['sourceKind']) {
+  return sourceKind === 'upload-url' || sourceKind === 'advanced-import-url';
 }
 
 function getPreviewCanvasSize(

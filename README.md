@@ -3,7 +3,7 @@
 Minimal browser-only meme generator for personal use.
 
 The goal is a fast editor in the spirit of Imgflip:
-- paste an image from the clipboard or upload a file
+- paste an image from the clipboard, load a direct image URL, or upload a file
 - add top and bottom text
 - drag text layers on the image
 - copy the result as an image or download PNG
@@ -14,10 +14,10 @@ Project is in working alpha.
 
 Current repo state:
 - React + TypeScript + Vite static app
-- clipboard paste and file upload
+- clipboard paste, direct image URL import, and file upload
 - top action bar with compact icon-only actions and delayed tooltips
 - right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, and `Watermark`, plus a localhost-only `Experimental` tab in the current workspace build
-- advanced `Upload Image` / `Advanced import` pre-insert modal with crop, rotate, and flip
+- advanced `Upload Image` / `Paste image URL` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
 - expansion presets for equal margin, top caption space, bottom caption space, and square canvas
@@ -37,13 +37,15 @@ Current repo state:
 - extraction from the base image, image layers, and draw layers into normal image layers
 - local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool using `Alt+click` source sampling, layer-scoped stamping, undoable stroke commits, and no healing or seamless-patch automation
 - preview zoom with `1:1`, `Fit`, mouse-wheel zoom, and middle-mouse pan for desktop editing
-- responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Paste` / `Upload` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, and viewport-height / keyboard-aware layout state
+- responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Paste` / `Upload` / `Paste URL` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, and viewport-height / keyboard-aware layout state
 - mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership
 - explicit preview touch scroll suppression so active canvas gestures stay on the canvas instead of turning into page scroll on phone
 - touch-oriented focus cues with a mobile summary banner for active tool / target state, larger preview handles for crop and transform work, and a coarse-pointer fallback that hides pre-insert `Crop mode` until touch-safe parity is in place
 - phone retouch session bars that move `Draw`, `Erase`, `Pick color`, `Select`, and selection extraction actions to the bottom edge while keeping brush settings in the `Draw` tab
 - experimental retouch now has an explicit phone fallback posture: clone stamp stays desktop-only on phone instead of exposing a brittle touch flow
 - mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and phone copy fallback that opens a long-press-ready finished-image modal with bottom-edge download and close icon actions when direct clipboard image write is unavailable or blocked
+- pasted `http/https` URLs now auto-try direct image fetch when the clipboard does not contain an image payload, and the same URL import flow is available from the top bar and `Layers`
+- the URL input inside `Prepare image` remains a normal editable field, so regular text paste works there even while the modal owns background clipboard actions
 - mobile preview guardrails that reduce expensive raster-effect passes on phone before preview responsiveness falls off, without changing export output
 - phone image imports now downscale oversized working canvases with explicit recovery messaging instead of silently capping them
 - mobile clipboard import/export stays progressive enhancement: async clipboard actions require a secure context, phone export keeps `Download PNG` primary, and interrupted phone sessions restore the latest mobile draft as flattened non-text content with editable text preserved where recovery storage allows, falling back to text-only recovery instead of a blank session when phone storage is too tight
@@ -141,6 +143,7 @@ Notes:
 
 Included:
 - clipboard image paste
+- direct image URL import with browser-side `content-type` validation
 - file upload fallback
 - multiple editable text layers
 - basic text styling
