@@ -100,6 +100,17 @@ For local-network manual testing on a phone or tablet:
 1. `npm run dev:lan`
 2. Open `http://<your-lan-ip>:5173` from the other device on the same network
 
+## Install on iPhone
+
+1. Open the deployed `HTTPS` app URL in Safari.
+2. Tap `Share`.
+3. Tap `Add to Home Screen`.
+4. Confirm the app name is `meme-elf`, then tap `Add`.
+
+Installed mode launches the editor from `/` in standalone mode, so it opens like a tool instead of reopening inside a normal Safari tab.
+
+Offline support is intentionally limited: if the app shell is already loaded, some already-cached static assets may keep the shell open briefly, but import/export flows and fresh loads should still be treated as network-dependent in this alpha.
+
 Template publishing workflow:
 1. On localhost, open `Experimental` -> `Template Curator`
 2. Import or edit `.melf` template drafts
