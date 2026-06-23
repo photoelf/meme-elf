@@ -111,6 +111,11 @@ Installed mode launches the editor from `/` in standalone mode, so it opens like
 
 Offline support is intentionally limited: if the app shell is already loaded, some already-cached static assets may keep the shell open briefly, but import/export flows and fresh loads should still be treated as network-dependent in this alpha.
 
+Install audit note:
+- Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.
+- Weak defaults before `9A-1`: only a generic SVG favicon was linked, there was no explicit install name/start URL/theme color contract, and standalone launch metadata was absent.
+- Duplicated or conflicting meta tags before `9A-1`: none found; install-facing tags were missing rather than conflicting.
+
 Template publishing workflow:
 1. On localhost, open `Experimental` -> `Template Curator`
 2. Import or edit `.melf` template drafts
