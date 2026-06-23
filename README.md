@@ -108,6 +108,7 @@ For local-network manual testing on a phone or tablet:
 4. Confirm the app name is `meme-elf`, then tap `Add`.
 
 Installed mode launches the editor from `/` in standalone mode, so it opens like a tool instead of reopening inside a normal Safari tab.
+Standalone launch detection now checks both `(display-mode: standalone)` and Safari `navigator.standalone` so installed-mode launch is recognized consistently across iPhone and other PWA-capable browsers.
 
 Installability is supported in `9A-1`, but reliable offline reopen or reload is not part of this task yet. For now, treat the installed app as network-dependent after the current page session ends. Reliable offline behavior is planned for later Milestone `9B` / `9D` work.
 
