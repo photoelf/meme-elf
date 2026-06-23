@@ -81,6 +81,60 @@ function mockHostname(hostname: string) {
   });
 }
 
+function mockUserAgent(userAgent: string) {
+  Object.defineProperty(window.navigator, 'userAgent', {
+    configurable: true,
+    value: userAgent,
+  });
+}
+
+function mockStandaloneLaunchState(isStandalone: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(display-mode: standalone)' ? isStandalone : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
+
+  Object.defineProperty(window.navigator, 'standalone', {
+    configurable: true,
+    writable: true,
+    value: isStandalone,
+  });
+}
+
+function renderApp(options?: {
+  hostname?: string;
+  standalone?: boolean;
+  userAgent?: string;
+}) {
+  mockHostname(options?.hostname ?? 'localhost');
+  mockUserAgent(
+    options?.userAgent ??
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  );
+  mockStandaloneLaunchState(options?.standalone ?? false);
+
+  return render(<App />);
+}
+
+function resetBrowserShell(options?: {
+  hostname?: string;
+  standalone?: boolean;
+  userAgent?: string;
+}) {
+  mockHostname(options?.hostname ?? 'localhost');
+  mockUserAgent(
+    options?.userAgent ??
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  );
+  mockStandaloneLaunchState(options?.standalone ?? false);
+}
+
 const MOBILE_RECOVERY_STORAGE_KEY = 'meme-elf.mobile-recovery';
 const RECENT_SCENES_STORAGE_KEY = 'meme-elf.recent-scenes';
 const DEV_TEMPLATE_LIBRARY_STORAGE_KEY = 'meme-elf.dev-template-library';
@@ -92,22 +146,12 @@ describe('App', () => {
     document.documentElement.dataset.theme = '';
     window.innerWidth = 1280;
     window.innerHeight = 768;
-    window.matchMedia = vi.fn().mockImplementation(() => ({
-      matches: false,
-      media: '',
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })) as unknown as typeof window.matchMedia;
     Object.defineProperty(window, 'isSecureContext', {
       configurable: true,
       writable: true,
       value: true,
     });
-    mockHostname('localhost');
+    resetBrowserShell();
     window.sessionStorage.clear();
     window.localStorage.clear();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(createCanvasContextStub());
@@ -142,6 +186,38 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+  });
+
+  it('shows passive install help for non-standalone iPhone Safari sessions on the deployed app', () => {
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: false,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.getByText(/add to home screen/i)).toBeInTheDocument();
+    expect(screen.getByText(/share/i)).toBeInTheDocument();
+  });
+
+  it('does not show install help once the app is already in standalone mode', () => {
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: true,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show install help in the default desktop browser flow', () => {
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: false,
+    });
+
+    expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
   });
 
   it('opens a .melf scene through the open picker and restores the saved text layers', async () => {

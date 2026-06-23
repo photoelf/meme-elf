@@ -109,6 +109,7 @@ For local-network manual testing on a phone or tablet:
 
 Installed mode launches the editor from `/` in standalone mode, so it opens like a tool instead of reopening inside a normal Safari tab.
 The standalone-launch helper checks both `(display-mode: standalone)` and Safari `navigator.standalone`, so this install path has an explicit detection contract for later runtime wiring.
+When the app is opened in normal iPhone Safari on the deployed `HTTPS` URL, the editor shows a passive `Share` -> `Add to Home Screen` reminder in the status strip. That copy stays hidden in standalone mode and outside the iPhone Safari install path so the normal quick-meme flow stays quiet.
 
 Installability is supported in `9A-1`, but reliable offline reopen or reload is not part of this task yet. For now, treat the installed app as network-dependent after the current page session ends. Reliable offline behavior is planned for later Milestone `9B` / `9D` work.
 
@@ -123,6 +124,9 @@ Template publishing workflow:
 3. Click `Promote shipped catalog`
 4. Review the repo diff under `public/templates/`
 5. Commit and deploy so the updated shipped catalog appears for normal users in `Templates`
+
+Full step-by-step guide:
+- [docs/template-publishing-workflow.md](/D:/PETS/meme-elf/docs/template-publishing-workflow.md)
 
 ## Hosting Direction
 

@@ -39,6 +39,7 @@ import {
   resolveMobileExportMessage,
 } from '../features/mobile/mobile-export-fallbacks';
 import { CopyFallbackModal } from '../features/mobile/copy-fallback-modal';
+import { getStandaloneLaunchState } from '../features/pwa/pwa-service';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -325,6 +326,28 @@ function shouldShowLocalOnlyTabs() {
   return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 }
 
+function isPassiveInstallHelpTarget() {
+  if (typeof window === 'undefined' || !window.isSecureContext) {
+    return false;
+  }
+
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return false;
+  }
+
+  const { isStandalone } = getStandaloneLaunchState(window);
+
+  if (isStandalone) {
+    return false;
+  }
+
+  const userAgent = window.navigator.userAgent;
+  const isIPhone = /\biPhone\b/i.test(userAgent);
+  const isSafari = /\bSafari\b/i.test(userAgent) && !/\b(CriOS|EdgiOS|FxiOS)\b/i.test(userAgent);
+
+  return isIPhone && isSafari;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -540,6 +563,9 @@ export function App() {
   const templateLibraryMutationVersionRef = useRef(0);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
+  const passiveInstallHelpLabel = isPassiveInstallHelpTarget()
+    ? 'On iPhone Safari, use Share -> Add to Home Screen to install meme-elf.'
+    : null;
   const activeToolLabel = resolveActiveToolLabel(appState);
   const activeTargetLabel = resolveActiveTargetLabel(appState);
   const activeGestureLabel = resolveMobileGestureLabel(appState.mobileInteraction.activeGestureOwner);
@@ -3658,6 +3684,7 @@ export function App() {
           </div>
           <div className="status-strip" aria-label="Editor status">
             <span>{activeStatusLabel}</span>
+            {passiveInstallHelpLabel ? <span>{passiveInstallHelpLabel}</span> : null}
             {mobileShellLayout.shellMode !== 'desktop' ? (
               <>
                 <span>Tool: {activeToolLabel}</span>
