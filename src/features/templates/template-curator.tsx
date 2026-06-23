@@ -13,6 +13,8 @@ type TemplateCuratorProps = {
   onMoveUp: (templateId: string) => void;
   onMoveDown: (templateId: string) => void;
   onDelete: (templateId: string) => void;
+  onPromote: () => void;
+  promoteStatus: 'idle' | 'loading' | 'success' | 'error';
 };
 
 export function TemplateCurator({
@@ -23,7 +25,18 @@ export function TemplateCurator({
   onMoveUp,
   onMoveDown,
   onDelete,
+  onPromote,
+  promoteStatus,
 }: TemplateCuratorProps) {
+  const promoteLabel =
+    promoteStatus === 'loading'
+      ? 'Promoting shipped catalog...'
+      : promoteStatus === 'success'
+        ? 'Shipped catalog updated.'
+        : promoteStatus === 'error'
+          ? 'Shipped catalog promotion failed.'
+          : 'Promote current draft library into shipped templates.';
+
   return (
     <div className="template-curator">
       <div className="template-curator-toolbar">
@@ -45,7 +58,18 @@ export function TemplateCurator({
             }}
           />
         </label>
+        <button
+          type="button"
+          className="mini-action-button"
+          disabled={items.length === 0 || promoteStatus === 'loading'}
+          onClick={onPromote}
+        >
+          Promote shipped catalog
+        </button>
       </div>
+      <p className="section-copy" aria-live="polite">
+        {promoteLabel}
+      </p>
 
       <div className="template-curator-stack">
         {items.map((item, index) => (

@@ -1,0 +1,187 @@
+{
+  "kind": "template",
+  "version": 1,
+  "templateId": "two-buttons",
+  "name": "Two Buttons",
+  "title": "Two Buttons",
+  "description": "Imported from Two Buttons.",
+  "category": "classic",
+  "tags": [
+    "imported"
+  ],
+  "sortOrder": 100,
+  "previewImagePath": "/templates/two-buttons/preview.png",
+  "baseImagePath": "/templates/two-buttons/base.png",
+  "scene": {
+    "canvasSize": {
+      "width": 500,
+      "height": 757
+    },
+    "activeLayerId": "top",
+    "textSlots": [
+      {
+        "id": "top",
+        "role": "top-caption",
+        "name": "Top text",
+        "defaultText": "",
+        "box": {
+          "x": 47,
+          "y": 73,
+          "width": 179,
+          "height": 108,
+          "rotation": -0.27877712791553955
+        },
+        "verticalAlign": "middle",
+        "fontFamily": "Helvetica",
+        "fontSize": 90,
+        "fillStyle": "#ffffff",
+        "strokeStyle": "#000000",
+        "outlineWidth": 5,
+        "textAlign": "center",
+        "effect": "outline",
+        "allCaps": false,
+        "bold": false,
+        "italic": false,
+        "opacity": 1
+      },
+      {
+        "id": "bottom",
+        "role": "bottom-caption",
+        "name": "Bottom text",
+        "defaultText": "",
+        "box": {
+          "x": 239,
+          "y": 51,
+          "width": 115,
+          "height": 78,
+          "rotation": -0.17862082848170346
+        },
+        "verticalAlign": "middle",
+        "fontFamily": "Helvetica",
+        "fontSize": 90,
+        "fillStyle": "#ffffff",
+        "strokeStyle": "#000000",
+        "outlineWidth": 5,
+        "textAlign": "center",
+        "effect": "outline",
+        "allCaps": false,
+        "bold": false,
+        "italic": false,
+        "opacity": 1
+      },
+      {
+        "id": "layer-4",
+        "role": "custom",
+        "name": "Text 4",
+        "defaultText": "",
+        "box": {
+          "x": 25,
+          "y": 637,
+          "width": 452,
+          "height": 82,
+          "rotation": 0
+        },
+        "verticalAlign": "middle",
+        "fontFamily": "Helvetica",
+        "fontSize": 90,
+        "fillStyle": "#ffffff",
+        "strokeStyle": "#000000",
+        "outlineWidth": 5,
+        "textAlign": "center",
+        "effect": "outline",
+        "allCaps": false,
+        "bold": false,
+        "italic": false,
+        "opacity": 1
+      }
+    ],
+    "imageSlots": [
+      {
+        "id": "primary-image",
+        "role": "primary-image",
+        "name": "Primary image",
+        "fitMode": "cover",
+        "anchor": "center",
+        "allowOverflow": false,
+        "box": {
+          "x": 0,
+          "y": 0,
+          "width": 500,
+          "height": 757,
+          "rotation": 0
+        }
+      }
+    ],
+    "canvas": {
+      "backgroundFill": null,
+      "safeInsets": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      }
+    }
+  },
+  "sceneImageAdjustments": {
+    "brightness": 100,
+    "contrast": 100,
+    "saturation": 100,
+    "hue": 0,
+    "grayscale": false,
+    "includeText": false,
+    "sepia": false,
+    "invert": false
+  },
+  "sceneEffectStack": [
+    {
+      "id": "blur",
+      "kind": "blur",
+      "value": 0
+    },
+    {
+      "id": "sharpen",
+      "kind": "sharpen",
+      "value": 0
+    },
+    {
+      "id": "threshold",
+      "kind": "threshold",
+      "value": 0
+    },
+    {
+      "id": "pixelate",
+      "kind": "pixelate",
+      "value": 0
+    },
+    {
+      "id": "noise",
+      "kind": "noise",
+      "value": 0
+    },
+    {
+      "id": "grain",
+      "kind": "grain",
+      "value": 0
+    },
+    {
+      "id": "posterize",
+      "kind": "posterize",
+      "value": 0
+    },
+    {
+      "id": "jpeg",
+      "kind": "jpeg",
+      "value": 0
+    }
+  ],
+  "sceneWatermark": {
+    "enabled": true,
+    "text": "создано в программе meme-elf",
+    "mode": "corner",
+    "corner": "bottom-left",
+    "opacity": 50,
+    "size": 12,
+    "color": "#808080",
+    "rotation": 0
+  }
+}

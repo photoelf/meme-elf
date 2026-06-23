@@ -63,6 +63,7 @@ type ControlPanelProps = {
   sceneWatermark: SceneWatermark;
   sceneExpandDraft: SceneExpandDraft;
   templateCatalog: readonly MelfTemplateCatalogEntry[];
+  templateDraftCatalog: readonly MelfTemplateCatalogEntry[];
   selectedTemplateId: string | null;
   applyingTemplateId: string | null;
   recentScenes: readonly RecentSceneEntry[];
@@ -118,6 +119,8 @@ type ControlPanelProps = {
   onMoveTemplateUp: (templateId: string) => void;
   onMoveTemplateDown: (templateId: string) => void;
   onDeleteTemplate: (templateId: string) => void;
+  onPromoteTemplateCatalog: () => void;
+  templatePromoteStatus: 'idle' | 'loading' | 'success' | 'error';
   onOpenRecentScene: (entry: RecentSceneEntry) => void;
   onRemoveRecentScene: (sceneId: string) => void;
   onRecoverMobileDraft: () => void;
@@ -174,6 +177,7 @@ export function ControlPanel({
   sceneWatermark,
   sceneExpandDraft,
   templateCatalog,
+  templateDraftCatalog,
   selectedTemplateId,
   applyingTemplateId,
   recentScenes,
@@ -213,6 +217,8 @@ export function ControlPanel({
   onMoveTemplateUp,
   onMoveTemplateDown,
   onDeleteTemplate,
+  onPromoteTemplateCatalog,
+  templatePromoteStatus,
   onOpenRecentScene,
   onRemoveRecentScene,
   onRecoverMobileDraft,
@@ -1071,17 +1077,19 @@ export function ControlPanel({
                   <div className="section-heading">
                     <div>
                       <h3 className="section-title">TEMPLATE CURATOR</h3>
-                      <p className="section-copy">Local-only maintenance for the built-in meme set.</p>
+                      <p className="section-copy">Local-only maintenance for imported and shipped meme templates.</p>
                     </div>
                   </div>
                   <TemplateCurator
-                    items={templateCatalog}
+                    items={templateDraftCatalog}
                     onImportFiles={onImportTemplateFiles}
                     onTitleChange={onTemplateTitleChange}
                     onTagsChange={onTemplateTagsChange}
                     onMoveUp={onMoveTemplateUp}
                     onMoveDown={onMoveTemplateDown}
                     onDelete={onDeleteTemplate}
+                    onPromote={onPromoteTemplateCatalog}
+                    promoteStatus={templatePromoteStatus}
                   />
                 </div>
               </>

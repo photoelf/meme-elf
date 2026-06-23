@@ -98,7 +98,6 @@ import {
   stringifyMelfSceneDocument,
 } from '../features/templates/melf-scene';
 import {
-  STARTER_MELF_TEMPLATE_PRESETS,
   type MelfTemplateDocument,
   parseMelfTemplateDocument,
 } from '../features/templates/melf-template';
@@ -121,6 +120,7 @@ import {
   cloneTemplateDocuments,
   getTemplateById,
 } from '../features/templates/template-catalog';
+import { loadShippedTemplateDocuments } from '../features/templates/shipped-template-catalog';
 import { parseImportedTemplateDocument } from '../features/templates/import-template-source';
 import {
   rotateDraftClockwise,
@@ -437,6 +437,7 @@ export function App() {
   const latestExplicitClipboardRequestTokenRef = useRef(0);
   const latestUrlImportRequestTokenRef = useRef(0);
   const latestTemplateApplyRequestTokenRef = useRef(0);
+  const latestShippedTemplateLoadRequestTokenRef = useRef(0);
   const pendingAutoFitPreviewRef = useRef(true);
   const selectionClipboardRef = useRef<SelectionClipboardSnapshot | null>(null);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
@@ -473,6 +474,10 @@ export function App() {
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
   const [templateLibrary, setTemplateLibrary] = useState<MelfTemplateDocument[]>(readInitialTemplateLibrary);
+  const [shippedTemplateLibrary, setShippedTemplateLibrary] = useState<MelfTemplateDocument[]>([]);
+  const [templatePromoteStatus, setTemplatePromoteStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
   const [recentScenes, setRecentScenes] = useState<RecentSceneEntry[]>(readInitialRecentSceneEntries);
@@ -484,7 +489,12 @@ export function App() {
     restoreFocusTo: HTMLElement | null;
   } | null>(null);
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
-  const templateCatalog = createBuiltInTemplateCatalog(templateLibrary);
+  const pickerTemplateLibrary =
+    showLocalOnlyTabs && shippedTemplateLibrary.length === 0
+      ? templateLibrary
+      : shippedTemplateLibrary;
+  const templateCatalog = createBuiltInTemplateCatalog(pickerTemplateLibrary);
+  const draftTemplateCatalog = createBuiltInTemplateCatalog(templateLibrary);
   const mobileShellLayout = resolveMobileShellLayout(viewportWidth);
   const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
   const isInspectorVisible =
@@ -527,11 +537,31 @@ export function App() {
   const historyPastRef = useRef<EditorHistorySnapshot[]>([]);
   const historyFutureRef = useRef<EditorHistorySnapshot[]>([]);
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
+  const templateLibraryMutationVersionRef = useRef(0);
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
   const activeToolLabel = resolveActiveToolLabel(appState);
   const activeTargetLabel = resolveActiveTargetLabel(appState);
   const activeGestureLabel = resolveMobileGestureLabel(appState.mobileInteraction.activeGestureOwner);
+
+  useEffect(() => {
+    let cancelled = false;
+    const requestToken = latestShippedTemplateLoadRequestTokenRef.current + 1;
+    latestShippedTemplateLoadRequestTokenRef.current = requestToken;
+
+    void loadShippedTemplateDocuments().then((templates) => {
+      if (cancelled || latestShippedTemplateLoadRequestTokenRef.current !== requestToken) {
+        return;
+      }
+
+      setShippedTemplateLibrary(templates);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function syncHistoryState() {
     setHistoryState({
       canUndo: historyPastRef.current.length > 0,
@@ -1379,7 +1409,7 @@ export function App() {
     const requestToken = latestTemplateApplyRequestTokenRef.current + 1;
     latestTemplateApplyRequestTokenRef.current = requestToken;
     setApplyingTemplateId(templateId);
-    const template = getTemplateById(templateLibrary, templateId);
+    const template = getTemplateById(pickerTemplateLibrary, templateId);
 
     if (!template) {
       setApplyingTemplateId(null);
@@ -1418,6 +1448,7 @@ export function App() {
   }
 
   function persistTemplateLibrary(nextLibrary: MelfTemplateDocument[]) {
+    templateLibraryMutationVersionRef.current += 1;
     setTemplateLibrary(nextLibrary);
 
     if (typeof window === 'undefined' || !showLocalOnlyTabs) {
@@ -1477,7 +1508,7 @@ export function App() {
   }
 
   function moveTemplate(templateId: string, direction: 'up' | 'down') {
-    const orderedIds = templateCatalog.map((entry) => entry.templateId);
+    const orderedIds = draftTemplateCatalog.map((entry) => entry.templateId);
     const index = orderedIds.indexOf(templateId);
 
     if (index < 0) {
@@ -1521,7 +1552,7 @@ export function App() {
       return;
     }
 
-    const existingIds = templateCatalog.map((entry) => entry.templateId);
+    const existingIds = draftTemplateCatalog.map((entry) => entry.templateId);
     const importedIds = importedTemplates.map((template) => template.templateId);
     const nextOrderedIds = [
       ...importedIds,
@@ -1541,6 +1572,52 @@ export function App() {
         ? `Imported template: ${importedTemplates[0]!.title}.`
         : `Imported ${importedTemplates.length} templates.`,
     );
+  }
+
+  async function refreshShippedTemplateLibrary() {
+    const requestToken = latestShippedTemplateLoadRequestTokenRef.current + 1;
+    latestShippedTemplateLoadRequestTokenRef.current = requestToken;
+    const templates = await loadShippedTemplateDocuments();
+
+    if (latestShippedTemplateLoadRequestTokenRef.current !== requestToken) {
+      return templates;
+    }
+
+    setShippedTemplateLibrary(templates);
+    return templates;
+  }
+
+  async function promoteTemplateCatalog() {
+    setTemplatePromoteStatus('loading');
+
+    try {
+      const response = await fetch('/__dev/templates/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templates: templateLibrary.map((template) => ({
+            templateId: template.templateId,
+            title: template.title,
+            tags: template.tags,
+            sortOrder: template.sortOrder,
+            template,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        setTemplatePromoteStatus('error');
+        setStatusMessage('Failed to promote the shipped template catalog.');
+        return;
+      }
+
+      await refreshShippedTemplateLibrary();
+      setTemplatePromoteStatus('success');
+      setStatusMessage('Shipped template catalog updated.');
+    } catch {
+      setTemplatePromoteStatus('error');
+      setStatusMessage('Failed to promote the shipped template catalog.');
+    }
   }
 
   function handleRetouchBrushSample(sample: { color: string; opacity: number }) {
@@ -2714,10 +2791,19 @@ export function App() {
       return;
     }
 
+    if (typeof window !== 'undefined' && window.localStorage.getItem(DEV_TEMPLATE_LIBRARY_STORAGE_KEY)) {
+      return;
+    }
+
     let cancelled = false;
+    const mutationVersionAtRequestStart = templateLibraryMutationVersionRef.current;
 
     void readPersistedTemplateLibrary(DEV_TEMPLATE_LIBRARY_STORAGE_KEY).then((library) => {
-      if (cancelled || library === null) {
+      if (
+        cancelled ||
+        library === null ||
+        templateLibraryMutationVersionRef.current !== mutationVersionAtRequestStart
+      ) {
         return;
       }
 
@@ -3610,6 +3696,7 @@ export function App() {
             sceneWatermark={appState.sceneWatermark}
             sceneExpandDraft={appState.sceneBoundsDraft.expand}
             templateCatalog={templateCatalog}
+            templateDraftCatalog={draftTemplateCatalog}
             selectedTemplateId={selectedTemplateId}
             applyingTemplateId={applyingTemplateId}
             recentScenes={recentScenes}
@@ -3671,6 +3758,10 @@ export function App() {
             onMoveTemplateUp={(templateId) => moveTemplate(templateId, 'up')}
             onMoveTemplateDown={(templateId) => moveTemplate(templateId, 'down')}
             onDeleteTemplate={deleteTemplate}
+            onPromoteTemplateCatalog={() => {
+              void promoteTemplateCatalog();
+            }}
+            templatePromoteStatus={templatePromoteStatus}
             onOpenRecentScene={(entry) => {
               void handleOpenRecentScene(entry);
             }}
@@ -4448,23 +4539,21 @@ function readInitialRecentSceneEntries() {
 }
 
 function readInitialTemplateLibrary() {
-  const fallbackLibrary = cloneTemplateDocuments(STARTER_MELF_TEMPLATE_PRESETS);
-
   if (typeof window === 'undefined' || !shouldShowLocalOnlyTabs()) {
-    return fallbackLibrary;
+    return [];
   }
 
   const rawLibrary = window.localStorage.getItem(DEV_TEMPLATE_LIBRARY_STORAGE_KEY);
 
   if (!rawLibrary) {
-    return fallbackLibrary;
+    return [];
   }
 
   try {
     const parsed = JSON.parse(rawLibrary) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return fallbackLibrary;
+      return [];
     }
 
     if (parsed.length === 0) {
@@ -4475,9 +4564,9 @@ function readInitialTemplateLibrary() {
       .map((entry) => parseMelfTemplateDocument(JSON.stringify(entry)))
       .filter((entry): entry is MelfTemplateDocument => entry !== null);
 
-    return library.length > 0 ? library : fallbackLibrary;
+    return library;
   } catch {
-    return fallbackLibrary;
+    return [];
   }
 }
 

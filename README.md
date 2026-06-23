@@ -35,8 +35,8 @@ Current repo state:
 - immediate rectangular selection commit with `Copy to new layer` and `Cut to new layer`
 - keyboard `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` extraction flow for selection copy, cut, and paste
 - extraction from the base image, image layers, and draw layers into normal image layers
-- local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool plus a dev-only meme template curator for importing `.melf` templates, editing `title` and `tags`, reordering the curated set, and removing templates without exposing that maintenance flow in the normal editor path
-- built-in meme template picker with square preview tiles in a dedicated inspector `Templates` tab that instantly applies known meme layouts into editable text/image scene state without taking over the main preview workspace
+- local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool plus a dev-only meme template curator for importing `.melf` templates, editing `title` and `tags`, reordering the curated set, removing draft entries, and promoting the current localhost draft library into repo-backed shipped assets under `public/templates/`
+- meme template picker with square preview tiles in a dedicated inspector `Templates` tab that applies whatever is currently in the shipped catalog, while localhost curation remains a separate draft workflow instead of forcing starter presets into the workspace
 - native `.melf` scene document normalization for local save/reopen work, covering embedded base-image payloads plus editable text, image, and draw layers without serializing transient editor UI state
 - top-bar `Open .melf` and `Save .melf` actions for native local save/reopen, preferring browser file-picker handles for overwrite and falling back to hidden file-input open plus downloadable `.melf` files when needed
 - dedicated inspector `Saves` tab for reopening recent local `.melf` scenes from browser storage, removing stale recent entries, and recovering or dismissing interrupted mobile recovery drafts without putting saved-work UX into the main canvas flow
@@ -99,6 +99,13 @@ Current source documents:
 For local-network manual testing on a phone or tablet:
 1. `npm run dev:lan`
 2. Open `http://<your-lan-ip>:5173` from the other device on the same network
+
+Template publishing workflow:
+1. On localhost, open `Experimental` -> `Template Curator`
+2. Import or edit `.melf` template drafts
+3. Click `Promote shipped catalog`
+4. Review the repo diff under `public/templates/`
+5. Commit and deploy so the updated shipped catalog appears for normal users in `Templates`
 
 ## Hosting Direction
 

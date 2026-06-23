@@ -25,6 +25,7 @@ describe('TemplateCurator', () => {
     const onMoveUp = vi.fn();
     const onMoveDown = vi.fn();
     const onDelete = vi.fn();
+    const onPromote = vi.fn();
 
     render(
       <TemplateCurator
@@ -35,6 +36,8 @@ describe('TemplateCurator', () => {
         onMoveUp={onMoveUp}
         onMoveDown={onMoveDown}
         onDelete={onDelete}
+        onPromote={onPromote}
+        promoteStatus="idle"
       />,
     );
 
@@ -56,13 +59,34 @@ describe('TemplateCurator', () => {
     fireEvent.change(screen.getByLabelText(/import template source files/i), {
       target: { files: [file] },
     });
+    fireEvent.click(screen.getByRole('button', { name: /promote shipped catalog/i }));
 
     expect(onTitleChange).toHaveBeenCalledWith('drake', 'Drake meme');
     expect(onTagsChange).toHaveBeenCalledWith('drake', 'reaction, classic');
     expect(onMoveUp).toHaveBeenCalledWith('two-buttons');
     expect(onMoveDown).toHaveBeenCalledWith('drake');
     expect(onDelete).toHaveBeenCalledWith('drake');
+    expect(onPromote).toHaveBeenCalledTimes(1);
     expect(onImportFiles).toHaveBeenCalledTimes(1);
     expect(onImportFiles.mock.calls[0]?.[0]).toHaveLength(1);
+  });
+
+  it('surfaces shipped promotion status and disables promote while a publish is running', () => {
+    render(
+      <TemplateCurator
+        items={CURATOR_ITEMS}
+        onImportFiles={vi.fn()}
+        onTitleChange={vi.fn()}
+        onTagsChange={vi.fn()}
+        onMoveUp={vi.fn()}
+        onMoveDown={vi.fn()}
+        onDelete={vi.fn()}
+        onPromote={vi.fn()}
+        promoteStatus="loading"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /promote shipped catalog/i })).toBeDisabled();
+    expect(screen.getByText(/promoting shipped catalog/i)).toBeInTheDocument();
   });
 });

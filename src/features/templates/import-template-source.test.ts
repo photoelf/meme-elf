@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseImportedTemplateDocument } from './import-template-source';
+import { createTwoButtonsSceneDocument } from './two-buttons-test-fixture';
 
 describe('parseImportedTemplateDocument', () => {
   it('keeps native template documents unchanged', () => {
@@ -46,85 +47,43 @@ describe('parseImportedTemplateDocument', () => {
 
   it('converts saved scene documents into importable template documents', () => {
     const templateDocument = parseImportedTemplateDocument(
-      JSON.stringify({
-        kind: 'scene',
-        version: 1,
-        name: 'Imported Scene',
-        scene: {
-          canvasSize: {
-            width: 640,
-            height: 360,
-          },
-          activeLayerId: 'headline',
-          baseImage: {
-            mimeType: 'image/png',
-            dataUrl: 'data:image/png;base64,AAAA',
-            width: 640,
-            height: 360,
-          },
-          layers: [
-            {
-              kind: 'text',
-              id: 'headline',
-              name: 'Headline',
-              text: 'loaded text',
-              verticalAlign: 'top',
-              box: {
-                x: 20,
-                y: 12,
-                width: 600,
-                height: 96,
-                rotation: 0,
-              },
-            },
-            {
-              kind: 'text',
-              id: 'bottom',
-              name: 'Bottom text',
-              text: 'loaded bottom',
-              verticalAlign: 'bottom',
-              box: {
-                x: 20,
-                y: 252,
-                width: 600,
-                height: 96,
-                rotation: 0,
-              },
-            },
-          ],
-        },
-      }),
-      'imported-scene.melf',
+      JSON.stringify(createTwoButtonsSceneDocument()),
+      'Two Buttons.melf',
     );
 
     expect(templateDocument).not.toBeNull();
     expect(templateDocument).toMatchObject({
       kind: 'template',
-      templateId: 'imported-scene',
-      title: 'Imported Scene',
-      description: 'Imported from imported-scene.',
+      templateId: 'two-buttons',
+      title: 'Two Buttons',
+      description: 'Imported from Two Buttons.',
       category: 'classic',
       tags: ['imported'],
       previewImagePath: 'data:image/png;base64,AAAA',
       baseImagePath: 'data:image/png;base64,AAAA',
       scene: {
         canvasSize: {
-          width: 640,
-          height: 360,
+          width: 500,
+          height: 757,
         },
-        activeLayerId: 'headline',
+        activeLayerId: 'top',
       },
     });
-    expect(templateDocument?.scene.textSlots).toHaveLength(2);
+    expect(templateDocument?.scene.textSlots).toHaveLength(3);
     expect(templateDocument?.scene.textSlots[0]).toMatchObject({
-      id: 'headline',
+      id: 'top',
       role: 'top-caption',
-      defaultText: 'loaded text',
+      defaultText: '',
     });
     expect(templateDocument?.scene.textSlots[1]).toMatchObject({
       id: 'bottom',
       role: 'bottom-caption',
-      defaultText: 'loaded bottom',
+      defaultText: '',
+    });
+    expect(templateDocument?.scene.textSlots[2]).toMatchObject({
+      id: 'layer-4',
+      role: 'custom',
+      defaultText: '',
     });
   });
 

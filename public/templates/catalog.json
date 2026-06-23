@@ -1,3 +1,15 @@
 {
-  "templates": []
+  "templates": [
+    {
+      "templateId": "two-buttons",
+      "title": "Two Buttons",
+      "tags": [
+        "imported"
+      ],
+      "sortOrder": 100,
+      "templatePath": "/templates/two-buttons/template.melf",
+      "previewImagePath": "/templates/two-buttons/preview.png",
+      "baseImagePath": "/templates/two-buttons/base.png"
+    }
+  ]
 }

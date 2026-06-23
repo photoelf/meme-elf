@@ -153,13 +153,14 @@ function resolveImportedTextSlotRole(
 }
 
 function normalizeImportedTemplateName(documentName: string, fileName: string) {
+  const normalizedFileName = normalizeImportedSceneFileName(fileName);
   const trimmedDocumentName = documentName.trim();
 
-  if (trimmedDocumentName.length > 0) {
+  if (trimmedDocumentName.length > 0 && !isGenericImportedSceneName(trimmedDocumentName)) {
     return trimmedDocumentName;
   }
 
-  return normalizeImportedSceneFileName(fileName);
+  return normalizedFileName;
 }
 
 function normalizeImportedSceneFileName(fileName: string) {
@@ -179,4 +180,9 @@ function createImportedTemplateId(name: string) {
 
 function stripMelfExtension(fileName: string) {
   return fileName.toLowerCase().endsWith('.melf') ? fileName.slice(0, -'.melf'.length) : fileName;
+}
+
+function isGenericImportedSceneName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return normalized === 'meme-elf-scene' || normalized === 'untitled scene';
 }

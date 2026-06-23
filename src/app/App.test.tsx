@@ -3,6 +3,7 @@ import { vi } from 'vitest';
 import { App } from './App';
 import { getCanvasPoint } from '../features/preview/preview-canvas';
 import { resetPreviewRenderSurfacesForTests } from '../features/canvas/canvas-renderer';
+import { createTwoButtonsTemplateDocument } from '../features/templates/two-buttons-test-fixture';
 
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
@@ -275,101 +276,75 @@ describe('App', () => {
     expect(window.sessionStorage.getItem(MOBILE_RECOVERY_STORAGE_KEY)).toBeNull();
   });
 
-  it('shows the template picker in the Templates tab and quick-applies a single-caption preset', async () => {
+  it('shows the template picker in the Templates tab and applies the imported Two Buttons fixture', async () => {
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([createTwoButtonsTemplateDocument()]),
+    );
+
     render(<App />);
 
-    expect(screen.queryByRole('button', { name: /top caption/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /two buttons/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
 
     const controls = screen.getByRole('complementary', { name: /controls/i });
-    expect(within(controls).getByRole('button', { name: /classic top \/ bottom/i })).toBeInTheDocument();
-    expect(within(controls).getByRole('button', { name: /square social/i })).toBeInTheDocument();
+    expect(within(controls).getByRole('button', { name: /two buttons/i })).toBeInTheDocument();
 
-    fireEvent.click(within(controls).getByRole('button', { name: /top caption/i }));
+    fireEvent.click(within(controls).getByRole('button', { name: /two buttons/i }));
 
     await waitFor(() => {
       expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
-      expect(screen.queryByRole('textbox', { name: /bottom text/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /text 4/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(/applied template: top caption\./i);
+    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(/applied template: two buttons\./i);
   });
 
   it('loads a template base image immediately when an imported template tile is clicked', async () => {
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([createTwoButtonsTemplateDocument()]),
+    );
+    mocks.loadImageElementFromUrl.mockResolvedValueOnce(createImageElement(640, 360));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
+    fireEvent.click(screen.getByRole('button', { name: /two buttons/i }));
+
+    await waitFor(() => {
+      expect(mocks.loadImageElementFromUrl).toHaveBeenCalledWith('data:image/png;base64,AAAA');
+    });
+    expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('');
+    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(/applied template: two buttons\./i);
+  });
+
+  it('boots the picker from shipped catalog files instead of draft-only browser state', async () => {
     window.localStorage.setItem(
       DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
       JSON.stringify([
         {
           kind: 'template',
           version: 1,
-          templateId: 'imported-scene',
-          name: 'Imported Scene',
-          title: 'Imported Scene',
-          description: 'Imported scene template',
+          templateId: 'draft-only',
+          name: 'Draft Only',
+          title: 'Draft Only',
+          description: 'Draft template',
           category: 'classic',
-          tags: ['imported'],
+          tags: ['draft'],
           sortOrder: 100,
-          previewImagePath: 'data:image/png;base64,AAAA',
-          baseImagePath: 'data:image/png;base64,AAAA',
+          previewImagePath: null,
+          baseImagePath: null,
           scene: {
-            canvasSize: {
-              width: 640,
-              height: 360,
-            },
+            canvasSize: { width: 640, height: 360 },
             activeLayerId: 'top',
-            textSlots: [
-              {
-                id: 'top',
-                role: 'top-caption',
-                name: 'Top text',
-                defaultText: 'IMPORTED TOP',
-                verticalAlign: 'top',
-                fontFamily: 'Impact',
-                fontSize: 90,
-                fillStyle: '#ffffff',
-                strokeStyle: '#000000',
-                outlineWidth: 5,
-                textAlign: 'center',
-                effect: 'outline',
-                allCaps: true,
-                bold: false,
-                italic: false,
-                opacity: 1,
-                box: {
-                  x: 20,
-                  y: 12,
-                  width: 600,
-                  height: 96,
-                  rotation: 0,
-                },
-              },
-            ],
-            imageSlots: [
-              {
-                id: 'primary-image',
-                role: 'primary-image',
-                name: 'Primary image',
-                fitMode: 'cover',
-                anchor: 'center',
-                allowOverflow: false,
-                box: {
-                  x: 0,
-                  y: 0,
-                  width: 640,
-                  height: 360,
-                  rotation: 0,
-                },
-              },
-            ],
+            textSlots: [],
+            imageSlots: [],
             canvas: {
               backgroundFill: null,
-              safeInsets: {
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0,
-              },
+              safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
             },
           },
           sceneImageAdjustments: {},
@@ -387,50 +362,211 @@ describe('App', () => {
         },
       ]),
     );
-    mocks.loadImageElementFromUrl.mockResolvedValueOnce(createImageElement(640, 360));
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            templates: [
+              {
+                templateId: 'two-buttons',
+                title: 'Two Buttons',
+                tags: ['choice'],
+                sortOrder: 100,
+                templatePath: '/templates/two-buttons/template.melf',
+                previewImagePath: '/templates/two-buttons/preview.png',
+                baseImagePath: '/templates/two-buttons/base.png',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: 'template',
+            version: 1,
+            templateId: 'two-buttons',
+            name: 'Two Buttons',
+            title: 'Two Buttons',
+            description: 'Pick a side.',
+            category: 'classic',
+            tags: ['choice'],
+            sortOrder: 100,
+            previewImagePath: '/templates/two-buttons/preview.png',
+            baseImagePath: '/templates/two-buttons/base.png',
+            scene: {
+              canvasSize: { width: 640, height: 360 },
+              activeLayerId: 'top',
+              textSlots: [],
+              imageSlots: [],
+              canvas: {
+                backgroundFill: null,
+                safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+              },
+            },
+            sceneImageAdjustments: {},
+            sceneEffectStack: [],
+            sceneWatermark: {
+              enabled: false,
+              text: 'meme-elf',
+              mode: 'corner',
+              corner: 'bottom-left',
+              opacity: 50,
+              size: 12,
+              color: '#808080',
+              rotation: 0,
+            },
+          }),
+        ),
+      );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /two buttons/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /draft only/i })).not.toBeInTheDocument();
+  });
+
+  it('refreshes the shipped picker after promoting the localhost curator draft', async () => {
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([createTwoButtonsTemplateDocument()]),
+    );
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ templates: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            templates: [
+              {
+                templateId: 'classic-top-bottom',
+                title: 'Classic Top / Bottom',
+                tags: ['classic'],
+                sortOrder: 100,
+                templatePath: '/templates/classic-top-bottom/template.melf',
+                previewImagePath: '/templates/classic-top-bottom/preview.png',
+                baseImagePath: '/templates/classic-top-bottom/base.png',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            kind: 'template',
+            version: 1,
+            templateId: 'classic-top-bottom',
+            name: 'Classic Top / Bottom',
+            title: 'Classic Top / Bottom',
+            description: 'Classic meme layout.',
+            category: 'classic',
+            tags: ['classic'],
+            sortOrder: 100,
+            previewImagePath: '/templates/classic-top-bottom/preview.png',
+            baseImagePath: '/templates/classic-top-bottom/base.png',
+            scene: {
+              canvasSize: { width: 640, height: 360 },
+              activeLayerId: 'top',
+              textSlots: [],
+              imageSlots: [],
+              canvas: {
+                backgroundFill: null,
+                safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+              },
+            },
+            sceneImageAdjustments: {},
+            sceneEffectStack: [],
+            sceneWatermark: {
+              enabled: false,
+              text: 'meme-elf',
+              mode: 'corner',
+              corner: 'bottom-left',
+              opacity: 50,
+              size: 12,
+              color: '#808080',
+              rotation: 0,
+            },
+          }),
+        ),
+      );
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
-    fireEvent.click(screen.getByRole('button', { name: /imported scene/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
+    fireEvent.click(screen.getByRole('button', { name: /promote shipped catalog/i }));
 
     await waitFor(() => {
-      expect(mocks.loadImageElementFromUrl).toHaveBeenCalledWith('data:image/png;base64,AAAA');
+      expect(screen.getByText(/shipped catalog updated/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('IMPORTED TOP');
-    expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(/applied template: imported scene\./i);
+
+    fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /classic top \/ bottom/i })).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/__dev/templates/promote',
+      expect.objectContaining({
+        body: expect.any(String),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      }),
+    );
   });
 
   it('lets localhost dev curation edit, reorder, and delete templates through Experimental', async () => {
+    const twoButtons = createTwoButtonsTemplateDocument();
+    const drake = {
+      ...createTwoButtonsTemplateDocument(),
+      templateId: 'drake',
+      name: 'Drake',
+      title: 'Drake',
+      sortOrder: 200,
+    };
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([twoButtons, drake]),
+    );
+
     render(<App />);
 
     fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
 
-    fireEvent.change(screen.getByLabelText(/tags for classic top \/ bottom/i), {
-      target: { value: 'classic, remixed' },
+    fireEvent.change(screen.getByLabelText(/tags for two buttons/i), {
+      target: { value: 'choice, remixed' },
     });
-    fireEvent.change(screen.getByLabelText(/title for classic top \/ bottom/i), {
-      target: { value: 'Classic Meme' },
+    fireEvent.change(screen.getByLabelText(/title for two buttons/i), {
+      target: { value: 'Two Buttons QA' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /move top caption up/i }));
-    fireEvent.click(screen.getByRole('button', { name: /move square social up/i }));
-    fireEvent.click(screen.getByRole('button', { name: /delete bottom caption/i }));
+    fireEvent.click(screen.getByRole('button', { name: /move drake up/i }));
+    fireEvent.click(screen.getByRole('button', { name: /delete two buttons qa/i }));
 
     fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
     const templateButtons = screen.getAllByTestId('template-picker-tile');
-    expect(templateButtons[0]).toHaveAttribute('data-template-id', 'top-caption');
-    expect(screen.getByRole('button', { name: /classic meme/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /bottom caption/i })).not.toBeInTheDocument();
+    expect(templateButtons[0]).toHaveAttribute('data-template-id', 'drake');
+    expect(screen.getByRole('button', { name: /drake/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /two buttons qa/i })).not.toBeInTheDocument();
   });
 
   it('keeps an intentionally empty localhost curator library empty after reload', async () => {
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([createTwoButtonsTemplateDocument()]),
+    );
     const firstRender = render(<App />);
 
     fireEvent.click(screen.getByRole('tab', { name: /experimental/i }));
-    fireEvent.click(screen.getByRole('button', { name: /delete classic top \/ bottom/i }));
-    fireEvent.click(screen.getByRole('button', { name: /delete top caption/i }));
-    fireEvent.click(screen.getByRole('button', { name: /delete bottom caption/i }));
-    fireEvent.click(screen.getByRole('button', { name: /delete square social/i }));
+    fireEvent.click(screen.getByRole('button', { name: /delete two buttons/i }));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(DEV_TEMPLATE_LIBRARY_STORAGE_KEY)).toBe(JSON.stringify([]));
+    });
 
     firstRender.unmount();
 
@@ -440,10 +576,15 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByTestId('template-picker-empty')).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /classic top \/ bottom/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /two buttons/i })).not.toBeInTheDocument();
   });
 
   it('preserves existing text content when a template is applied', async () => {
+    window.localStorage.setItem(
+      DEV_TEMPLATE_LIBRARY_STORAGE_KEY,
+      JSON.stringify([createTwoButtonsTemplateDocument()]),
+    );
+
     render(<App />);
 
     const topText = screen.getByRole('textbox', { name: /top text/i });
@@ -452,7 +593,7 @@ describe('App', () => {
     fireEvent.change(bottomText, { target: { value: 'hello bottom' } });
 
     fireEvent.click(screen.getByRole('tab', { name: /templates/i }));
-    fireEvent.click(screen.getByRole('button', { name: /square social/i }));
+    fireEvent.click(screen.getByRole('button', { name: /two buttons/i }));
 
     await waitFor(() => {
       expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('HELLO TOP');

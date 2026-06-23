@@ -18,7 +18,14 @@ type ShippedTemplateCatalogPayload = {
 };
 
 export async function loadShippedTemplateCatalog(): Promise<ShippedTemplateCatalogRecord[]> {
-  const response = await fetch('/templates/catalog.json', { cache: 'no-store' });
+  let response: Response;
+
+  try {
+    response = await fetch('/templates/catalog.json', { cache: 'no-store' });
+  } catch {
+    return [];
+  }
+
   if (!response.ok) {
     return [];
   }
@@ -30,7 +37,14 @@ export async function loadShippedTemplateCatalog(): Promise<ShippedTemplateCatal
 export async function loadShippedTemplateDocument(
   record: ShippedTemplateCatalogRecord,
 ): Promise<MelfTemplateDocument | null> {
-  const response = await fetch(record.templatePath, { cache: 'no-store' });
+  let response: Response;
+
+  try {
+    response = await fetch(record.templatePath, { cache: 'no-store' });
+  } catch {
+    return null;
+  }
+
   if (!response.ok) {
     return null;
   }
