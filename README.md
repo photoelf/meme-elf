@@ -109,7 +109,7 @@ For local-network manual testing on a phone or tablet:
 
 Installed mode launches the editor from `/` in standalone mode, so it opens like a tool instead of reopening inside a normal Safari tab.
 
-Offline support is intentionally limited: if the app shell is already loaded, some already-cached static assets may keep the shell open briefly, but import/export flows and fresh loads should still be treated as network-dependent in this alpha.
+Installability is supported in `9A-1`, but reliable offline reopen or reload is not part of this task yet. For now, treat the installed app as network-dependent after the current page session ends. Reliable offline behavior is planned for later Milestone `9B` / `9D` work.
 
 Install audit note:
 - Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.
