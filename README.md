@@ -125,9 +125,6 @@ Template publishing workflow:
 4. Review the repo diff under `public/templates/`
 5. Commit and deploy so the updated shipped catalog appears for normal users in `Templates`
 
-Full step-by-step guide:
-- [docs/template-publishing-workflow.md](/D:/PETS/meme-elf/docs/template-publishing-workflow.md)
-
 ## Hosting Direction
 
 Primary alpha hosting options, in order:
