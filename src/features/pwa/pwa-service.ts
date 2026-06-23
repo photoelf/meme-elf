@@ -1,3 +1,8 @@
+type StandaloneLaunchWindow = {
+  matchMedia?: (query: string) => { matches: boolean };
+  navigator: Navigator & { standalone?: boolean };
+};
+
 export function detectStandaloneMode(input: {
   matchMediaStandalone: boolean;
   navigatorStandalone: boolean;
@@ -5,13 +10,11 @@ export function detectStandaloneMode(input: {
   return input.matchMediaStandalone || input.navigatorStandalone;
 }
 
-export function getStandaloneLaunchState(win: Window = window) {
+export function getStandaloneLaunchState(win: StandaloneLaunchWindow = window) {
   const matchMediaStandalone =
     typeof win.matchMedia === 'function' &&
     win.matchMedia('(display-mode: standalone)').matches;
-  const navigatorStandalone =
-    'standalone' in win.navigator &&
-    (win.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const navigatorStandalone = win.navigator.standalone === true;
 
   return {
     isStandalone: detectStandaloneMode({
