@@ -12,6 +12,8 @@ export type ToolbarActionId =
   | 'paste'
   | 'upload'
   | 'url'
+  | 'open-scene'
+  | 'save-scene'
   | 'copy'
   | 'download'
   | 'theme'
@@ -56,8 +58,8 @@ export function resolveTopbarActionLayout(
 ): TopbarActionLayout {
   if (shellMode === 'phone') {
     return {
-      overflow: [],
-      primary: ['paste', 'upload', 'url', 'theme'],
+      overflow: ['open-scene', 'save-scene', 'theme'],
+      primary: ['paste', 'upload', 'url'],
       sticky: ['copy', 'download', 'tools'],
     };
   }
@@ -65,14 +67,14 @@ export function resolveTopbarActionLayout(
   if (shellMode === 'small-tablet') {
     return {
       overflow: [],
-      primary: ['paste', 'upload', 'url', 'copy', 'download', 'theme'],
+      primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
       sticky: [],
     };
   }
 
   return {
     overflow: [],
-    primary: ['paste', 'upload', 'url', 'copy', 'download', 'theme'],
+    primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
     sticky: [],
   };
 }

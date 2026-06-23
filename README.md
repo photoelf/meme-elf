@@ -16,7 +16,7 @@ Current repo state:
 - React + TypeScript + Vite static app
 - clipboard paste, direct image URL import, and file upload
 - top action bar with compact icon-only actions and delayed tooltips
-- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, and `Watermark`, plus a localhost-only `Experimental` tab in the current workspace build
+- right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, `Watermark`, `Experimental`, and a right-edge `Templates` tab kept outside the main canvas flow during local QC
 - advanced `Upload Image` / `Paste image URL` / `Advanced import` pre-insert modal with crop, rotate, and flip
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
@@ -35,7 +35,11 @@ Current repo state:
 - immediate rectangular selection commit with `Copy to new layer` and `Cut to new layer`
 - keyboard `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` extraction flow for selection copy, cut, and paste
 - extraction from the base image, image layers, and draw layers into normal image layers
-- local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool using `Alt+click` source sampling, layer-scoped stamping, undoable stroke commits, and no healing or seamless-patch automation
+- local-only `Experimental` tab with a shipped local-only narrow `Clone Stamp` tool plus a dev-only meme template curator for importing `.melf` templates, editing `title` and `tags`, reordering the curated set, and removing templates without exposing that maintenance flow in the normal editor path
+- built-in meme template picker with square preview tiles in a dedicated inspector `Templates` tab that instantly applies known meme layouts into editable text/image scene state without taking over the main preview workspace
+- native `.melf` scene document normalization for local save/reopen work, covering embedded base-image payloads plus editable text, image, and draw layers without serializing transient editor UI state
+- top-bar `Open .melf` and `Save .melf` actions for native local save/reopen, preferring browser file-picker handles for overwrite and falling back to hidden file-input open plus downloadable `.melf` files when needed
+- dedicated inspector `Saves` tab for reopening recent local `.melf` scenes from browser storage, removing stale recent entries, and recovering or dismissing interrupted mobile recovery drafts without putting saved-work UX into the main canvas flow
 - preview zoom with `1:1`, `Fit`, mouse-wheel zoom, and middle-mouse pan for desktop editing
 - responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Paste` / `Upload` / `Paste URL` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, and viewport-height / keyboard-aware layout state
 - mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership

@@ -22,7 +22,10 @@ import type {
 import { SCENE_BOUNDS_FILL_MODE_OPTIONS } from '../../app/types';
 import type { SceneImageStackTransform } from '../image/scene-image-stack-utils';
 import { describeSceneWatermarkPreview } from '../image/watermark-utils';
-import type { MelfTemplateDocument } from '../templates/melf-template';
+import type { MelfTemplateCatalogEntry } from '../templates/template-catalog';
+import { TemplateCurator } from '../templates/template-curator';
+import { TemplatePicker } from '../templates/template-picker';
+import type { RecentSceneEntry } from '../templates/recent-scenes-storage';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -33,7 +36,7 @@ import {
 const FONT_OPTIONS = ['Impact', 'Arial Black', 'Helvetica', 'Trebuchet MS'];
 
 type ControlPanelProps = {
-  activeTab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
+  activeTab: 'layers' | 'saves' | 'templates' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
   shellMode: 'desktop' | 'small-tablet' | 'phone';
@@ -59,7 +62,18 @@ type ControlPanelProps = {
   sceneEffectStack: SceneEffectStackItem[];
   sceneWatermark: SceneWatermark;
   sceneExpandDraft: SceneExpandDraft;
-  templatePresets: readonly MelfTemplateDocument[];
+  templateCatalog: readonly MelfTemplateCatalogEntry[];
+  selectedTemplateId: string | null;
+  applyingTemplateId: string | null;
+  recentScenes: readonly RecentSceneEntry[];
+  mobileRecoverySnapshot: {
+    canvasSize: {
+      width: number;
+      height: number;
+    };
+    imageDataUrl?: string;
+    textLayers: TextLayer[];
+  } | null;
   onOpenAdvancedImportClipboard: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportFile: (opener: HTMLButtonElement) => void;
   onOpenAdvancedImportUrl: (opener: HTMLButtonElement) => void;
@@ -68,7 +82,7 @@ type ControlPanelProps = {
   onApplySceneCrop: () => void;
   onApplySceneExpand: () => void;
   onActiveLayerChange: (layerId: LayerId) => void;
-  onActiveTabChange: (tab: 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental') => void;
+  onActiveTabChange: (tab: 'layers' | 'saves' | 'templates' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental') => void;
   onCancelSceneBounds: () => void;
   onClearActiveLayer: () => void;
   onAddLayer: () => void;
@@ -98,6 +112,16 @@ type ControlPanelProps = {
     value: number,
   ) => void;
   onApplyTemplatePreset: (templateId: string) => void;
+  onImportTemplateFiles: (files: File[]) => void;
+  onTemplateTitleChange: (templateId: string, title: string) => void;
+  onTemplateTagsChange: (templateId: string, tags: string) => void;
+  onMoveTemplateUp: (templateId: string) => void;
+  onMoveTemplateDown: (templateId: string) => void;
+  onDeleteTemplate: (templateId: string) => void;
+  onOpenRecentScene: (entry: RecentSceneEntry) => void;
+  onRemoveRecentScene: (sceneId: string) => void;
+  onRecoverMobileDraft: () => void;
+  onDismissRecoveryDraft: () => void;
   onStartSceneCrop: () => void;
   onTextLayerChange: (
     layerId: LayerId,
@@ -149,7 +173,11 @@ export function ControlPanel({
   sceneEffectStack,
   sceneWatermark,
   sceneExpandDraft,
-  templatePresets,
+  templateCatalog,
+  selectedTemplateId,
+  applyingTemplateId,
+  recentScenes,
+  mobileRecoverySnapshot,
   onOpenAdvancedImportClipboard,
   onOpenAdvancedImportFile,
   onOpenAdvancedImportUrl,
@@ -179,6 +207,16 @@ export function ControlPanel({
   onTextEditSessionStart,
   onSceneExpandDraftChange,
   onApplyTemplatePreset,
+  onImportTemplateFiles,
+  onTemplateTitleChange,
+  onTemplateTagsChange,
+  onMoveTemplateUp,
+  onMoveTemplateDown,
+  onDeleteTemplate,
+  onOpenRecentScene,
+  onRemoveRecentScene,
+  onRecoverMobileDraft,
+  onDismissRecoveryDraft,
   onStartSceneCrop,
   onTextLayerChange,
   onRotateImageLayer,
@@ -262,6 +300,14 @@ export function ControlPanel({
           {showLocalOnlyTabs ? (
             <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'experimental'} label="Experimental" onClick={() => onActiveTabChange('experimental')} />
           ) : null}
+          <InspectorTabButton icon={<SaveIcon />} isActive={activeTab === 'saves'} label="Saves" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('saves');
+          }} />
+          <InspectorTabButton icon={<SparkIcon />} isActive={activeTab === 'templates'} label="Templates" onClick={() => {
+            clearRetouchMode();
+            onActiveTabChange('templates');
+          }} />
         </div>
       </div>
 
@@ -625,6 +671,92 @@ export function ControlPanel({
           </div>
         ) : null}
 
+        {activeTab === 'templates' ? (
+          <div className="inspector-section">
+            <div className="section-heading">
+              <div>
+                <h2 className="section-title">TEMPLATES</h2>
+                <p className="section-copy">Pick a meme format and jump straight into editing.</p>
+              </div>
+            </div>
+            <TemplatePicker
+              items={templateCatalog}
+              onSelectTemplate={onApplyTemplatePreset}
+              selectedTemplateId={selectedTemplateId}
+              applyingTemplateId={applyingTemplateId}
+            />
+          </div>
+        ) : null}
+
+        {activeTab === 'saves' ? (
+          <div className="inspector-section">
+            <div className="section-heading">
+              <div>
+                <h2 className="section-title">SAVES</h2>
+                <p className="section-copy">Reopen recent local scenes and recover interrupted mobile work.</p>
+              </div>
+            </div>
+
+            {mobileRecoverySnapshot ? (
+              <div className="saved-scene-card saved-scene-card-recovery">
+                <div className="saved-scene-copy">
+                  <span className="saved-scene-name">Interrupted mobile draft</span>
+                  <span className="saved-scene-meta">
+                    {mobileRecoverySnapshot.textLayers.length} text layer{mobileRecoverySnapshot.textLayers.length === 1 ? '' : 's'} on {mobileRecoverySnapshot.canvasSize.width}x{mobileRecoverySnapshot.canvasSize.height}
+                  </span>
+                </div>
+                <div className="saved-scene-actions">
+                  <button type="button" className="mini-action-button" onClick={onRecoverMobileDraft}>
+                    Recover mobile draft
+                  </button>
+                  <button type="button" className="mini-action-button" onClick={onDismissRecoveryDraft}>
+                    Dismiss recovery draft
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {recentScenes.length > 0 ? (
+              <div className="saved-scene-stack">
+                {recentScenes.map((entry) => (
+                  <div key={entry.id} className="saved-scene-card">
+                    <div className="saved-scene-copy">
+                      <span className="saved-scene-name">{entry.name}</span>
+                      <span className="saved-scene-meta">{formatRecentSceneTimestamp(entry.updatedAt)}</span>
+                    </div>
+                    <div className="saved-scene-actions">
+                      <button
+                        type="button"
+                        className="mini-action-button"
+                        aria-label={`Open saved scene ${entry.name}`}
+                        onClick={() => onOpenRecentScene(entry)}
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        className="mini-action-button remove-layer-button"
+                        aria-label={`Remove saved scene ${entry.name}`}
+                        onClick={() => onRemoveRecentScene(entry.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {!mobileRecoverySnapshot && recentScenes.length === 0 ? (
+              <div className="template-picker-empty-state">
+                <p className="template-picker-empty-copy">
+                  Saved scenes will appear here after you use Save .melf or reopen a local scene.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {activeTab === 'draw' ? (
           <div className="inspector-section">
             <div className="section-heading">
@@ -880,36 +1012,6 @@ export function ControlPanel({
                 <p className="section-copy">Narrow retouch tools outside the default meme path</p>
               </div>
             </div>
-            <div className="section-subgroup section-subgroup-first">
-              <div className="section-heading">
-                <div>
-                  <p className="section-subtitle">Starter templates</p>
-                  <p className="section-copy">
-                    Temporary home for quick-apply caption layouts until the dedicated template UX lands in `8C`.
-                  </p>
-                </div>
-              </div>
-              <div className="template-preset-stack">
-                {templatePresets.map((preset) => (
-                  <div key={preset.templateId} className="template-preset-card">
-                    <div className="template-preset-copy">
-                      <span className="template-preset-name">{preset.name}</span>
-                      <span className="template-preset-meta">
-                        {preset.scene.canvasSize.width} x {preset.scene.canvasSize.height} - {preset.description}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="mini-action-button"
-                      aria-label={`Apply ${preset.name} template`}
-                      onClick={() => onApplyTemplatePreset(preset.templateId)}
-                    >
-                      Apply
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
             {shellMode === 'phone' ? (
               <>
                 <p className="section-copy">
@@ -965,6 +1067,23 @@ export function ControlPanel({
                     ? `Source set`
                     : 'No source selected'}
                 </p>
+                <div className="section-subgroup">
+                  <div className="section-heading">
+                    <div>
+                      <h3 className="section-title">TEMPLATE CURATOR</h3>
+                      <p className="section-copy">Local-only maintenance for the built-in meme set.</p>
+                    </div>
+                  </div>
+                  <TemplateCurator
+                    items={templateCatalog}
+                    onImportFiles={onImportTemplateFiles}
+                    onTitleChange={onTemplateTitleChange}
+                    onTagsChange={onTemplateTagsChange}
+                    onMoveUp={onMoveTemplateUp}
+                    onMoveDown={onMoveTemplateDown}
+                    onDelete={onDeleteTemplate}
+                  />
+                </div>
               </>
             )}
           </div>
@@ -1384,6 +1503,15 @@ function WatermarkIcon() {
     <RailIconBase>
       <path d="M4.5 14.5 8 5.5l2 5 2-3 3.5 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M6 14.5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </RailIconBase>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <RailIconBase>
+      <path d="M5 4.5h8l2 2V15.5H5V4.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M7 4.5v4h6v-4M8 12h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </RailIconBase>
   );
 }
@@ -1913,4 +2041,14 @@ function getSceneEffectLabel(effectKind: SceneEffectStackItem['kind']) {
 
 function getSceneEffectUnit(effectKind: SceneEffectStackItem['kind']) {
   return effectKind === 'blur' || effectKind === 'pixelate' ? 'px' : '%';
+}
+
+function formatRecentSceneTimestamp(value: string) {
+  const parsed = Date.parse(value);
+
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+
+  return `Saved ${new Date(parsed).toLocaleString()}`;
 }

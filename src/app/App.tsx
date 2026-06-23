@@ -90,7 +90,38 @@ import {
 } from '../features/selection/selection-utils';
 import { applyCloneStampStroke } from '../features/selection/clone-stamp-prototype';
 import { applyMelfTemplateToState } from '../features/templates/apply-template';
-import { STARTER_MELF_TEMPLATE_PRESETS } from '../features/templates/melf-template';
+import {
+  MELF_EXTENSION,
+  MELF_MIME_TYPE,
+  type MelfSceneDocument,
+  parseMelfSceneDocument,
+  stringifyMelfSceneDocument,
+} from '../features/templates/melf-scene';
+import {
+  STARTER_MELF_TEMPLATE_PRESETS,
+  type MelfTemplateDocument,
+  parseMelfTemplateDocument,
+} from '../features/templates/melf-template';
+import {
+  materializeAppStateFromMelfSceneDocument,
+  serializeAppStateToMelfSceneDocument,
+} from '../features/templates/melf-scene-state';
+import {
+  readRecentSceneEntries,
+  removeRecentSceneEntry,
+  upsertRecentSceneEntry,
+  type RecentSceneEntry,
+} from '../features/templates/recent-scenes-storage';
+import {
+  readPersistedTemplateLibrary,
+  writePersistedTemplateLibrary,
+} from '../features/templates/dev-template-library-storage';
+import {
+  createBuiltInTemplateCatalog,
+  cloneTemplateDocuments,
+  getTemplateById,
+} from '../features/templates/template-catalog';
+import { parseImportedTemplateDocument } from '../features/templates/import-template-source';
 import {
   rotateDraftClockwise,
   rotateDraftCounterClockwise,
@@ -121,7 +152,29 @@ const MAX_PREVIEW_ZOOM_FACTOR = 3;
 const EQUAL_MARGIN_PRESET = 48;
 const CAPTION_SPACE_PRESET = 120;
 const MOBILE_RECOVERY_STORAGE_KEY = 'meme-elf.mobile-recovery';
-type InspectorTab = 'layers' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
+const DEV_TEMPLATE_LIBRARY_STORAGE_KEY = 'meme-elf.dev-template-library';
+type SceneFileHandle = {
+  name?: string;
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+  getFile: () => Promise<File>;
+};
+type FilePickerWindow = Window & {
+  showOpenFilePicker?: (options?: unknown) => Promise<SceneFileHandle[]>;
+  showSaveFilePicker?: (options?: unknown) => Promise<SceneFileHandle>;
+};
+type InspectorTab =
+  | 'layers'
+  | 'saves'
+  | 'templates'
+  | 'crop'
+  | 'adjustments'
+  | 'draw'
+  | 'effects'
+  | 'watermark'
+  | 'experimental';
 type ImageInsertionMode =
   | 'inside-canvas'
   | 'outside-left'
@@ -200,6 +253,14 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), 'image/png');
   });
+}
+
+async function readTextFromBlob(blob: Blob) {
+  if (typeof blob.text === 'function') {
+    return blob.text();
+  }
+
+  return new Response(blob).text();
 }
 
 function getPreferredTheme(): 'light' | 'dark' {
@@ -364,6 +425,7 @@ export function App() {
   const [inspectorWidth, setInspectorWidth] = useState(getStoredInspectorWidth);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const openSceneInputRef = useRef<HTMLInputElement | null>(null);
   const uploadButtonRef = useRef<HTMLButtonElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
@@ -374,12 +436,14 @@ export function App() {
   const lastShortcutCopyAtRef = useRef(0);
   const latestExplicitClipboardRequestTokenRef = useRef(0);
   const latestUrlImportRequestTokenRef = useRef(0);
+  const latestTemplateApplyRequestTokenRef = useRef(0);
   const pendingAutoFitPreviewRef = useRef(true);
   const selectionClipboardRef = useRef<SelectionClipboardSnapshot | null>(null);
   const pendingFilePickerRequestRef = useRef<ImportRequestContext>({
     restoreFocusTo: null,
     target: { kind: 'base' },
   });
+  const saveSceneFileHandleRef = useRef<SceneFileHandle | null>(null);
   const preInsertSessionRef = useRef<{
     pendingUploadFileName: string | null;
     previousStatusMessage: string | null;
@@ -408,11 +472,19 @@ export function App() {
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
+  const [templateLibrary, setTemplateLibrary] = useState<MelfTemplateDocument[]>(readInitialTemplateLibrary);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
+  const [recentScenes, setRecentScenes] = useState<RecentSceneEntry[]>(readInitialRecentSceneEntries);
+  const [mobileRecoverySnapshot, setMobileRecoverySnapshot] = useState<MobileRecoverySnapshot | null>(
+    readMobileRecoverySnapshot,
+  );
   const [copyFallbackModalState, setCopyFallbackModalState] = useState<{
     imageDataUrl: string;
     restoreFocusTo: HTMLElement | null;
   } | null>(null);
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
+  const templateCatalog = createBuiltInTemplateCatalog(templateLibrary);
   const mobileShellLayout = resolveMobileShellLayout(viewportWidth);
   const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
   const isInspectorVisible =
@@ -658,7 +730,7 @@ export function App() {
       return;
     }
 
-    const snapshot = readMobileRecoverySnapshot();
+    const snapshot = mobileRecoverySnapshot;
 
     if (!snapshot) {
       return;
@@ -666,34 +738,9 @@ export function App() {
 
     let cancelled = false;
 
-    const applyRecoveredState = (image: HTMLImageElement | null, nextStatusMessage: string) => {
-      if (cancelled) {
-        return;
-      }
-
-      pendingAutoFitPreviewRef.current = true;
-      setAppState((currentState) => ({
-        ...currentState,
-        activeLayerId: snapshot.textLayers[0]?.id ?? null,
-        canvasSize: { ...snapshot.canvasSize },
-        errorMessage: null,
-        image,
-        layers: cloneTextLayers(snapshot.textLayers),
-        previewZoomFactor: currentState.previewZoomFactor,
-        sceneEffectStack: createDefaultSceneEffectStack(),
-        sceneImageAdjustments: createDefaultSceneImageAdjustments(),
-        sceneWatermark: {
-          ...createDefaultSceneWatermark(),
-          enabled: false,
-        },
-        status: 'idle',
-      }));
-      setPreviewPan({ x: 0, y: 0 });
-      setStatusMessage(nextStatusMessage);
-    };
-
     if (!snapshot.imageDataUrl) {
-      applyRecoveredState(
+      applyMobileRecoverySnapshot(
+        snapshot,
         null,
         'Recovered the last mobile draft text after the previous session was interrupted. Non-text content could not be restored on this phone.',
       );
@@ -706,7 +753,8 @@ export function App() {
           return;
         }
 
-        applyRecoveredState(
+        applyMobileRecoverySnapshot(
+          snapshot,
           image,
           'Recovered the last mobile draft with editable text layers after the previous session was interrupted. Non-text content was flattened into the base image.',
         );
@@ -722,7 +770,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [viewportWidth]);
+  }, [mobileRecoverySnapshot, viewportWidth]);
 
   useEffect(() => {
     if (!pendingAutoFitPreviewRef.current || typeof window === 'undefined') {
@@ -1327,17 +1375,172 @@ export function App() {
     }));
   }
 
-  function applyTemplatePreset(templateId: string) {
-    const template = STARTER_MELF_TEMPLATE_PRESETS.find((preset) => preset.templateId === templateId);
+  async function applyTemplatePreset(templateId: string) {
+    const requestToken = latestTemplateApplyRequestTokenRef.current + 1;
+    latestTemplateApplyRequestTokenRef.current = requestToken;
+    setApplyingTemplateId(templateId);
+    const template = getTemplateById(templateLibrary, templateId);
 
     if (!template) {
+      setApplyingTemplateId(null);
       setStatusMessage('That template is no longer available.');
       return;
     }
 
-    setAppState((currentState) => applyMelfTemplateToState(currentState, template));
+    let templateImage: HTMLImageElement | null = null;
+    let imageLoadFailed = false;
+
+    if (template.baseImagePath) {
+      try {
+        templateImage = await loadImageElementFromUrl(template.baseImagePath);
+      } catch {
+        imageLoadFailed = true;
+      }
+    }
+
+    if (latestTemplateApplyRequestTokenRef.current !== requestToken) {
+      return;
+    }
+
+    pendingAutoFitPreviewRef.current = true;
+    setSelectedTemplateId(templateId);
+    setAppState((currentState) => ({
+      ...applyMelfTemplateToState(currentState, template),
+      image: templateImage,
+    }));
     setActiveInspectorTab('layers');
-    setStatusMessage(`Applied template: ${template.name}.`);
+    setStatusMessage(
+      imageLoadFailed
+        ? `Applied template: ${template.title}. The template base image could not be loaded.`
+        : `Applied template: ${template.title}.`,
+    );
+    setApplyingTemplateId(null);
+  }
+
+  function persistTemplateLibrary(nextLibrary: MelfTemplateDocument[]) {
+    setTemplateLibrary(nextLibrary);
+
+    if (typeof window === 'undefined' || !showLocalOnlyTabs) {
+      return;
+    }
+
+    void writePersistedTemplateLibrary(DEV_TEMPLATE_LIBRARY_STORAGE_KEY, nextLibrary);
+  }
+
+  function reorderTemplateLibrary(
+    currentLibrary: readonly MelfTemplateDocument[],
+    orderedTemplateIds: readonly string[],
+  ) {
+    const templateMap = new Map(
+      currentLibrary.map((template) => [template.templateId, template] as const),
+    );
+
+    return orderedTemplateIds.map((templateId, index) => ({
+      ...cloneTemplateDocuments([templateMap.get(templateId)!])[0]!,
+      sortOrder: (index + 1) * 100,
+    }));
+  }
+
+  function updateTemplateTitle(templateId: string, title: string) {
+    persistTemplateLibrary(
+      templateLibrary.map((template) =>
+        template.templateId === templateId
+          ? {
+              ...template,
+              title: title.trim().length > 0 ? title.trim() : template.name,
+            }
+          : template,
+      ),
+    );
+  }
+
+  function updateTemplateTags(templateId: string, rawTags: string) {
+    const tags = Array.from(
+      new Set(
+        rawTags
+          .split(',')
+          .map((tag) => tag.trim().toLowerCase())
+          .filter((tag) => tag.length > 0),
+      ),
+    );
+
+    persistTemplateLibrary(
+      templateLibrary.map((template) =>
+        template.templateId === templateId
+          ? {
+              ...template,
+              tags,
+            }
+          : template,
+      ),
+    );
+  }
+
+  function moveTemplate(templateId: string, direction: 'up' | 'down') {
+    const orderedIds = templateCatalog.map((entry) => entry.templateId);
+    const index = orderedIds.indexOf(templateId);
+
+    if (index < 0) {
+      return;
+    }
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= orderedIds.length) {
+      return;
+    }
+
+    const nextIds = [...orderedIds];
+    const [movedId] = nextIds.splice(index, 1);
+    nextIds.splice(targetIndex, 0, movedId!);
+    persistTemplateLibrary(reorderTemplateLibrary(templateLibrary, nextIds));
+  }
+
+  function deleteTemplate(templateId: string) {
+    persistTemplateLibrary(templateLibrary.filter((template) => template.templateId !== templateId));
+
+    if (selectedTemplateId === templateId) {
+      setSelectedTemplateId(null);
+    }
+  }
+
+  async function importTemplateFiles(files: File[]) {
+    const importedTemplates: MelfTemplateDocument[] = [];
+
+    for (const file of files) {
+      const rawDocument = await readTextFromBlob(file);
+      const template = parseImportedTemplateDocument(rawDocument, file.name);
+
+      if (template) {
+        importedTemplates.push(template);
+      }
+    }
+
+    if (importedTemplates.length === 0) {
+      setStatusMessage('No valid template or scene .melf documents were imported.');
+      return;
+    }
+
+    const existingIds = templateCatalog.map((entry) => entry.templateId);
+    const importedIds = importedTemplates.map((template) => template.templateId);
+    const nextOrderedIds = [
+      ...importedIds,
+      ...existingIds.filter((templateId) => !importedIds.includes(templateId)),
+    ];
+    const nextLibrary = reorderTemplateLibrary(
+      [
+        ...importedTemplates,
+        ...templateLibrary.filter((template) => !importedIds.includes(template.templateId)),
+      ],
+      nextOrderedIds,
+    );
+
+    persistTemplateLibrary(nextLibrary);
+    setStatusMessage(
+      importedTemplates.length === 1
+        ? `Imported template: ${importedTemplates[0]!.title}.`
+        : `Imported ${importedTemplates.length} templates.`,
+    );
   }
 
   function handleRetouchBrushSample(sample: { color: string; opacity: number }) {
@@ -2263,6 +2466,241 @@ export function App() {
     setStatusMessage('PNG download started.');
   }
 
+  async function handleSaveSceneClick() {
+    try {
+      const currentHandle = saveSceneFileHandleRef.current;
+      const suggestedName = normalizeSceneFileName(currentHandle?.name ?? 'meme-elf-scene');
+      const sceneDocument = await serializeAppStateToMelfSceneDocument(appStateRef.current, {
+        name: stripMelfExtension(suggestedName),
+      });
+      const rawDocument = stringifyMelfSceneDocument(sceneDocument);
+
+      if (currentHandle) {
+        await writeSceneDocumentToHandle(currentHandle, rawDocument);
+        persistRecentScene(sceneDocument.name, rawDocument);
+        setStatusMessage(`${normalizeSceneFileName(currentHandle.name ?? suggestedName)} saved.`);
+        return;
+      }
+
+      const pickerWindow = window as FilePickerWindow;
+      if (typeof pickerWindow.showSaveFilePicker === 'function') {
+        const nextHandle = await pickerWindow.showSaveFilePicker({
+          suggestedName,
+          types: [
+            {
+              accept: {
+                [MELF_MIME_TYPE]: [MELF_EXTENSION],
+              },
+              description: 'meme-elf scene',
+            },
+          ],
+        });
+
+        await writeSceneDocumentToHandle(nextHandle, rawDocument);
+        saveSceneFileHandleRef.current = nextHandle;
+        persistRecentScene(sceneDocument.name, rawDocument);
+        setStatusMessage(`${normalizeSceneFileName(nextHandle.name ?? suggestedName)} saved.`);
+        return;
+      }
+
+      downloadSceneDocument(rawDocument, suggestedName);
+      persistRecentScene(sceneDocument.name, rawDocument);
+      setStatusMessage(`${suggestedName} download started.`);
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      setStatusMessage('The .melf scene could not be saved.');
+    }
+  }
+
+  async function handleOpenSceneClick() {
+    try {
+      const pickerWindow = window as FilePickerWindow;
+      if (typeof pickerWindow.showOpenFilePicker === 'function') {
+        const handles = await pickerWindow.showOpenFilePicker({
+          excludeAcceptAllOption: false,
+          multiple: false,
+          types: [
+            {
+              accept: {
+                [MELF_MIME_TYPE]: [MELF_EXTENSION],
+                'application/json': [MELF_EXTENSION],
+              },
+              description: 'meme-elf scene',
+            },
+          ],
+        });
+        const handle = handles[0] ?? null;
+
+        if (!handle) {
+          return;
+        }
+
+        const file = await handle.getFile();
+        await openSceneFile(file, handle);
+        return;
+      }
+
+      openSceneInputRef.current?.click();
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      setStatusMessage('The .melf scene could not be opened.');
+    }
+  }
+
+  async function openSceneFile(file: File, fileHandle: SceneFileHandle | null) {
+    try {
+      const rawDocument = await file.text();
+      const sceneDocument = parseMelfSceneDocument(rawDocument);
+
+      if (!sceneDocument) {
+        setStatusMessage('That .melf file is not valid.');
+        return;
+      }
+
+      await applySceneDocument(sceneDocument, {
+        fileHandle,
+        rawDocument,
+      });
+      setStatusMessage(`${normalizeSceneFileName(file.name)} opened.`);
+    } catch {
+      setStatusMessage('The .melf scene could not be opened.');
+    }
+  }
+
+  async function handleOpenRecentScene(entry: RecentSceneEntry) {
+    const sceneDocument = parseMelfSceneDocument(entry.document);
+
+    if (!sceneDocument) {
+      handleRemoveRecentScene(entry.id);
+      setStatusMessage('That saved scene is no longer valid.');
+      return;
+    }
+
+    await applySceneDocument(sceneDocument, {
+      fileHandle: null,
+      rawDocument: entry.document,
+    });
+    setStatusMessage(`${entry.name} reopened from local saves.`);
+  }
+
+  function handleRemoveRecentScene(sceneId: string) {
+    const nextEntries = removeRecentSceneEntry(window.localStorage, sceneId);
+    setRecentScenes(nextEntries);
+  }
+
+  function handleDismissRecoveryDraft() {
+    window.sessionStorage.removeItem(MOBILE_RECOVERY_STORAGE_KEY);
+    setMobileRecoverySnapshot(null);
+    setStatusMessage('Recovery draft dismissed.');
+  }
+
+  async function handleRecoverMobileDraft() {
+    if (!mobileRecoverySnapshot) {
+      return;
+    }
+
+    if (!mobileRecoverySnapshot.imageDataUrl) {
+      applyMobileRecoverySnapshot(
+        mobileRecoverySnapshot,
+        null,
+        'Recovered the interrupted mobile draft into the current editor session.',
+      );
+      return;
+    }
+
+    try {
+      const image = await loadImageElementFromUrl(mobileRecoverySnapshot.imageDataUrl);
+      applyMobileRecoverySnapshot(
+        mobileRecoverySnapshot,
+        image,
+        'Recovered the interrupted mobile draft into the current editor session.',
+      );
+    } catch {
+      handleDismissRecoveryDraft();
+      setStatusMessage('The recovery draft could not be restored.');
+    }
+  }
+
+  function persistRecentScene(name: string, rawDocument: string) {
+    const nextEntries = upsertRecentSceneEntry(window.localStorage, {
+      document: rawDocument,
+      name,
+      updatedAt: new Date().toISOString(),
+    });
+    setRecentScenes(nextEntries);
+  }
+
+  async function applySceneDocument(
+    sceneDocument: MelfSceneDocument,
+    options: {
+      fileHandle: SceneFileHandle | null;
+      rawDocument: string;
+    },
+  ) {
+    const nextState = await materializeAppStateFromMelfSceneDocument(sceneDocument);
+    const fitZoomFactor = resolveFitToWindowZoomFactor(nextState.canvasSize, previewFrameRef.current);
+
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    historyTransactionRef.current = null;
+    syncHistoryState();
+    pendingAutoFitPreviewRef.current = true;
+    nextLayerSequenceRef.current = nextState.layers.filter(isTextLayer).length + 1;
+    nextImageLayerSequenceRef.current = nextState.layers.filter(isImageLayer).length + 1;
+    nextDrawLayerSequenceRef.current = nextState.layers.filter(isDrawLayer).length + 1;
+    saveSceneFileHandleRef.current = options.fileHandle;
+    setAppState({
+      ...nextState,
+      previewZoomFactor: fitZoomFactor,
+    });
+    setActiveInspectorTab('layers');
+    setPreviewPan({ x: 0, y: 0 });
+    persistRecentScene(sceneDocument.name, options.rawDocument);
+  }
+
+  function applyMobileRecoverySnapshot(
+    snapshot: MobileRecoverySnapshot,
+    image: HTMLImageElement | null,
+    nextStatusMessage: string,
+  ) {
+    pendingAutoFitPreviewRef.current = true;
+    setAppState((currentState) => ({
+      ...currentState,
+      activeLayerId: snapshot.textLayers[0]?.id ?? null,
+      canvasSize: { ...snapshot.canvasSize },
+      errorMessage: null,
+      image,
+      layers: cloneTextLayers(snapshot.textLayers),
+      previewZoomFactor: currentState.previewZoomFactor,
+      sceneEffectStack: createDefaultSceneEffectStack(),
+      sceneImageAdjustments: createDefaultSceneImageAdjustments(),
+      sceneWatermark: {
+        ...createDefaultSceneWatermark(),
+        enabled: false,
+      },
+      status: 'idle',
+    }));
+    setPreviewPan({ x: 0, y: 0 });
+    setStatusMessage(nextStatusMessage);
+  }
+
+  function handleOpenSceneFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    void openSceneFile(file, null);
+  }
+
   useEffect(() => {
     isPreInsertModalOpenRef.current = appState.preInsertModalDraft !== null;
   }, [appState.preInsertModalDraft]);
@@ -2270,6 +2708,26 @@ export function App() {
   useEffect(() => {
     isCopyFallbackModalOpenRef.current = copyFallbackModalState !== null;
   }, [copyFallbackModalState]);
+
+  useEffect(() => {
+    if (!showLocalOnlyTabs) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void readPersistedTemplateLibrary(DEV_TEMPLATE_LIBRARY_STORAGE_KEY).then((library) => {
+      if (cancelled || library === null) {
+        return;
+      }
+
+      setTemplateLibrary(library);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showLocalOnlyTabs]);
 
   useEffect(() => {
     async function handlePasteEvent(event: ClipboardEvent) {
@@ -2665,6 +3123,30 @@ export function App() {
             }}
           />
         );
+      case 'open-scene':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Open .melf"
+            icon={<OpenSceneIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              void handleOpenSceneClick();
+            }}
+          />
+        );
+      case 'save-scene':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="Save .melf"
+            icon={<SaveSceneIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              void handleSaveSceneClick();
+            }}
+          />
+        );
       case 'download':
         return (
           <ToolbarIconButton
@@ -2810,26 +3292,28 @@ export function App() {
                   type="button"
                   role="menuitem"
                   className="toolbar-overflow-item"
-                  aria-label={
-                    actionId === 'theme'
-                      ? theme === 'light'
-                        ? 'Switch to dark theme'
-                        : 'Switch to light theme'
-                      : actionId
-                  }
+                  aria-label={resolveOverflowActionLabel(actionId, theme)}
                   onClick={() => {
                     setIsTopbarOverflowOpen(false);
 
                     if (actionId === 'theme') {
                       handleThemeToggle();
+                      return;
+                    }
+
+                    if (actionId === 'open-scene') {
+                      dismissActiveTextFocus();
+                      void handleOpenSceneClick();
+                      return;
+                    }
+
+                    if (actionId === 'save-scene') {
+                      dismissActiveTextFocus();
+                      void handleSaveSceneClick();
                     }
                   }}
                 >
-                  {actionId === 'theme'
-                    ? theme === 'light'
-                      ? 'Switch to dark theme'
-                      : 'Switch to light theme'
-                    : actionId}
+                  {resolveOverflowActionLabel(actionId, theme)}
                 </button>
               ))}
             </div>
@@ -3125,7 +3609,11 @@ export function App() {
             sceneEffectStack={appState.sceneEffectStack}
             sceneWatermark={appState.sceneWatermark}
             sceneExpandDraft={appState.sceneBoundsDraft.expand}
-            templatePresets={STARTER_MELF_TEMPLATE_PRESETS}
+            templateCatalog={templateCatalog}
+            selectedTemplateId={selectedTemplateId}
+            applyingTemplateId={applyingTemplateId}
+            recentScenes={recentScenes}
+            mobileRecoverySnapshot={mobileRecoverySnapshot}
             onOpenAdvancedImportClipboard={(opener) => {
               void handleAdvancedImportClipboardClick(opener);
             }}
@@ -3175,6 +3663,22 @@ export function App() {
             onSceneImageStackTransform={applySceneImageTransform}
             onSceneExpandDraftChange={updateSceneExpandDraft}
             onApplyTemplatePreset={applyTemplatePreset}
+            onImportTemplateFiles={(files) => {
+              void importTemplateFiles(files);
+            }}
+            onTemplateTitleChange={updateTemplateTitle}
+            onTemplateTagsChange={updateTemplateTags}
+            onMoveTemplateUp={(templateId) => moveTemplate(templateId, 'up')}
+            onMoveTemplateDown={(templateId) => moveTemplate(templateId, 'down')}
+            onDeleteTemplate={deleteTemplate}
+            onOpenRecentScene={(entry) => {
+              void handleOpenRecentScene(entry);
+            }}
+            onRemoveRecentScene={handleRemoveRecentScene}
+            onRecoverMobileDraft={() => {
+              void handleRecoverMobileDraft();
+            }}
+            onDismissRecoveryDraft={handleDismissRecoveryDraft}
             onStartSceneCrop={startSceneCropSession}
             onTextLayerChange={updateTextLayer}
             onTextEditSessionStart={() => handleTextEditSessionStart('inspector')}
@@ -3305,6 +3809,14 @@ export function App() {
         type="file"
         accept="image/png,image/jpeg,image/webp"
         onChange={handleFileChange}
+      />
+      <input
+        ref={openSceneInputRef}
+        className="file-input file-input-hidden"
+        aria-label="Open .melf file"
+        type="file"
+        accept={`${MELF_EXTENSION},${MELF_MIME_TYPE},application/json`}
+        onChange={handleOpenSceneFileChange}
       />
       {preInsertDraft ? (
         <PreInsertModal
@@ -3568,6 +4080,55 @@ function DownloadIcon() {
   );
 }
 
+function OpenSceneIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M4.5 15V6a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.5H14A1.5 1.5 0 0 1 15.5 7.5V15"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 12V7.5M7.8 9.7 10 7.5l2.2 2.2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconBase>
+  );
+}
+
+function SaveSceneIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M5 4.5h8l2 2V15a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 5 15V4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 4.5v4h4v-4M10 13v-2.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.5 11.5 10 13l1.5-1.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </IconBase>
+  );
+}
+
 function MoonIcon() {
   return (
     <IconBase>
@@ -3698,6 +4259,59 @@ function CloseIcon() {
   );
 }
 
+function resolveOverflowActionLabel(
+  actionId: ToolbarActionId,
+  theme: 'light' | 'dark',
+) {
+  if (actionId === 'theme') {
+    return theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+  }
+
+  if (actionId === 'open-scene') {
+    return 'Open .melf';
+  }
+
+  if (actionId === 'save-scene') {
+    return 'Save .melf';
+  }
+
+  return actionId;
+}
+
+async function writeSceneDocumentToHandle(handle: SceneFileHandle, rawDocument: string) {
+  const writable = await handle.createWritable();
+  await writable.write(rawDocument);
+  await writable.close();
+}
+
+function downloadSceneDocument(rawDocument: string, fileName: string) {
+  const blob = new Blob([rawDocument], { type: MELF_MIME_TYPE });
+  const url = URL.createObjectURL(blob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = url;
+  downloadLink.download = normalizeSceneFileName(fileName);
+  downloadLink.click();
+  URL.revokeObjectURL(url);
+}
+
+function normalizeSceneFileName(fileName: string) {
+  const trimmed = fileName.trim();
+  const normalized = trimmed.length > 0 ? trimmed : 'meme-elf-scene';
+  return normalized.toLowerCase().endsWith(MELF_EXTENSION) ? normalized : `${normalized}${MELF_EXTENSION}`;
+}
+
+function stripMelfExtension(fileName: string) {
+  return fileName.toLowerCase().endsWith(MELF_EXTENSION)
+    ? fileName.slice(0, -MELF_EXTENSION.length)
+    : fileName;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
 function createExpandedBaseImage(
   image: CanvasImageSource | null,
   currentCanvasSize: { width: number; height: number },
@@ -3822,6 +4436,48 @@ function resolveImageUrlFileName(url: string) {
     return `${parsedUrl.hostname} image`;
   } catch {
     return 'URL image';
+  }
+}
+
+function readInitialRecentSceneEntries() {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  return readRecentSceneEntries(window.localStorage);
+}
+
+function readInitialTemplateLibrary() {
+  const fallbackLibrary = cloneTemplateDocuments(STARTER_MELF_TEMPLATE_PRESETS);
+
+  if (typeof window === 'undefined' || !shouldShowLocalOnlyTabs()) {
+    return fallbackLibrary;
+  }
+
+  const rawLibrary = window.localStorage.getItem(DEV_TEMPLATE_LIBRARY_STORAGE_KEY);
+
+  if (!rawLibrary) {
+    return fallbackLibrary;
+  }
+
+  try {
+    const parsed = JSON.parse(rawLibrary) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return fallbackLibrary;
+    }
+
+    if (parsed.length === 0) {
+      return [];
+    }
+
+    const library = parsed
+      .map((entry) => parseMelfTemplateDocument(JSON.stringify(entry)))
+      .filter((entry): entry is MelfTemplateDocument => entry !== null);
+
+    return library.length > 0 ? library : fallbackLibrary;
+  } catch {
+    return fallbackLibrary;
   }
 }
 
