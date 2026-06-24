@@ -111,11 +111,11 @@ Installed mode launches the editor from `/` in standalone mode, so it opens like
 The standalone-launch helper checks both `(display-mode: standalone)` and Safari `navigator.standalone`, so this install path has an explicit detection contract for later runtime wiring.
 When the app is opened in normal iPhone Safari on the deployed `HTTPS` URL, the editor shows a passive `Share` -> `Add to Home Screen` reminder in the status strip. That copy stays hidden in standalone mode and outside the iPhone Safari install path so the normal quick-meme flow stays quiet.
 
-Installability is supported in `9A-1`, and Milestone `9B-1` now defines a narrow offline shell contract for later runtime wiring:
+Installability is supported in `9A-1`, and Milestone `9B-1` now defines and registers a narrow offline shell contract:
 - cached after the first successful online load: the HTML shell, built JS/CSS bundles referenced by that shell, the web manifest, install icons, and same-origin static assets needed to render the base editor UI
 - explicitly out of offline scope: direct image URL fetches, remote images that were not already available locally, and any promise that user-generated scenes or edits are durable offline storage
 
-This is intentionally not a `cache everything` posture. The service worker boundary is limited to shipped shell assets so future work can add offline messaging and update UX without pretending the whole editor or imported content is offline-first.
+This is intentionally not a `cache everything` posture. The registered service worker boundary is limited to shipped shell assets so future work can add offline messaging and update UX without pretending the whole editor or imported content is offline-first.
 
 Install audit note:
 - Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.

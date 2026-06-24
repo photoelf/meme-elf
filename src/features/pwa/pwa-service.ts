@@ -3,6 +3,10 @@ type StandaloneLaunchWindow = {
   navigator: Navigator & { standalone?: boolean };
 };
 
+type ServiceWorkerRegisterWindow = {
+  navigator: Navigator;
+};
+
 const PWA_SCOPE_CONTRACT = {
   cachedAfterFirstOnlineLoad: [
     'HTML shell entry (/)',
@@ -53,6 +57,16 @@ export function getStandaloneLaunchState(win: StandaloneLaunchWindow = window) {
 
 export function getPwaScopeContract() {
   return PWA_SCOPE_CONTRACT;
+}
+
+export function registerShellServiceWorker(
+  win: ServiceWorkerRegisterWindow = window,
+): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in win.navigator)) {
+    return Promise.resolve(null);
+  }
+
+  return win.navigator.serviceWorker.register('/sw.js');
 }
 
 export function buildShellPrecacheUrls(indexHtml: string) {

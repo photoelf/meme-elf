@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
+import { registerShellServiceWorker } from './features/pwa/pwa-service';
 import './styles/global.css';
 
 const rootElement = document.getElementById('root');
@@ -14,3 +15,7 @@ createRoot(rootElement).render(
     <App />
   </StrictMode>,
 );
+
+if (window.isSecureContext) {
+  void registerShellServiceWorker();
+}

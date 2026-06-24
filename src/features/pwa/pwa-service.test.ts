@@ -3,6 +3,7 @@ import {
   buildShellPrecacheUrls,
   detectStandaloneMode,
   getPwaScopeContract,
+  registerShellServiceWorker,
   getStandaloneLaunchState,
   STATIC_PWA_SHELL_URLS,
 } from './pwa-service';
@@ -129,6 +130,33 @@ describe('buildShellPrecacheUrls', () => {
           </body>
         </html>`),
     ).toEqual(['/', ...STATIC_PWA_SHELL_URLS, '/assets/index-def456.js']);
+  });
+});
+
+describe('registerShellServiceWorker', () => {
+  it('registers the shell worker at /sw.js when service workers are available', async () => {
+    const registration = { scope: '/' };
+    const register = vi.fn().mockResolvedValue(registration);
+
+    await expect(
+      registerShellServiceWorker({
+        navigator: {
+          serviceWorker: {
+            register,
+          },
+        } as unknown as Navigator,
+      }),
+    ).resolves.toBe(registration);
+
+    expect(register).toHaveBeenCalledWith('/sw.js');
+  });
+
+  it('returns null when service workers are unavailable', async () => {
+    await expect(
+      registerShellServiceWorker({
+        navigator: {} as Navigator,
+      }),
+    ).resolves.toBeNull();
   });
 });
 
