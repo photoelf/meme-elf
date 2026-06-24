@@ -110,12 +110,18 @@ For local-network manual testing on a phone or tablet:
 Installed mode launches the editor from `/` in standalone mode, so it opens like a tool instead of reopening inside a normal Safari tab.
 The standalone-launch helper checks both `(display-mode: standalone)` and Safari `navigator.standalone`, so this install path has an explicit detection contract for later runtime wiring.
 When the app is opened in normal iPhone Safari on the deployed `HTTPS` URL, the editor shows a passive `Share` -> `Add to Home Screen` reminder in the status strip. That copy stays hidden in standalone mode and outside the iPhone Safari install path so the normal quick-meme flow stays quiet.
+The installed phone shell now adds standalone-specific safe-area padding for the iPhone top inset and keeps the fixed bottom action bars aligned to left/right safe-area edges, so launch-from-icon mode does not crowd the notch or clip the persistent action chrome.
 
 Installability is supported in `9A-1`, and Milestone `9B-1` now defines and registers a narrow offline shell contract:
 - cached after the first successful online load: the HTML shell, built JS/CSS bundles referenced by that shell, the web manifest, install icons, and same-origin static assets needed to render the base editor UI
 - explicitly out of offline scope: direct image URL fetches, remote images that were not already available locally, and any promise that user-generated scenes or edits are durable offline storage
 
 This is intentionally not a `cache everything` posture. The registered service worker boundary is limited to shipped shell assets so future work can add offline messaging and update UX without pretending the whole editor or imported content is offline-first.
+When a new shell update is waiting, the status strip shows a compact `Refresh app` action. That button tells the waiting service worker to activate immediately and then reloads into the updated shell when control changes.
+
+Current verification status for the installed iPhone flow:
+- locally covered by automated tests: standalone detection, standalone shell marker wiring, update-available status-strip affordance, `SKIP_WAITING` activation request, and single reload on `controllerchange`
+- still requires real-device iPhone smoke before calling the installed flow fully closed: launch from icon, import from supported local paths, edit text, and export through the preferred and fallback routes
 
 Install audit note:
 - Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.
