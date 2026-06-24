@@ -4,6 +4,10 @@ import { App } from './App';
 import { getCanvasPoint } from '../features/preview/preview-canvas';
 import { resetPreviewRenderSurfacesForTests } from '../features/canvas/canvas-renderer';
 import { createTwoButtonsTemplateDocument } from '../features/templates/two-buttons-test-fixture';
+import {
+  resetShellServiceWorkerStateForTests,
+  setShellServiceWorkerStateForTests,
+} from '../features/pwa/pwa-service';
 
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
@@ -143,6 +147,7 @@ describe('App', () => {
   beforeEach(() => {
     resetPreviewRenderSurfacesForTests();
     vi.clearAllMocks();
+    resetShellServiceWorkerStateForTests();
     document.documentElement.dataset.theme = '';
     window.innerWidth = 1280;
     window.innerHeight = 768;
@@ -237,6 +242,39 @@ describe('App', () => {
     });
 
     expect(screen.getByRole('main')).toHaveAttribute('data-standalone-mode', 'false');
+  });
+
+  it('shows a refresh action when a waiting shell update is available', () => {
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole('button', { name: /refresh app/i })).toBeInTheDocument();
+  });
+
+  it('requests the waiting shell update when refresh app is pressed', async () => {
+    const postMessage = vi.fn();
+
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+      registration: {
+        waiting: {
+          postMessage,
+        },
+      } as unknown as ServiceWorkerRegistration,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh app/i }));
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
+    expect(
+      screen.getByText(/refreshing app to apply the latest installed update\./i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /refreshing app/i })).toBeDisabled();
   });
 
   it('does not show install help in the default desktop browser flow', () => {

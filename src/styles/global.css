@@ -532,6 +532,29 @@ button {
   letter-spacing: 0.06em;
 }
 
+.status-strip-action {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel-strong);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.status-strip-action:hover,
+.status-strip-action:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.status-strip-action:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .inspector {
   display: flex;
   flex-direction: column;

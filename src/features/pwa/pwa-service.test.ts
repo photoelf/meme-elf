@@ -1,12 +1,17 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  applyWaitingShellServiceWorkerUpdate,
   buildShellPrecacheUrls,
   detectStandaloneMode,
+  getShellServiceWorkerState,
   getShellAssetCachingStrategy,
   getPwaScopeContract,
   normalizeServiceWorkerState,
+  resetShellServiceWorkerStateForTests,
   registerShellServiceWorker,
+  setShellServiceWorkerStateForTests,
+  subscribeShellServiceWorkerState,
   getStandaloneLaunchState,
   STATIC_PWA_SHELL_URLS,
 } from './pwa-service';
@@ -97,6 +102,10 @@ describe('getPwaScopeContract', () => {
 });
 
 describe('normalizeServiceWorkerState', () => {
+  beforeEach(() => {
+    resetShellServiceWorkerStateForTests();
+  });
+
   it('marks an update as available when a waiting service worker exists', () => {
     expect(
       normalizeServiceWorkerState({
@@ -113,6 +122,37 @@ describe('normalizeServiceWorkerState', () => {
         hasWaitingWorker: false,
       }),
     ).toEqual({ updateAvailable: false });
+  });
+
+  it('publishes shell worker state updates to subscribers', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeShellServiceWorkerState(listener);
+
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+    });
+
+    expect(listener).toHaveBeenNthCalledWith(1, { updateAvailable: false });
+    expect(listener).toHaveBeenNthCalledWith(2, { updateAvailable: true });
+    expect(getShellServiceWorkerState()).toEqual({ updateAvailable: true });
+
+    unsubscribe();
+  });
+
+  it('posts skip-waiting to the current shell update when refresh is requested', () => {
+    const postMessage = vi.fn();
+
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+      registration: {
+        waiting: {
+          postMessage,
+        },
+      } as unknown as ServiceWorkerRegistration,
+    });
+
+    expect(applyWaitingShellServiceWorkerUpdate()).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
   });
 });
 
@@ -314,6 +354,13 @@ describe('public/sw.js smoke contract', () => {
     expect(serviceWorkerSource).toContain(
       'async function buildShellEntryFingerprint(url, response)',
     );
+  });
+
+  it('supports skip-waiting activation messages for refresh affordances', () => {
+    const serviceWorkerSource = readFileSync('public/sw.js', 'utf8');
+
+    expect(serviceWorkerSource).toContain("event.data?.type === 'SKIP_WAITING'");
+    expect(serviceWorkerSource).toContain('self.skipWaiting()');
   });
 });
 

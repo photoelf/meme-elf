@@ -11,6 +11,8 @@ type ServiceWorkerStateChangeListener = (state: {
   updateAvailable: boolean;
 }) => void;
 
+type ShellServiceWorkerState = ReturnType<typeof normalizeServiceWorkerState>;
+
 const PWA_SCOPE_CONTRACT = {
   cachedAfterFirstOnlineLoad: [
     'HTML shell entry (/)',
@@ -36,6 +38,12 @@ export const STATIC_PWA_SHELL_URLS = [
 
 const SHELL_ASSET_PATTERN = /<(?:link|script)\b[^>]+(?:href|src)=["']([^"'#?]+)["'][^>]*>/gi;
 const FIXED_PATH_SHELL_URLS = new Set<string>(['/', ...STATIC_PWA_SHELL_URLS]);
+const DEFAULT_SHELL_SERVICE_WORKER_STATE = Object.freeze({
+  updateAvailable: false,
+});
+const shellServiceWorkerStateListeners = new Set<ServiceWorkerStateChangeListener>();
+let shellServiceWorkerState: ShellServiceWorkerState = DEFAULT_SHELL_SERVICE_WORKER_STATE;
+let activeShellServiceWorkerRegistration: ServiceWorkerRegistration | null = null;
 
 export function detectStandaloneMode(input: {
   matchMediaStandalone: boolean;
@@ -90,6 +98,7 @@ export function registerShellServiceWorker(
   }
 
   return win.navigator.serviceWorker.register('/sw.js').then((registration) => {
+    activeShellServiceWorkerRegistration = registration;
     const observedInstallingWorkers = new WeakSet<ServiceWorker>();
     const emitState = (installingWorker?: ServiceWorker | null) => {
       const state = getNormalizedRegistrationState(
@@ -98,6 +107,7 @@ export function registerShellServiceWorker(
         installingWorker,
       );
 
+      publishShellServiceWorkerState(state, registration);
       options.onStateChange?.(state);
       return state;
     };
@@ -114,6 +124,50 @@ export function registerShellServiceWorker(
       state: emitState(registration.installing),
     };
   });
+}
+
+export function getShellServiceWorkerState() {
+  return shellServiceWorkerState;
+}
+
+export function subscribeShellServiceWorkerState(
+  listener: ServiceWorkerStateChangeListener,
+) {
+  shellServiceWorkerStateListeners.add(listener);
+  listener(shellServiceWorkerState);
+
+  return () => {
+    shellServiceWorkerStateListeners.delete(listener);
+  };
+}
+
+export function applyWaitingShellServiceWorkerUpdate() {
+  const waitingWorker = resolveWaitingShellWorker(activeShellServiceWorkerRegistration);
+
+  if (!waitingWorker || typeof waitingWorker.postMessage !== 'function') {
+    return false;
+  }
+
+  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  return true;
+}
+
+export function resetShellServiceWorkerStateForTests() {
+  shellServiceWorkerStateListeners.clear();
+  shellServiceWorkerState = DEFAULT_SHELL_SERVICE_WORKER_STATE;
+  activeShellServiceWorkerRegistration = null;
+}
+
+export function setShellServiceWorkerStateForTests(input: {
+  registration?: ServiceWorkerRegistration | null;
+  updateAvailable: boolean;
+}) {
+  publishShellServiceWorkerState(
+    {
+      updateAvailable: input.updateAvailable,
+    },
+    input.registration ?? null,
+  );
 }
 
 export function buildShellPrecacheUrls(indexHtml: string) {
@@ -233,4 +287,34 @@ function getNormalizedRegistrationState(
     hasRegistration: true,
     hasWaitingWorker: waitingWorkerAvailable,
   });
+}
+
+function publishShellServiceWorkerState(
+  state: ShellServiceWorkerState,
+  registration: ServiceWorkerRegistration | null,
+) {
+  shellServiceWorkerState = state;
+  activeShellServiceWorkerRegistration = registration;
+
+  for (const listener of shellServiceWorkerStateListeners) {
+    listener(state);
+  }
+}
+
+function resolveWaitingShellWorker(
+  registration: ServiceWorkerRegistration | null,
+) {
+  if (!registration) {
+    return null;
+  }
+
+  if (registration.waiting) {
+    return registration.waiting;
+  }
+
+  if (registration.installing?.state === 'installed') {
+    return registration.installing;
+  }
+
+  return null;
 }

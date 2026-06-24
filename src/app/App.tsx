@@ -39,7 +39,12 @@ import {
   resolveMobileExportMessage,
 } from '../features/mobile/mobile-export-fallbacks';
 import { CopyFallbackModal } from '../features/mobile/copy-fallback-modal';
-import { getStandaloneLaunchState } from '../features/pwa/pwa-service';
+import {
+  applyWaitingShellServiceWorkerUpdate,
+  getShellServiceWorkerState,
+  getStandaloneLaunchState,
+  subscribeShellServiceWorkerState,
+} from '../features/pwa/pwa-service';
 import {
   handleTooltipTouchClick,
   handleTooltipTouchFocus,
@@ -514,6 +519,10 @@ export function App() {
     imageDataUrl: string;
     restoreFocusTo: HTMLElement | null;
   } | null>(null);
+  const [shellServiceWorkerState, setShellServiceWorkerState] = useState(
+    getShellServiceWorkerState,
+  );
+  const [isRefreshingShellUpdate, setIsRefreshingShellUpdate] = useState(false);
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
   const pickerTemplateLibrary =
     showLocalOnlyTabs && shippedTemplateLibrary.length === 0
@@ -590,6 +599,38 @@ export function App() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return subscribeShellServiceWorkerState((state) => {
+      setShellServiceWorkerState(state);
+
+      if (!state.updateAvailable) {
+        setIsRefreshingShellUpdate(false);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      !('serviceWorker' in window.navigator) ||
+      typeof window.navigator.serviceWorker.addEventListener !== 'function'
+    ) {
+      return;
+    }
+
+    const handleControllerChange = () => {
+      window.location.reload();
+    };
+
+    window.navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+    return () => {
+      window.navigator.serviceWorker.removeEventListener?.(
+        'controllerchange',
+        handleControllerChange,
+      );
     };
   }, []);
 
@@ -3352,6 +3393,15 @@ export function App() {
     setPreviewPan({ x: 0, y: 0 });
   }
 
+  function handleRefreshAppClick() {
+    if (!applyWaitingShellServiceWorkerUpdate()) {
+      return;
+    }
+
+    setIsRefreshingShellUpdate(true);
+    setStatusMessage('Refreshing app to apply the latest installed update.');
+  }
+
   useEffect(() => {
     function handleDocumentTouchPointerDown(event: PointerEvent) {
       const currentState = appStateRef.current;
@@ -3691,6 +3741,16 @@ export function App() {
           <div className="status-strip" aria-label="Editor status">
             <span>{activeStatusLabel}</span>
             {passiveInstallHelpLabel ? <span>{passiveInstallHelpLabel}</span> : null}
+            {shellServiceWorkerState.updateAvailable ? (
+              <button
+                type="button"
+                className="status-strip-action"
+                onClick={handleRefreshAppClick}
+                disabled={isRefreshingShellUpdate}
+              >
+                {isRefreshingShellUpdate ? 'Refreshing app...' : 'Refresh app'}
+              </button>
+            ) : null}
             {mobileShellLayout.shellMode !== 'desktop' ? (
               <>
                 <span>Tool: {activeToolLabel}</span>
