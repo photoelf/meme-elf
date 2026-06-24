@@ -6,7 +6,9 @@
  * - Keep hashed /assets/* bundles cache-first because their URLs already version the content.
  * - Do not cache direct URL imports, remote image fetches, template content, or user edits as guaranteed offline storage.
  */
-const SHELL_CACHE_NAME = 'meme-elf-shell-v1';
+const SHELL_CACHE_PREFIX = 'meme-elf-shell-';
+const SHELL_CACHE_META_NAME = 'meme-elf-shell-meta';
+const ACTIVE_SHELL_CACHE_KEY = '/active-cache-name';
 const STATIC_SHELL_URLS = [
   '/',
   '/manifest.webmanifest',
@@ -17,13 +19,14 @@ const STATIC_SHELL_URLS = [
 ];
 const SHELL_ASSET_PATTERN = /<(?:link|script)\b[^>]+(?:href|src)=["']([^"'#?]+)["'][^>]*>/gi;
 const FIXED_PATH_SHELL_URLS = new Set(STATIC_SHELL_URLS);
+let pendingShellCacheName = null;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(precacheShell());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(clearOldShellCaches());
+  event.waitUntil(activateShellCache());
 });
 
 self.addEventListener('fetch', (event) => {
@@ -63,24 +66,46 @@ async function precacheShell() {
     throw new Error(`Failed to fetch app shell: ${htmlResponse.status}`);
   }
 
+  const htmlResponseClone = htmlResponse.clone();
   const indexHtml = await htmlResponse.text();
-  const cache = await caches.open(SHELL_CACHE_NAME);
   const shellUrls = buildShellPrecacheUrls(indexHtml);
-  await cache.addAll(shellUrls);
+  const shellCacheName = buildShellCacheName(shellUrls);
+  const cache = await caches.open(shellCacheName);
+  pendingShellCacheName = shellCacheName;
+  await cache.put('/', htmlResponseClone);
+  await cache.addAll(shellUrls.filter((shellUrl) => shellUrl !== '/'));
 }
 
-async function clearOldShellCaches() {
+async function activateShellCache() {
+  const activeShellCacheName =
+    pendingShellCacheName ?? (await getNewestVersionedShellCacheName());
+
+  if (!activeShellCacheName) {
+    return;
+  }
+
+  const metaCache = await caches.open(SHELL_CACHE_META_NAME);
+  await metaCache.put(ACTIVE_SHELL_CACHE_KEY, new Response(activeShellCacheName));
+  await clearOldShellCaches(activeShellCacheName);
+}
+
+async function clearOldShellCaches(activeShellCacheName) {
   const cacheNames = await caches.keys();
 
   await Promise.all(
     cacheNames
-      .filter((cacheName) => cacheName.startsWith('meme-elf-shell-') && cacheName !== SHELL_CACHE_NAME)
+      .filter(
+        (cacheName) =>
+          cacheName.startsWith(SHELL_CACHE_PREFIX) &&
+          cacheName !== SHELL_CACHE_META_NAME &&
+          cacheName !== activeShellCacheName,
+      )
       .map((cacheName) => caches.delete(cacheName)),
   );
 }
 
 async function handleHtmlNavigation(request) {
-  const cache = await caches.open(SHELL_CACHE_NAME);
+  const cache = await openActiveShellCache();
 
   try {
     const response = await fetch(request, { cache: 'no-store' });
@@ -102,7 +127,7 @@ async function handleHtmlNavigation(request) {
 }
 
 async function handleNetworkFirstShellRequest(request) {
-  const cache = await caches.open(SHELL_CACHE_NAME);
+  const cache = await openActiveShellCache();
 
   try {
     const response = await fetch(request, { cache: 'no-store' });
@@ -124,7 +149,7 @@ async function handleNetworkFirstShellRequest(request) {
 }
 
 async function handleCacheFirstShellAssetRequest(request) {
-  const cache = await caches.open(SHELL_CACHE_NAME);
+  const cache = await openActiveShellCache();
   const cachedResponse = await cache.match(request);
 
   if (cachedResponse) {
@@ -155,6 +180,17 @@ function buildShellPrecacheUrls(indexHtml) {
   return Array.from(shellUrls);
 }
 
+function buildShellCacheName(shellUrls) {
+  const versionSource = shellUrls.slice().sort().join('\n');
+  let hash = 0;
+
+  for (let index = 0; index < versionSource.length; index += 1) {
+    hash = (hash * 31 + versionSource.charCodeAt(index)) >>> 0;
+  }
+
+  return `${SHELL_CACHE_PREFIX}${hash.toString(16)}`;
+}
+
 function getShellAssetCachingStrategy(pathname) {
   if (!pathname.startsWith('/')) {
     return null;
@@ -173,4 +209,37 @@ function getShellAssetCachingStrategy(pathname) {
   }
 
   return null;
+}
+
+async function openActiveShellCache() {
+  const activeShellCacheName = await getActiveShellCacheName();
+  return caches.open(activeShellCacheName);
+}
+
+async function getActiveShellCacheName() {
+  if (pendingShellCacheName) {
+    return pendingShellCacheName;
+  }
+
+  const metaCache = await caches.open(SHELL_CACHE_META_NAME);
+  const cachedActiveShellCache = await metaCache.match(ACTIVE_SHELL_CACHE_KEY);
+
+  if (cachedActiveShellCache) {
+    return cachedActiveShellCache.text();
+  }
+
+  return getNewestVersionedShellCacheName();
+}
+
+async function getNewestVersionedShellCacheName() {
+  const cacheNames = await caches.keys();
+  const shellCacheNames = cacheNames
+    .filter(
+      (cacheName) =>
+        cacheName.startsWith(SHELL_CACHE_PREFIX) &&
+        cacheName !== SHELL_CACHE_META_NAME,
+    )
+    .sort();
+
+  return shellCacheNames.at(-1) ?? `${SHELL_CACHE_PREFIX}bootstrap`;
 }

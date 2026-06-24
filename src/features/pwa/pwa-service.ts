@@ -7,6 +7,10 @@ type ServiceWorkerRegisterWindow = {
   navigator: Navigator;
 };
 
+type ServiceWorkerStateChangeListener = (state: {
+  updateAvailable: boolean;
+}) => void;
+
 const PWA_SCOPE_CONTRACT = {
   cachedAfterFirstOnlineLoad: [
     'HTML shell entry (/)',
@@ -60,14 +64,49 @@ export function getPwaScopeContract() {
   return PWA_SCOPE_CONTRACT;
 }
 
+export function normalizeServiceWorkerState(input: {
+  hasRegistration: boolean;
+  hasWaitingWorker: boolean;
+}) {
+  return {
+    updateAvailable: input.hasRegistration && input.hasWaitingWorker,
+  };
+}
+
 export function registerShellServiceWorker(
   win: ServiceWorkerRegisterWindow = window,
-): Promise<ServiceWorkerRegistration | null> {
+  options: {
+    onStateChange?: ServiceWorkerStateChangeListener;
+  } = {},
+): Promise<
+  | {
+      registration: ServiceWorkerRegistration;
+      state: ReturnType<typeof normalizeServiceWorkerState>;
+    }
+  | null
+> {
   if (!('serviceWorker' in win.navigator)) {
     return Promise.resolve(null);
   }
 
-  return win.navigator.serviceWorker.register('/sw.js');
+  return win.navigator.serviceWorker.register('/sw.js').then((registration) => {
+    const emitState = () => {
+      const state = normalizeServiceWorkerState({
+        hasRegistration: true,
+        hasWaitingWorker: registration.waiting != null,
+      });
+
+      options.onStateChange?.(state);
+      return state;
+    };
+
+    observeWaitingWorkerUpdates(win, registration, emitState);
+
+    return {
+      registration,
+      state: emitState(),
+    };
+  });
 }
 
 export function buildShellPrecacheUrls(indexHtml: string) {
@@ -114,4 +153,34 @@ function extractShellAssetUrlsFromHtml(indexHtml: string) {
 
 function isCacheableShellAssetUrl(assetUrl: string) {
   return getShellAssetCachingStrategy(assetUrl) !== null;
+}
+
+function observeWaitingWorkerUpdates(
+  win: ServiceWorkerRegisterWindow,
+  registration: ServiceWorkerRegistration,
+  emitState: () => ReturnType<typeof normalizeServiceWorkerState>,
+) {
+  if (typeof registration.addEventListener !== 'function') {
+    return;
+  }
+
+  registration.addEventListener('updatefound', () => {
+    const installingWorker = registration.installing;
+
+    if (
+      !installingWorker ||
+      typeof installingWorker.addEventListener !== 'function'
+    ) {
+      return;
+    }
+
+    installingWorker.addEventListener('statechange', () => {
+      if (
+        installingWorker.state === 'installed' &&
+        win.navigator.serviceWorker.controller
+      ) {
+        emitState();
+      }
+    });
+  });
 }

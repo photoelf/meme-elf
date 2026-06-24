@@ -5,6 +5,7 @@ import {
   detectStandaloneMode,
   getShellAssetCachingStrategy,
   getPwaScopeContract,
+  normalizeServiceWorkerState,
   registerShellServiceWorker,
   getStandaloneLaunchState,
   STATIC_PWA_SHELL_URLS,
@@ -95,6 +96,26 @@ describe('getPwaScopeContract', () => {
   });
 });
 
+describe('normalizeServiceWorkerState', () => {
+  it('marks an update as available when a waiting service worker exists', () => {
+    expect(
+      normalizeServiceWorkerState({
+        hasRegistration: true,
+        hasWaitingWorker: true,
+      }),
+    ).toEqual({ updateAvailable: true });
+  });
+
+  it('keeps updateAvailable false when no waiting worker exists yet', () => {
+    expect(
+      normalizeServiceWorkerState({
+        hasRegistration: true,
+        hasWaitingWorker: false,
+      }),
+    ).toEqual({ updateAvailable: false });
+  });
+});
+
 describe('buildShellPrecacheUrls', () => {
   it('builds a deduped shell asset list from built html', () => {
     expect(
@@ -155,7 +176,7 @@ describe('getShellAssetCachingStrategy', () => {
 });
 
 describe('registerShellServiceWorker', () => {
-  it('registers the shell worker at /sw.js when service workers are available', async () => {
+  it('registers the shell worker at /sw.js and returns normalized state when service workers are available', async () => {
     const registration = { scope: '/' };
     const register = vi.fn().mockResolvedValue(registration);
 
@@ -167,9 +188,30 @@ describe('registerShellServiceWorker', () => {
           },
         } as unknown as Navigator,
       }),
-    ).resolves.toBe(registration);
+    ).resolves.toEqual({
+      registration,
+      state: { updateAvailable: false },
+    });
 
     expect(register).toHaveBeenCalledWith('/sw.js');
+  });
+
+  it('reports a waiting worker as an available shell update', async () => {
+    const registration = { scope: '/', waiting: { state: 'installed' } };
+    const register = vi.fn().mockResolvedValue(registration);
+
+    await expect(
+      registerShellServiceWorker({
+        navigator: {
+          serviceWorker: {
+            register,
+          },
+        } as unknown as Navigator,
+      }),
+    ).resolves.toEqual({
+      registration,
+      state: { updateAvailable: true },
+    });
   });
 
   it('returns null when service workers are unavailable', async () => {
