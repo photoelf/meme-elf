@@ -44,6 +44,13 @@ const DEFAULT_SHELL_SERVICE_WORKER_STATE = Object.freeze({
 const shellServiceWorkerStateListeners = new Set<ServiceWorkerStateChangeListener>();
 let shellServiceWorkerState: ShellServiceWorkerState = DEFAULT_SHELL_SERVICE_WORKER_STATE;
 let activeShellServiceWorkerRegistration: ServiceWorkerRegistration | null = null;
+let shellServiceWorkerRegistrationPromise: Promise<
+  | {
+      registration: ServiceWorkerRegistration;
+      state: ReturnType<typeof normalizeServiceWorkerState>;
+    }
+  | null
+> | null = null;
 
 export function detectStandaloneMode(input: {
   matchMediaStandalone: boolean;
@@ -97,33 +104,45 @@ export function registerShellServiceWorker(
     return Promise.resolve(null);
   }
 
-  return win.navigator.serviceWorker.register('/sw.js').then((registration) => {
-    activeShellServiceWorkerRegistration = registration;
-    const observedInstallingWorkers = new WeakSet<ServiceWorker>();
-    const emitState = (installingWorker?: ServiceWorker | null) => {
-      const state = getNormalizedRegistrationState(
+  if (shellServiceWorkerRegistrationPromise) {
+    return shellServiceWorkerRegistrationPromise;
+  }
+
+  shellServiceWorkerRegistrationPromise = win.navigator.serviceWorker
+    .register('/sw.js')
+    .then((registration) => {
+      activeShellServiceWorkerRegistration = registration;
+      const observedInstallingWorkers = new WeakSet<ServiceWorker>();
+      const emitState = (installingWorker?: ServiceWorker | null) => {
+        const state = getNormalizedRegistrationState(
+          win,
+          registration,
+          installingWorker,
+        );
+
+        publishShellServiceWorkerState(state, registration);
+        options.onStateChange?.(state);
+        return state;
+      };
+
+      observeWaitingWorkerUpdates(
         win,
         registration,
-        installingWorker,
+        emitState,
+        observedInstallingWorkers,
       );
 
-      publishShellServiceWorkerState(state, registration);
-      options.onStateChange?.(state);
-      return state;
-    };
+      return {
+        registration,
+        state: emitState(registration.installing),
+      };
+    })
+    .catch((error) => {
+      shellServiceWorkerRegistrationPromise = null;
+      throw error;
+    });
 
-    observeWaitingWorkerUpdates(
-      win,
-      registration,
-      emitState,
-      observedInstallingWorkers,
-    );
-
-    return {
-      registration,
-      state: emitState(registration.installing),
-    };
-  });
+  return shellServiceWorkerRegistrationPromise;
 }
 
 export function getShellServiceWorkerState() {
@@ -156,6 +175,7 @@ export function resetShellServiceWorkerStateForTests() {
   shellServiceWorkerStateListeners.clear();
   shellServiceWorkerState = DEFAULT_SHELL_SERVICE_WORKER_STATE;
   activeShellServiceWorkerRegistration = null;
+  shellServiceWorkerRegistrationPromise = null;
 }
 
 export function setShellServiceWorkerStateForTests(input: {

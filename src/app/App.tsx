@@ -573,6 +573,7 @@ export function App() {
   const historyFutureRef = useRef<EditorHistorySnapshot[]>([]);
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
   const templateLibraryMutationVersionRef = useRef(0);
+  const hasReloadedForShellUpdateRef = useRef(false);
   const isStandaloneLaunch =
     typeof window !== 'undefined' && getStandaloneLaunchState(window).isStandalone;
 
@@ -622,6 +623,11 @@ export function App() {
     }
 
     const handleControllerChange = () => {
+      if (hasReloadedForShellUpdateRef.current) {
+        return;
+      }
+
+      hasReloadedForShellUpdateRef.current = true;
       window.location.reload();
     };
 

@@ -216,6 +216,10 @@ describe('getShellAssetCachingStrategy', () => {
 });
 
 describe('registerShellServiceWorker', () => {
+  beforeEach(() => {
+    resetShellServiceWorkerStateForTests();
+  });
+
   it('registers the shell worker at /sw.js and returns normalized state when service workers are available', async () => {
     const registration = { scope: '/' };
     const register = vi.fn().mockResolvedValue(registration);
@@ -322,6 +326,27 @@ describe('registerShellServiceWorker', () => {
         navigator: {} as Navigator,
       }),
     ).resolves.toBeNull();
+  });
+
+  it('reuses the first shell registration promise instead of replacing tracked state', async () => {
+    const firstRegistration = createRegistrationStub();
+    const register = vi.fn().mockResolvedValue(firstRegistration);
+    const win = {
+      navigator: {
+        serviceWorker: {
+          register,
+        },
+      } as unknown as Navigator,
+    };
+
+    const firstPromise = registerShellServiceWorker(win);
+    const secondPromise = registerShellServiceWorker(win);
+    const firstResult = await firstPromise;
+    const secondResult = await secondPromise;
+
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(secondPromise).toBe(firstPromise);
+    expect(secondResult).toEqual(firstResult);
   });
 });
 

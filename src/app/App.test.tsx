@@ -139,6 +139,36 @@ function resetBrowserShell(options?: {
   mockStandaloneLaunchState(options?.standalone ?? false);
 }
 
+function installServiceWorkerEventHarness() {
+  const listeners = new Map<string, Array<() => void>>();
+  const serviceWorker = {
+    addEventListener(eventName: string, listener: () => void) {
+      const eventListeners = listeners.get(eventName) ?? [];
+      eventListeners.push(listener);
+      listeners.set(eventName, eventListeners);
+    },
+    removeEventListener(eventName: string, listener: () => void) {
+      const eventListeners = listeners.get(eventName) ?? [];
+      listeners.set(
+        eventName,
+        eventListeners.filter((registeredListener) => registeredListener !== listener),
+      );
+    },
+    dispatch(eventName: string) {
+      for (const listener of listeners.get(eventName) ?? []) {
+        listener();
+      }
+    },
+  };
+
+  Object.defineProperty(window.navigator, 'serviceWorker', {
+    configurable: true,
+    value: serviceWorker,
+  });
+
+  return serviceWorker;
+}
+
 const MOBILE_RECOVERY_STORAGE_KEY = 'meme-elf.mobile-recovery';
 const RECENT_SCENES_STORAGE_KEY = 'meme-elf.recent-scenes';
 const DEV_TEMPLATE_LIBRARY_STORAGE_KEY = 'meme-elf.dev-template-library';
@@ -156,6 +186,7 @@ describe('App', () => {
       writable: true,
       value: true,
     });
+    installServiceWorkerEventHarness();
     resetBrowserShell();
     window.sessionStorage.clear();
     window.localStorage.clear();
@@ -275,6 +306,37 @@ describe('App', () => {
       screen.getByText(/refreshing app to apply the latest installed update\./i),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /refreshing app/i })).toBeDisabled();
+  });
+
+  it('reloads once when the updated shell takes control after refresh', () => {
+    const serviceWorker = installServiceWorkerEventHarness();
+    const postMessage = vi.fn();
+    const reload = vi.fn();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        reload,
+      },
+    });
+
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+      registration: {
+        waiting: {
+          postMessage,
+        },
+      } as unknown as ServiceWorkerRegistration,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh app/i }));
+    serviceWorker.dispatch('controllerchange');
+    serviceWorker.dispatch('controllerchange');
+
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it('does not show install help in the default desktop browser flow', () => {
