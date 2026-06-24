@@ -220,6 +220,45 @@ describe('App', () => {
     expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
   });
 
+  it('does not show install help when the deployed app is opened in iPhone Opera', () => {
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: false,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) OPiOS/5.4.1.123456 Mobile/15E148 Safari/9537.53',
+    });
+
+    expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show install help when the context is not secure', () => {
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      writable: true,
+      value: false,
+    });
+
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: false,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show install help on localhost even in iPhone Safari', () => {
+    renderApp({
+      hostname: 'localhost',
+      standalone: false,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
+  });
+
   it('opens a .melf scene through the open picker and restores the saved text layers', async () => {
     const showOpenFilePicker = vi.fn().mockResolvedValue([
       {

@@ -343,7 +343,10 @@ function isPassiveInstallHelpTarget() {
 
   const userAgent = window.navigator.userAgent;
   const isIPhone = /\biPhone\b/i.test(userAgent);
-  const isSafari = /\bSafari\b/i.test(userAgent) && !/\b(CriOS|EdgiOS|FxiOS)\b/i.test(userAgent);
+  const isSafari =
+    /\bVersion\/[\d.]+\b/i.test(userAgent) &&
+    /\bSafari\b/i.test(userAgent) &&
+    !/\b(CriOS|EdgiOS|FxiOS|OPiOS)\b/i.test(userAgent);
 
   return isIPhone && isSafari;
 }
