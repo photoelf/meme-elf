@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildShellPrecacheUrls,
   detectStandaloneMode,
+  getShellAssetCachingStrategy,
   getPwaScopeContract,
   registerShellServiceWorker,
   getStandaloneLaunchState,
@@ -130,6 +131,25 @@ describe('buildShellPrecacheUrls', () => {
           </body>
         </html>`),
     ).toEqual(['/', ...STATIC_PWA_SHELL_URLS, '/assets/index-def456.js']);
+  });
+});
+
+describe('getShellAssetCachingStrategy', () => {
+  it('uses a refresh-safe strategy for fixed-path shell assets', () => {
+    expect(getShellAssetCachingStrategy('/')).toBe('network-first');
+    expect(getShellAssetCachingStrategy('/manifest.webmanifest')).toBe('network-first');
+    expect(getShellAssetCachingStrategy('/favicon.svg')).toBe('network-first');
+    expect(getShellAssetCachingStrategy('/icons/icon-192.png')).toBe('network-first');
+  });
+
+  it('keeps hashed build assets cache-first', () => {
+    expect(getShellAssetCachingStrategy('/assets/index-abc123.css')).toBe('cache-first');
+    expect(getShellAssetCachingStrategy('/assets/index-def456.js')).toBe('cache-first');
+  });
+
+  it('treats template and external content as out of scope', () => {
+    expect(getShellAssetCachingStrategy('/templates/two-buttons/base.png')).toBeNull();
+    expect(getShellAssetCachingStrategy('https://cdn.example.com/app.css')).toBeNull();
   });
 });
 

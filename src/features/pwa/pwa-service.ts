@@ -31,6 +31,7 @@ export const STATIC_PWA_SHELL_URLS = [
 ] as const;
 
 const SHELL_ASSET_PATTERN = /<(?:link|script)\b[^>]+(?:href|src)=["']([^"'#?]+)["'][^>]*>/gi;
+const FIXED_PATH_SHELL_URLS = new Set<string>(['/', ...STATIC_PWA_SHELL_URLS]);
 
 export function detectStandaloneMode(input: {
   matchMediaStandalone: boolean;
@@ -76,6 +77,26 @@ export function buildShellPrecacheUrls(indexHtml: string) {
   );
 }
 
+export function getShellAssetCachingStrategy(pathname: string) {
+  if (!pathname.startsWith('/')) {
+    return null;
+  }
+
+  if (pathname.startsWith('/templates/')) {
+    return null;
+  }
+
+  if (pathname.startsWith('/assets/')) {
+    return 'cache-first' as const;
+  }
+
+  if (FIXED_PATH_SHELL_URLS.has(pathname)) {
+    return 'network-first' as const;
+  }
+
+  return null;
+}
+
 function extractShellAssetUrlsFromHtml(indexHtml: string) {
   const urls: string[] = [];
   let match: RegExpExecArray | null;
@@ -92,18 +113,5 @@ function extractShellAssetUrlsFromHtml(indexHtml: string) {
 }
 
 function isCacheableShellAssetUrl(assetUrl: string) {
-  if (!assetUrl.startsWith('/')) {
-    return false;
-  }
-
-  if (assetUrl.startsWith('/templates/')) {
-    return false;
-  }
-
-  return (
-    assetUrl.startsWith('/assets/') ||
-    assetUrl === '/manifest.webmanifest' ||
-    assetUrl === '/favicon.svg' ||
-    assetUrl.startsWith('/icons/')
-  );
+  return getShellAssetCachingStrategy(assetUrl) !== null;
 }

@@ -2,6 +2,8 @@
  * Scope contract:
  * - Cache only the shipped app shell after a successful online load.
  * - Keep HTML network-first and fall back to cached shell for offline reopen.
+ * - Keep fixed-path shell URLs refresh-safe so deploys can replace same-URL shell assets.
+ * - Keep hashed /assets/* bundles cache-first because their URLs already version the content.
  * - Do not cache direct URL imports, remote image fetches, template content, or user edits as guaranteed offline storage.
  */
 const SHELL_CACHE_NAME = 'meme-elf-shell-v1';
@@ -14,6 +16,7 @@ const STATIC_SHELL_URLS = [
   '/icons/icon-512.png',
 ];
 const SHELL_ASSET_PATTERN = /<(?:link|script)\b[^>]+(?:href|src)=["']([^"'#?]+)["'][^>]*>/gi;
+const FIXED_PATH_SHELL_URLS = new Set(STATIC_SHELL_URLS);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(precacheShell());
@@ -41,8 +44,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (isCacheableShellAssetPath(requestUrl.pathname)) {
-    event.respondWith(handleShellAssetRequest(request));
+  const strategy = getShellAssetCachingStrategy(requestUrl.pathname);
+
+  if (strategy === 'network-first') {
+    event.respondWith(handleNetworkFirstShellRequest(request));
+    return;
+  }
+
+  if (strategy === 'cache-first') {
+    event.respondWith(handleCacheFirstShellAssetRequest(request));
   }
 });
 
@@ -87,7 +97,29 @@ async function handleHtmlNavigation(request) {
   }
 }
 
-async function handleShellAssetRequest(request) {
+async function handleNetworkFirstShellRequest(request) {
+  const cache = await caches.open(SHELL_CACHE_NAME);
+
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+
+    return response;
+  } catch (error) {
+    const cachedResponse = await cache.match(request);
+
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+
+    throw error;
+  }
+}
+
+async function handleCacheFirstShellAssetRequest(request) {
   const cache = await caches.open(SHELL_CACHE_NAME);
   const cachedResponse = await cache.match(request);
 
@@ -119,20 +151,22 @@ function buildShellPrecacheUrls(indexHtml) {
   return Array.from(shellUrls);
 }
 
-function isCacheableShellAssetPath(pathname) {
+function getShellAssetCachingStrategy(pathname) {
   if (!pathname.startsWith('/')) {
-    return false;
+    return null;
   }
 
   if (pathname.startsWith('/templates/')) {
-    return false;
+    return null;
   }
 
-  return (
-    pathname === '/' ||
-    pathname.startsWith('/assets/') ||
-    pathname === '/manifest.webmanifest' ||
-    pathname === '/favicon.svg' ||
-    pathname.startsWith('/icons/')
-  );
+  if (pathname.startsWith('/assets/')) {
+    return 'cache-first';
+  }
+
+  if (FIXED_PATH_SHELL_URLS.has(pathname)) {
+    return 'network-first';
+  }
+
+  return null;
 }
