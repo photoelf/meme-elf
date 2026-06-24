@@ -3,6 +3,31 @@ type StandaloneLaunchWindow = {
   navigator: Navigator & { standalone?: boolean };
 };
 
+const PWA_SCOPE_CONTRACT = {
+  cachedAfterFirstOnlineLoad: [
+    'HTML shell entry (/)',
+    'built JS and CSS bundles referenced by the HTML shell',
+    'manifest and install icons',
+    'same-origin static assets required to render the base UI shell',
+  ],
+  explicitlyNotOfflineGuaranteed: [
+    'direct image URL fetches',
+    'remote images that were not already available locally',
+    'user-generated scenes, imports, or edits as durable offline storage',
+    'cloud-like persistence or background sync that does not exist',
+  ],
+} as const;
+
+export const STATIC_PWA_SHELL_URLS = [
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/icons/apple-touch-icon.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+] as const;
+
+const SHELL_ASSET_PATTERN = /<(?:link|script)\b[^>]+(?:href|src)=["']([^"'#?]+)["'][^>]*>/gi;
+
 export function detectStandaloneMode(input: {
   matchMediaStandalone: boolean;
   navigatorStandalone: boolean;
@@ -24,4 +49,47 @@ export function getStandaloneLaunchState(win: StandaloneLaunchWindow = window) {
     matchMediaStandalone,
     navigatorStandalone,
   };
+}
+
+export function getPwaScopeContract() {
+  return PWA_SCOPE_CONTRACT;
+}
+
+export function buildShellPrecacheUrls(indexHtml: string) {
+  const dynamicShellUrls = extractShellAssetUrlsFromHtml(indexHtml);
+  return ['/', ...STATIC_PWA_SHELL_URLS, ...dynamicShellUrls].filter(
+    (value, index, list) => list.indexOf(value) === index,
+  );
+}
+
+function extractShellAssetUrlsFromHtml(indexHtml: string) {
+  const urls: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = SHELL_ASSET_PATTERN.exec(indexHtml)) !== null) {
+    const assetUrl = match[1];
+
+    if (isCacheableShellAssetUrl(assetUrl)) {
+      urls.push(assetUrl);
+    }
+  }
+
+  return urls;
+}
+
+function isCacheableShellAssetUrl(assetUrl: string) {
+  if (!assetUrl.startsWith('/')) {
+    return false;
+  }
+
+  if (assetUrl.startsWith('/templates/')) {
+    return false;
+  }
+
+  return (
+    assetUrl.startsWith('/assets/') ||
+    assetUrl === '/manifest.webmanifest' ||
+    assetUrl === '/favicon.svg' ||
+    assetUrl.startsWith('/icons/')
+  );
 }

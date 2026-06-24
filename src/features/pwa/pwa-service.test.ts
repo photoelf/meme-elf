@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { detectStandaloneMode, getStandaloneLaunchState } from './pwa-service';
+import {
+  buildShellPrecacheUrls,
+  detectStandaloneMode,
+  getPwaScopeContract,
+  getStandaloneLaunchState,
+  STATIC_PWA_SHELL_URLS,
+} from './pwa-service';
 
 describe('detectStandaloneMode', () => {
   it('detects ios standalone mode from navigator.standalone', () => {
@@ -64,6 +70,65 @@ describe('getStandaloneLaunchState', () => {
       matchMediaStandalone: false,
       navigatorStandalone: false,
     });
+  });
+});
+
+describe('getPwaScopeContract', () => {
+  it('documents a narrow offline shell boundary', () => {
+    expect(getPwaScopeContract()).toEqual({
+      cachedAfterFirstOnlineLoad: [
+        'HTML shell entry (/)',
+        'built JS and CSS bundles referenced by the HTML shell',
+        'manifest and install icons',
+        'same-origin static assets required to render the base UI shell',
+      ],
+      explicitlyNotOfflineGuaranteed: [
+        'direct image URL fetches',
+        'remote images that were not already available locally',
+        'user-generated scenes, imports, or edits as durable offline storage',
+        'cloud-like persistence or background sync that does not exist',
+      ],
+    });
+  });
+});
+
+describe('buildShellPrecacheUrls', () => {
+  it('builds a deduped shell asset list from built html', () => {
+    expect(
+      buildShellPrecacheUrls(`<!doctype html>
+        <html>
+          <head>
+            <link rel="icon" href="/favicon.svg" />
+            <link rel="manifest" href="/manifest.webmanifest" />
+            <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+            <link rel="stylesheet" href="/assets/index-abc123.css" />
+          </head>
+          <body>
+            <script type="module" src="/assets/index-def456.js"></script>
+          </body>
+        </html>`),
+    ).toEqual([
+      '/',
+      ...STATIC_PWA_SHELL_URLS,
+      '/assets/index-abc123.css',
+      '/assets/index-def456.js',
+    ]);
+  });
+
+  it('ignores external and out-of-scope asset urls', () => {
+    expect(
+      buildShellPrecacheUrls(`<!doctype html>
+        <html>
+          <head>
+            <link rel="stylesheet" href="https://cdn.example.com/app.css" />
+            <link rel="preload" href="/templates/two-buttons/preview.png" as="image" />
+          </head>
+          <body>
+            <script type="module" src="/assets/index-def456.js"></script>
+            <img src="/templates/two-buttons/base.png" alt="" />
+          </body>
+        </html>`),
+    ).toEqual(['/', ...STATIC_PWA_SHELL_URLS, '/assets/index-def456.js']);
   });
 });
 
