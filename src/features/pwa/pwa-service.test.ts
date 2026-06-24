@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildShellPrecacheUrls,
   detectStandaloneMode,
@@ -214,6 +214,68 @@ describe('registerShellServiceWorker', () => {
     });
   });
 
+  it('attaches to an installing worker that already exists at registration time', async () => {
+    const onStateChange = vi.fn();
+    const installingWorker = createServiceWorkerStub('installing');
+    const registration = createRegistrationStub({ installingWorker });
+    const register = vi.fn().mockResolvedValue(registration);
+    const serviceWorker = {
+      controller: {} as ServiceWorker,
+      register,
+    };
+
+    const registrationResult = await registerShellServiceWorker(
+      {
+        navigator: {
+          serviceWorker,
+        } as unknown as Navigator,
+      },
+      { onStateChange },
+    );
+
+    installingWorker.state = 'installed';
+    installingWorker.dispatch('statechange');
+
+    expect(registrationResult).toEqual({
+      registration,
+      state: { updateAvailable: false },
+    });
+    expect(onStateChange).toHaveBeenNthCalledWith(1, { updateAvailable: false });
+    expect(onStateChange).toHaveBeenNthCalledWith(2, { updateAvailable: true });
+  });
+
+  it('listens for updatefound and reports a waiting update after statechange', async () => {
+    const onStateChange = vi.fn();
+    const registration = createRegistrationStub();
+    const register = vi.fn().mockResolvedValue(registration);
+    const serviceWorker = {
+      controller: {} as ServiceWorker,
+      register,
+    };
+
+    const registrationResult = await registerShellServiceWorker(
+      {
+        navigator: {
+          serviceWorker,
+        } as unknown as Navigator,
+      },
+      { onStateChange },
+    );
+
+    const installingWorker = createServiceWorkerStub('installing');
+    registration.installing = installingWorker;
+    registration.dispatch('updatefound');
+    installingWorker.state = 'installed';
+    installingWorker.dispatch('statechange');
+
+    expect(registrationResult).toEqual({
+      registration,
+      state: { updateAvailable: false },
+    });
+    expect(onStateChange).toHaveBeenNthCalledWith(1, { updateAvailable: false });
+    expect(onStateChange).toHaveBeenNthCalledWith(2, { updateAvailable: true });
+  });
+
   it('returns null when service workers are unavailable', async () => {
     await expect(
       registerShellServiceWorker({
@@ -236,6 +298,17 @@ describe('public/sw.js smoke contract', () => {
 
     expect(serviceWorkerSource).toContain("if (response.ok) {\n      await cache.put('/', response.clone());");
   });
+
+  it('derives the shell cache version from html content as well as shell urls', () => {
+    const serviceWorkerSource = readFileSync('public/sw.js', 'utf8');
+
+    expect(serviceWorkerSource).toContain(
+      'const shellCacheVersion = buildShellCacheVersion(indexHtml, shellUrls);',
+    );
+    expect(serviceWorkerSource).toContain(
+      'function buildShellCacheVersion(indexHtml, shellUrls)',
+    );
+  });
 });
 
 function createWindowStub(input: {
@@ -248,6 +321,55 @@ function createWindowStub(input: {
     }),
     navigator: {
       standalone: input.navigatorStandalone ?? false,
+    },
+  };
+}
+
+function createRegistrationStub(input: {
+  installingWorker?: TestServiceWorker;
+  waitingWorker?: { state: string } | null;
+} = {}) {
+  const listeners = new Map<string, Array<() => void>>();
+
+  const registration = {
+    scope: '/',
+    installing: input.installingWorker ?? null,
+    waiting: input.waitingWorker ?? null,
+    addEventListener(eventName: string, listener: () => void) {
+      const eventListeners = listeners.get(eventName) ?? [];
+      eventListeners.push(listener);
+      listeners.set(eventName, eventListeners);
+    },
+    dispatch(eventName: string) {
+      for (const listener of listeners.get(eventName) ?? []) {
+        listener();
+      }
+    },
+  };
+
+  return registration;
+}
+
+type TestServiceWorker = {
+  state: string;
+  addEventListener: (eventName: string, listener: () => void) => void;
+  dispatch: (eventName: string) => void;
+};
+
+function createServiceWorkerStub(initialState: string): TestServiceWorker {
+  const listeners = new Map<string, Array<() => void>>();
+
+  return {
+    state: initialState,
+    addEventListener(eventName: string, listener: () => void) {
+      const eventListeners = listeners.get(eventName) ?? [];
+      eventListeners.push(listener);
+      listeners.set(eventName, eventListeners);
+    },
+    dispatch(eventName: string) {
+      for (const listener of listeners.get(eventName) ?? []) {
+        listener();
+      }
     },
   };
 }

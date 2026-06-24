@@ -18,7 +18,3 @@ createRoot(rootElement).render(
 
 export const shellServiceWorkerRegistration =
   window.isSecureContext ? registerShellServiceWorker() : Promise.resolve(null);
-
-if (window.isSecureContext) {
-  void shellServiceWorkerRegistration;
-}

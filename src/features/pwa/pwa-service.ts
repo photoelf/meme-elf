@@ -90,21 +90,28 @@ export function registerShellServiceWorker(
   }
 
   return win.navigator.serviceWorker.register('/sw.js').then((registration) => {
-    const emitState = () => {
-      const state = normalizeServiceWorkerState({
-        hasRegistration: true,
-        hasWaitingWorker: registration.waiting != null,
-      });
+    const observedInstallingWorkers = new WeakSet<ServiceWorker>();
+    const emitState = (installingWorker?: ServiceWorker | null) => {
+      const state = getNormalizedRegistrationState(
+        win,
+        registration,
+        installingWorker,
+      );
 
       options.onStateChange?.(state);
       return state;
     };
 
-    observeWaitingWorkerUpdates(win, registration, emitState);
+    observeWaitingWorkerUpdates(
+      win,
+      registration,
+      emitState,
+      observedInstallingWorkers,
+    );
 
     return {
       registration,
-      state: emitState(),
+      state: emitState(registration.installing),
     };
   });
 }
@@ -158,29 +165,72 @@ function isCacheableShellAssetUrl(assetUrl: string) {
 function observeWaitingWorkerUpdates(
   win: ServiceWorkerRegisterWindow,
   registration: ServiceWorkerRegistration,
-  emitState: () => ReturnType<typeof normalizeServiceWorkerState>,
+  emitState: (
+    installingWorker?: ServiceWorker | null,
+  ) => ReturnType<typeof normalizeServiceWorkerState>,
+  observedInstallingWorkers: WeakSet<ServiceWorker>,
 ) {
+  attachInstallingWorkerListener(
+    win,
+    registration.installing,
+    emitState,
+    observedInstallingWorkers,
+  );
+
   if (typeof registration.addEventListener !== 'function') {
     return;
   }
 
   registration.addEventListener('updatefound', () => {
-    const installingWorker = registration.installing;
+    attachInstallingWorkerListener(
+      win,
+      registration.installing,
+      emitState,
+      observedInstallingWorkers,
+    );
+  });
+}
 
+function attachInstallingWorkerListener(
+  win: ServiceWorkerRegisterWindow,
+  installingWorker: ServiceWorker | null,
+  emitState: (
+    installingWorker?: ServiceWorker | null,
+  ) => ReturnType<typeof normalizeServiceWorkerState>,
+  observedInstallingWorkers: WeakSet<ServiceWorker>,
+) {
+  if (!installingWorker || typeof installingWorker.addEventListener !== 'function') {
+    return;
+  }
+
+  if (observedInstallingWorkers.has(installingWorker)) {
+    return;
+  }
+
+  observedInstallingWorkers.add(installingWorker);
+
+  installingWorker.addEventListener('statechange', () => {
     if (
-      !installingWorker ||
-      typeof installingWorker.addEventListener !== 'function'
+      installingWorker.state === 'installed' &&
+      win.navigator.serviceWorker.controller
     ) {
-      return;
+      emitState(installingWorker);
     }
+  });
+}
 
-    installingWorker.addEventListener('statechange', () => {
-      if (
-        installingWorker.state === 'installed' &&
-        win.navigator.serviceWorker.controller
-      ) {
-        emitState();
-      }
-    });
+function getNormalizedRegistrationState(
+  win: ServiceWorkerRegisterWindow,
+  registration: ServiceWorkerRegistration,
+  installingWorker?: ServiceWorker | null,
+) {
+  const waitingWorkerAvailable =
+    registration.waiting != null ||
+    (installingWorker?.state === 'installed' &&
+      win.navigator.serviceWorker.controller != null);
+
+  return normalizeServiceWorkerState({
+    hasRegistration: true,
+    hasWaitingWorker: waitingWorkerAvailable,
   });
 }

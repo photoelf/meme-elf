@@ -69,7 +69,8 @@ async function precacheShell() {
   const htmlResponseClone = htmlResponse.clone();
   const indexHtml = await htmlResponse.text();
   const shellUrls = buildShellPrecacheUrls(indexHtml);
-  const shellCacheName = buildShellCacheName(shellUrls);
+  const shellCacheVersion = buildShellCacheVersion(indexHtml, shellUrls);
+  const shellCacheName = buildShellCacheName(shellCacheVersion);
   const cache = await caches.open(shellCacheName);
   pendingShellCacheName = shellCacheName;
   await cache.put('/', htmlResponseClone);
@@ -180,15 +181,24 @@ function buildShellPrecacheUrls(indexHtml) {
   return Array.from(shellUrls);
 }
 
-function buildShellCacheName(shellUrls) {
-  const versionSource = shellUrls.slice().sort().join('\n');
+function buildShellCacheVersion(indexHtml, shellUrls) {
+  return hashVersionInput(
+    `${indexHtml}\n${shellUrls.slice().sort().join('\n')}`,
+  );
+}
+
+function buildShellCacheName(shellCacheVersion) {
+  return `${SHELL_CACHE_PREFIX}${shellCacheVersion}`;
+}
+
+function hashVersionInput(versionSource) {
   let hash = 0;
 
   for (let index = 0; index < versionSource.length; index += 1) {
     hash = (hash * 31 + versionSource.charCodeAt(index)) >>> 0;
   }
 
-  return `${SHELL_CACHE_PREFIX}${hash.toString(16)}`;
+  return hash.toString(16);
 }
 
 function getShellAssetCachingStrategy(pathname) {
