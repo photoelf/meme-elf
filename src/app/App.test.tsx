@@ -211,6 +211,34 @@ describe('App', () => {
     expect(screen.queryByText(/add to home screen/i)).not.toBeInTheDocument();
   });
 
+  it('marks the shell as standalone when launched from the iPhone home screen', () => {
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: true,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.getByRole('main')).toHaveAttribute('data-standalone-mode', 'true');
+  });
+
+  it('keeps normal browser shell mode for non-standalone iPhone Safari sessions', () => {
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+
+    renderApp({
+      hostname: 'meme-elf.pages.dev',
+      standalone: false,
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    });
+
+    expect(screen.getByRole('main')).toHaveAttribute('data-standalone-mode', 'false');
+  });
+
   it('does not show install help in the default desktop browser flow', () => {
     renderApp({
       hostname: 'meme-elf.pages.dev',

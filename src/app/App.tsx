@@ -564,6 +564,8 @@ export function App() {
   const historyFutureRef = useRef<EditorHistorySnapshot[]>([]);
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
   const templateLibraryMutationVersionRef = useRef(0);
+  const isStandaloneLaunch =
+    typeof window !== 'undefined' && getStandaloneLaunchState(window).isStandalone;
 
   const activeStatusLabel = statusMessage ?? (appState.image ? 'Image loaded.' : 'Ready.');
   const passiveInstallHelpLabel = isPassiveInstallHelpTarget()
@@ -3383,6 +3385,7 @@ export function App() {
       className={`app-shell app-shell-${mobileShellLayout.shellMode}`}
       data-shell-mode={mobileShellLayout.shellMode}
       data-keyboard-open={isKeyboardOpen}
+      data-standalone-mode={isStandaloneLaunch}
     >
       <header className="topbar">
         <div className="topbar-brand">
