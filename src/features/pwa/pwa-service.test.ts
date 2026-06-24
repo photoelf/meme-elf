@@ -303,10 +303,16 @@ describe('public/sw.js smoke contract', () => {
     const serviceWorkerSource = readFileSync('public/sw.js', 'utf8');
 
     expect(serviceWorkerSource).toContain(
-      'const shellCacheVersion = buildShellCacheVersion(indexHtml, shellUrls);',
+      'const shellEntries = await fetchShellPrecacheEntries(shellUrls);',
     );
     expect(serviceWorkerSource).toContain(
-      'function buildShellCacheVersion(indexHtml, shellUrls)',
+      'const shellCacheVersion = buildShellCacheVersion(indexHtml, shellEntries);',
+    );
+    expect(serviceWorkerSource).toContain(
+      'function buildShellCacheVersion(indexHtml, shellEntries)',
+    );
+    expect(serviceWorkerSource).toContain(
+      'async function buildShellEntryFingerprint(url, response)',
     );
   });
 });

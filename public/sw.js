@@ -69,12 +69,15 @@ async function precacheShell() {
   const htmlResponseClone = htmlResponse.clone();
   const indexHtml = await htmlResponse.text();
   const shellUrls = buildShellPrecacheUrls(indexHtml);
-  const shellCacheVersion = buildShellCacheVersion(indexHtml, shellUrls);
+  const shellEntries = await fetchShellPrecacheEntries(shellUrls);
+  const shellCacheVersion = buildShellCacheVersion(indexHtml, shellEntries);
   const shellCacheName = buildShellCacheName(shellCacheVersion);
   const cache = await caches.open(shellCacheName);
   pendingShellCacheName = shellCacheName;
   await cache.put('/', htmlResponseClone);
-  await cache.addAll(shellUrls.filter((shellUrl) => shellUrl !== '/'));
+  await Promise.all(
+    shellEntries.map(({ url, response }) => cache.put(url, response)),
+  );
 }
 
 async function activateShellCache() {
@@ -181,9 +184,44 @@ function buildShellPrecacheUrls(indexHtml) {
   return Array.from(shellUrls);
 }
 
-function buildShellCacheVersion(indexHtml, shellUrls) {
-  return hashVersionInput(
-    `${indexHtml}\n${shellUrls.slice().sort().join('\n')}`,
+async function fetchShellPrecacheEntries(shellUrls) {
+  return Promise.all(
+    shellUrls
+      .filter((shellUrl) => shellUrl !== '/')
+      .map(async (url) => {
+        const response = await fetch(url, { cache: 'no-store' });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch shell asset: ${url} (${response.status})`);
+        }
+
+        return {
+          url,
+          response,
+          fingerprint: await buildShellEntryFingerprint(url, response.clone()),
+        };
+      }),
+  );
+}
+
+async function buildShellEntryFingerprint(url, response) {
+  if (getShellAssetCachingStrategy(url) === 'cache-first') {
+    return url;
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return `${bytes.length}:${hashBytes(bytes)}`;
+}
+
+function buildShellCacheVersion(indexHtml, shellEntries) {
+  return hashString(
+    [
+      `html:${hashString(indexHtml)}`,
+      ...shellEntries
+        .slice()
+        .sort((left, right) => left.url.localeCompare(right.url))
+        .map(({ url, fingerprint }) => `${url}:${fingerprint}`),
+    ].join('\n'),
   );
 }
 
@@ -191,11 +229,21 @@ function buildShellCacheName(shellCacheVersion) {
   return `${SHELL_CACHE_PREFIX}${shellCacheVersion}`;
 }
 
-function hashVersionInput(versionSource) {
+function hashString(versionSource) {
   let hash = 0;
 
   for (let index = 0; index < versionSource.length; index += 1) {
     hash = (hash * 31 + versionSource.charCodeAt(index)) >>> 0;
+  }
+
+  return hash.toString(16);
+}
+
+function hashBytes(bytes) {
+  let hash = 0;
+
+  for (const byte of bytes) {
+    hash = (hash * 31 + byte) >>> 0;
   }
 
   return hash.toString(16);
