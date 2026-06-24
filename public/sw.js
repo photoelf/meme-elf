@@ -84,7 +84,11 @@ async function handleHtmlNavigation(request) {
 
   try {
     const response = await fetch(request, { cache: 'no-store' });
-    await cache.put('/', response.clone());
+
+    if (response.ok) {
+      await cache.put('/', response.clone());
+    }
+
     return response;
   } catch (error) {
     const cachedResponse = await cache.match('/');
@@ -143,7 +147,7 @@ function buildShellPrecacheUrls(indexHtml) {
   while ((match = SHELL_ASSET_PATTERN.exec(indexHtml)) !== null) {
     const assetUrl = match[1];
 
-    if (isCacheableShellAssetPath(assetUrl)) {
+    if (getShellAssetCachingStrategy(assetUrl) !== null) {
       shellUrls.add(assetUrl);
     }
   }

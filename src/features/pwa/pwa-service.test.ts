@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   buildShellPrecacheUrls,
@@ -177,6 +178,21 @@ describe('registerShellServiceWorker', () => {
         navigator: {} as Navigator,
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe('public/sw.js smoke contract', () => {
+  it('uses the shipped caching strategy helper name consistently', () => {
+    const serviceWorkerSource = readFileSync('public/sw.js', 'utf8');
+
+    expect(serviceWorkerSource).toContain('function getShellAssetCachingStrategy(pathname)');
+    expect(serviceWorkerSource).not.toContain('isCacheableShellAssetPath(');
+  });
+
+  it('guards cached html shell updates behind successful network responses', () => {
+    const serviceWorkerSource = readFileSync('public/sw.js', 'utf8');
+
+    expect(serviceWorkerSource).toContain("if (response.ok) {\n      await cache.put('/', response.clone());");
   });
 });
 
