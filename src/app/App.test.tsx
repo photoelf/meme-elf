@@ -339,6 +339,28 @@ describe('App', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('does not reload on controllerchange until refresh app was explicitly requested', () => {
+    const serviceWorker = installServiceWorkerEventHarness();
+    const reload = vi.fn();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        reload,
+      },
+    });
+
+    setShellServiceWorkerStateForTests({
+      updateAvailable: true,
+    });
+
+    render(<App />);
+    serviceWorker.dispatch('controllerchange');
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it('does not show install help in the default desktop browser flow', () => {
     renderApp({
       hostname: 'meme-elf.pages.dev',

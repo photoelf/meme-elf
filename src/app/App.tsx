@@ -574,6 +574,7 @@ export function App() {
   const historyTransactionRef = useRef<EditorHistorySnapshot | null>(null);
   const templateLibraryMutationVersionRef = useRef(0);
   const hasReloadedForShellUpdateRef = useRef(false);
+  const shouldReloadForShellUpdateRef = useRef(false);
   const isStandaloneLaunch =
     typeof window !== 'undefined' && getStandaloneLaunchState(window).isStandalone;
 
@@ -609,6 +610,7 @@ export function App() {
 
       if (!state.updateAvailable) {
         setIsRefreshingShellUpdate(false);
+        shouldReloadForShellUpdateRef.current = false;
       }
     });
   }, []);
@@ -623,7 +625,10 @@ export function App() {
     }
 
     const handleControllerChange = () => {
-      if (hasReloadedForShellUpdateRef.current) {
+      if (
+        !shouldReloadForShellUpdateRef.current ||
+        hasReloadedForShellUpdateRef.current
+      ) {
         return;
       }
 
@@ -3404,6 +3409,7 @@ export function App() {
       return;
     }
 
+    shouldReloadForShellUpdateRef.current = true;
     setIsRefreshingShellUpdate(true);
     setStatusMessage('Refreshing app to apply the latest installed update.');
   }
