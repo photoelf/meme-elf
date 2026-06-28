@@ -358,23 +358,25 @@ export function ControlPanel({
                 >
                   <UploadImageIcon />
                 </button>
-                <button
-                  type="button"
-                  className="mini-action-button mini-action-button-icon image-import-button icon-button-with-tooltip"
-                  aria-label="Advanced import from clipboard"
-                  data-tooltip="Advanced import from clipboard"
-                  disabled={isImportModalOpen}
-                  onPointerDown={handleTooltipTouchPointerDown}
-                  onTouchStart={handleTooltipTouchStart}
-                  onFocus={handleTooltipTouchFocus}
-                  onClick={(event) => {
-                    handleTooltipTouchClick(event);
-                    clearRetouchMode();
-                    onOpenAdvancedImportClipboard(event.currentTarget);
-                  }}
-                >
-                  <PasteImageIcon />
-                </button>
+                {shellMode !== 'phone' ? (
+                  <button
+                    type="button"
+                    className="mini-action-button mini-action-button-icon image-import-button icon-button-with-tooltip"
+                    aria-label="Advanced import from clipboard"
+                    data-tooltip="Advanced import from clipboard"
+                    disabled={isImportModalOpen}
+                    onPointerDown={handleTooltipTouchPointerDown}
+                    onTouchStart={handleTooltipTouchStart}
+                    onFocus={handleTooltipTouchFocus}
+                    onClick={(event) => {
+                      handleTooltipTouchClick(event);
+                      clearRetouchMode();
+                      onOpenAdvancedImportClipboard(event.currentTarget);
+                    }}
+                  >
+                    <PasteImageIcon />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="mini-action-button mini-action-button-icon image-import-button icon-button-with-tooltip"
@@ -451,12 +453,14 @@ export function ControlPanel({
                     }}
                   >
                     {isTextLayer(layer) ? (
-                      <div className="layer-row">
+                      <div
+                        className={`layer-row${shellMode === 'phone' ? ' layer-row-text-compact' : ''}`}
+                      >
                         <textarea
                           id={`${layer.id}-text-input`}
                           className="layer-row-input"
                           aria-label={layer.name}
-                          rows={2}
+                          rows={shellMode === 'phone' ? 1 : 2}
                           value={layer.text}
                           onFocus={() => {
                             onActiveLayerChange(layer.id);

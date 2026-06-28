@@ -942,6 +942,11 @@ button {
   background: var(--bg-panel-muted);
 }
 
+.layer-row-text-compact {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
 .layer-row-image {
   align-items: center;
 }
@@ -957,6 +962,12 @@ button {
   resize: none;
   overflow: hidden;
   outline: none;
+}
+
+.layer-row-text-compact .layer-row-input {
+  min-height: 32px;
+  max-height: 32px;
+  white-space: nowrap;
 }
 
 .image-import-button {
@@ -1872,12 +1883,12 @@ button {
     position: fixed;
     left: 6px;
     right: 6px;
-    bottom: env(safe-area-inset-bottom);
+    bottom: 0;
     z-index: 5;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
-    padding: 0;
+    padding: 0 0 max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px));
     background: color-mix(in srgb, var(--bg) 88%, transparent);
     backdrop-filter: blur(8px);
   }
@@ -1886,15 +1897,26 @@ button {
     position: fixed;
     left: 6px;
     right: 6px;
-    bottom: env(safe-area-inset-bottom);
+    bottom: 0;
     z-index: 6;
     display: grid;
     grid-template-columns: minmax(0, 1fr) repeat(2, auto);
     align-items: center;
     gap: 8px;
-    padding: 10px;
+    padding: 10px 10px calc(10px + max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px)));
     background: color-mix(in srgb, var(--bg) 92%, transparent);
     backdrop-filter: blur(8px);
+  }
+
+  .mobile-bottom-underlay {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    height: calc(12px + max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px)));
+    background: var(--bg);
+    pointer-events: none;
   }
 
   .app-shell[data-standalone-mode='true'] .mobile-primary-actions,
@@ -1943,10 +1965,6 @@ button {
     min-width: 50px;
     width: 50px;
     padding-inline: 0;
-  }
-
-  .layer-row {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .layer-row-swatches {

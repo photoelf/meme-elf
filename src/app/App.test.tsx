@@ -1083,10 +1083,10 @@ describe('App', () => {
     render(<App />);
 
     const topbar = screen.getByRole('toolbar', { name: /editor actions/i });
-    expect(within(topbar).getByRole('button', { name: /paste from clipboard/i })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: /upload image/i })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: /paste image url/i })).toBeInTheDocument();
     expect(within(topbar).getByRole('button', { name: /more actions/i })).toBeInTheDocument();
+    expect(within(topbar).queryByRole('button', { name: /paste from clipboard/i })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: /copy image/i })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole('button', { name: /download png/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('menu', { name: /more actions/i })).not.toBeInTheDocument();
@@ -1095,6 +1095,52 @@ describe('App', () => {
     expect(within(stickyBar).getByRole('button', { name: /copy image/i })).toBeInTheDocument();
     expect(within(stickyBar).getByRole('button', { name: /download png/i })).toBeInTheDocument();
     expect(within(stickyBar).getByRole('button', { name: /show tools/i })).toBeInTheDocument();
+  });
+
+  it('removes clipboard import buttons from the phone shell while keeping copy export available', async () => {
+    window.innerWidth = 680;
+    renderApp({ hostname: 'example.com' });
+
+    expect(screen.queryByRole('button', { name: /paste from clipboard/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+
+    expect(screen.queryByRole('button', { name: /advanced import from clipboard/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy image/i })).toBeInTheDocument();
+  });
+
+  it('hides the status strip on the non-local phone shell', () => {
+    window.innerWidth = 680;
+    renderApp({ hostname: 'example.com' });
+
+    expect(screen.queryByLabelText(/editor status/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the status strip available on localhost phone sessions for debug', () => {
+    window.innerWidth = 680;
+    renderApp({ hostname: 'localhost' });
+
+    expect(screen.getByLabelText(/editor status/i)).toBeInTheDocument();
+  });
+
+  it('keeps text layer rows compact in the phone Layers inspector', async () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+
+    const topTextField = await screen.findByRole('textbox', { name: /top text/i });
+    expect(topTextField).toHaveAttribute('rows', '1');
+    expect(topTextField.closest('.layer-row')).toHaveClass('layer-row-text-compact');
+  });
+
+  it('renders a bottom underlay behind phone action bars so inspector content does not bleed through', () => {
+    window.innerWidth = 680;
+
+    render(<App />);
+
+    expect(document.querySelector('.mobile-bottom-underlay')).toBeInTheDocument();
   });
 
   it('hides the preview MEME title on phone so canvas actions keep one row', () => {
@@ -1178,8 +1224,7 @@ describe('App', () => {
     expect(screen.queryByRole('complementary', { name: /controls/i })).not.toBeInTheDocument();
   });
 
-  it('shows mobile clipboard import fallback guidance when direct clipboard read is unsupported', async () => {
-    window.innerWidth = 680;
+  it('shows clipboard import fallback guidance when direct clipboard read is unsupported', async () => {
     mocks.readImageFromClipboardResult.mockResolvedValue({
       image: null,
       reason: 'unsupported',

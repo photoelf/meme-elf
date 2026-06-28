@@ -59,7 +59,7 @@ export function resolveTopbarActionLayout(
   if (shellMode === 'phone') {
     return {
       overflow: ['open-scene', 'save-scene', 'theme'],
-      primary: ['paste', 'upload', 'url'],
+      primary: ['upload', 'url'],
       sticky: ['copy', 'download', 'tools'],
     };
   }

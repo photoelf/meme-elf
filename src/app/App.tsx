@@ -547,6 +547,10 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
   const draftTemplateCatalog = createBuiltInTemplateCatalog(templateLibrary);
   const mobileShellLayout = resolveMobileShellLayout(viewportWidth);
   const topbarActionLayout = resolveTopbarActionLayout(mobileShellLayout.shellMode);
+  const showMobileDebugStatusStrip =
+    mobileShellLayout.shellMode !== 'desktop' && showLocalOnlyTabs;
+  const shouldRenderStatusStrip =
+    mobileShellLayout.shellMode === 'desktop' || showMobileDebugStatusStrip;
   const isInspectorVisible =
     mobileShellLayout.inspectorMode !== 'collapsed' || isPhoneInspectorOpen;
   const hasPhoneSelectionSession = Boolean(
@@ -3885,27 +3889,29 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
               />
             </div>
           </div>
-          <div className="status-strip" aria-label="Editor status">
-            <span>{activeStatusLabel}</span>
-            {passiveInstallHelpLabel ? <span>{passiveInstallHelpLabel}</span> : null}
-            {shellServiceWorkerState.updateAvailable ? (
-              <button
-                type="button"
-                className="status-strip-action"
-                onClick={handleRefreshAppClick}
-                disabled={isRefreshingShellUpdate}
-              >
-                {isRefreshingShellUpdate ? 'Refreshing app...' : 'Refresh app'}
-              </button>
-            ) : null}
-            {mobileShellLayout.shellMode !== 'desktop' ? (
-              <>
-                <span>Tool: {activeToolLabel}</span>
-                <span>Target: {activeTargetLabel ?? 'Base image'}</span>
-                {activeGestureLabel ? <span>Gesture: {activeGestureLabel}</span> : null}
-              </>
-            ) : null}
-          </div>
+          {shouldRenderStatusStrip ? (
+            <div className="status-strip" aria-label="Editor status">
+              <span>{activeStatusLabel}</span>
+              {passiveInstallHelpLabel ? <span>{passiveInstallHelpLabel}</span> : null}
+              {shellServiceWorkerState.updateAvailable ? (
+                <button
+                  type="button"
+                  className="status-strip-action"
+                  onClick={handleRefreshAppClick}
+                  disabled={isRefreshingShellUpdate}
+                >
+                  {isRefreshingShellUpdate ? 'Refreshing app...' : 'Refresh app'}
+                </button>
+              ) : null}
+              {showMobileDebugStatusStrip ? (
+                <>
+                  <span>Tool: {activeToolLabel}</span>
+                  <span>Target: {activeTargetLabel ?? 'Base image'}</span>
+                  {activeGestureLabel ? <span>Gesture: {activeGestureLabel}</span> : null}
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         {isInspectorVisible ? (
@@ -4132,6 +4138,9 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
         <div className="mobile-primary-actions" role="toolbar" aria-label="Mobile primary actions">
           {topbarActionLayout.sticky.map((actionId) => renderToolbarAction(actionId))}
         </div>
+      ) : null}
+      {mobileShellLayout.shellMode === 'phone' ? (
+        <div className="mobile-bottom-underlay" aria-hidden="true" />
       ) : null}
       <input
         ref={fileInputRef}
