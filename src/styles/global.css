@@ -117,13 +117,33 @@ button {
   --telegram-content-safe-right: 0px;
   --telegram-content-safe-bottom: 0px;
   --telegram-content-safe-left: 0px;
+  --host-safe-top: max(
+    var(--telegram-content-safe-top),
+    var(--telegram-safe-top),
+    env(safe-area-inset-top, 0px)
+  );
+  --host-safe-right: max(
+    var(--telegram-content-safe-right),
+    var(--telegram-safe-right),
+    env(safe-area-inset-right, 0px)
+  );
+  --host-safe-bottom: max(
+    var(--telegram-content-safe-bottom),
+    var(--telegram-safe-bottom),
+    env(safe-area-inset-bottom, 0px)
+  );
+  --host-safe-left: max(
+    var(--telegram-content-safe-left),
+    var(--telegram-safe-left),
+    env(safe-area-inset-left, 0px)
+  );
 }
 
 .app-shell[data-host-mode='telegram'][data-telegram-available='true'] {
-  padding-top: max(10px, var(--telegram-content-safe-top), var(--telegram-safe-top));
-  padding-right: max(0px, var(--telegram-content-safe-right), var(--telegram-safe-right));
-  padding-bottom: max(12px, var(--telegram-content-safe-bottom), var(--telegram-safe-bottom));
-  padding-left: max(0px, var(--telegram-content-safe-left), var(--telegram-safe-left));
+  padding-top: max(10px, var(--host-safe-top));
+  padding-right: max(0px, var(--host-safe-right));
+  padding-bottom: max(12px, var(--host-safe-bottom));
+  padding-left: max(0px, var(--host-safe-left));
 }
 
 .app-shell[data-host-mode='telegram'] .topbar {
@@ -131,9 +151,7 @@ button {
 }
 
 .app-shell[data-host-mode='telegram'] .workspace-shell {
-  min-height: calc(
-    var(--app-height, 100dvh) - var(--telegram-content-safe-top) - var(--telegram-content-safe-bottom)
-  );
+  min-height: calc(var(--app-height, 100dvh) - var(--host-safe-top) - var(--host-safe-bottom));
 }
 
 .app-shell[data-host-mode='telegram'][data-telegram-fullscreen='true'] .preview-panel {
