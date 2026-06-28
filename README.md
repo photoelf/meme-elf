@@ -151,6 +151,12 @@ Telegram release checklist:
 4. Confirm export still reaches at least one successful user path.
 5. Confirm `/` still behaves like the normal web/PWA surface.
 
+Current Telegram verification status:
+- branch preview launch via bot is smoke-validated
+- iPhone fullscreen layout and Telegram chrome spacing are smoke-validated on the current shared shell
+- swipe-down no longer hides the Mini App in the validated Telegram mobile path
+- `/t` export currently has at least one successful user path through the shipped capability ladder
+
 Current known limits:
 - Telegram iOS may render its own fullscreen overlay chrome above the webview; the `/t` shell now carries an explicit top guard for that host chrome.
 - Telegram fullscreen behavior is validated against the current shared editor shell, not a Telegram-specific fork.
