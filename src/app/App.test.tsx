@@ -300,6 +300,37 @@ describe('App', () => {
     expect(screen.getByLabelText(/workspace/i)).toBeInTheDocument();
   });
 
+  it('adds an extra Telegram chrome top guard on the phone shell so the app toolbar clears the iOS overlay', async () => {
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+    mocks.loadTelegramSdk.mockResolvedValue({
+      ready: vi.fn(),
+      requestFullscreen: vi.fn(),
+      isFullscreen: true,
+      safeAreaInset: { top: 12, right: 0, bottom: 8, left: 0 },
+      contentSafeAreaInset: { top: 44, right: 0, bottom: 12, left: 0 },
+    });
+
+    render(
+      <App
+        routeState={{
+          hostMode: 'telegram',
+          isTelegramRoute: true,
+          pathname: '/t',
+          search: '',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-shell-mode', 'phone');
+    });
+
+    expect(screen.getByLabelText(/app shell/i)).toHaveStyle({
+      '--telegram-chrome-top-guard': '56px',
+    });
+  });
+
   it('updates Telegram safe-area state after runtime events and disables vertical swipes', async () => {
     const eventListeners = new Map<string, Array<(...args: unknown[]) => void>>();
     const webApp = {

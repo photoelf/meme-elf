@@ -3314,6 +3314,13 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     '--app-height': `${viewportHeight}px`,
     '--inspector-width': `${inspectorWidth}%`,
   } as CSSProperties;
+  const telegramChromeTopGuard =
+    routeState.hostMode === 'telegram' &&
+    telegramHost.isAvailable &&
+    telegramHost.isFullscreen &&
+    mobileShellLayout.shellMode === 'phone'
+      ? 56
+      : 0;
   const appShellStyle = {
     '--telegram-safe-top': `${telegramHost.safeAreaInset.top}px`,
     '--telegram-safe-right': `${telegramHost.safeAreaInset.right}px`,
@@ -3323,6 +3330,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     '--telegram-content-safe-right': `${telegramHost.contentSafeAreaInset.right}px`,
     '--telegram-content-safe-bottom': `${telegramHost.contentSafeAreaInset.bottom}px`,
     '--telegram-content-safe-left': `${telegramHost.contentSafeAreaInset.left}px`,
+    '--telegram-chrome-top-guard': `${telegramChromeTopGuard}px`,
   } as CSSProperties;
   const preInsertDraft = appState.preInsertModalDraft;
 
