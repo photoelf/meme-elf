@@ -268,6 +268,38 @@ describe('App', () => {
     expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-host-mode', 'web');
   });
 
+  it('publishes Telegram host availability and keeps the workspace mounted on the Telegram route', async () => {
+    mocks.loadTelegramSdk.mockResolvedValue({
+      ready: vi.fn(),
+      requestFullscreen: vi.fn(),
+      isFullscreen: true,
+      safeAreaInset: { top: 12, right: 4, bottom: 8, left: 4 },
+      contentSafeAreaInset: { top: 44, right: 4, bottom: 12, left: 4 },
+    });
+
+    render(
+      <App
+        routeState={{
+          hostMode: 'telegram',
+          isTelegramRoute: true,
+          pathname: '/t',
+          search: '',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-telegram-available', 'true');
+    });
+
+    expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-telegram-fullscreen', 'true');
+    expect(screen.getByLabelText(/app shell/i)).toHaveStyle({
+      '--telegram-content-safe-top': '44px',
+      '--telegram-safe-bottom': '8px',
+    });
+    expect(screen.getByLabelText(/workspace/i)).toBeInTheDocument();
+  });
+
   it('shows passive install help for non-standalone iPhone Safari sessions on the deployed app', () => {
     renderApp({
       hostname: 'meme-elf.pages.dev',

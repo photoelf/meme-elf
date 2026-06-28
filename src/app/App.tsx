@@ -617,6 +617,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
 
         webApp?.ready?.();
         webApp?.requestFullscreen?.();
+        webApp?.expand?.();
         setTelegramWebApp(webApp);
         setTelegramHost(createTelegramHostSnapshot(webApp));
       })
@@ -3282,6 +3283,10 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     '--telegram-safe-right': `${telegramHost.safeAreaInset.right}px`,
     '--telegram-safe-bottom': `${telegramHost.safeAreaInset.bottom}px`,
     '--telegram-safe-left': `${telegramHost.safeAreaInset.left}px`,
+    '--telegram-content-safe-top': `${telegramHost.contentSafeAreaInset.top}px`,
+    '--telegram-content-safe-right': `${telegramHost.contentSafeAreaInset.right}px`,
+    '--telegram-content-safe-bottom': `${telegramHost.contentSafeAreaInset.bottom}px`,
+    '--telegram-content-safe-left': `${telegramHost.contentSafeAreaInset.left}px`,
   } as CSSProperties;
   const preInsertDraft = appState.preInsertModalDraft;
 
