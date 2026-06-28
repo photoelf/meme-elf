@@ -37,6 +37,7 @@ import {
 import {
   canCopyImageToClipboard,
   resolveMobileExportMessage,
+  type MobileExportOutcome,
 } from '../features/mobile/mobile-export-fallbacks';
 import { CopyFallbackModal } from '../features/mobile/copy-fallback-modal';
 import {
@@ -135,6 +136,13 @@ import {
   toggleDraftFlipVertical,
 } from '../features/image/pre-insert-state';
 import { PreInsertModal } from '../features/image/pre-insert-modal';
+import {
+  createTelegramHostSnapshot,
+  getDefaultTelegramHostState,
+} from '../features/telegram/telegram-host';
+import { resolveTelegramExportCapabilities } from '../features/telegram/telegram-export';
+import { getAppRouteState, type AppRouteState } from '../features/telegram/telegram-route';
+import { loadTelegramSdk, type TelegramWebAppLike } from '../features/telegram/telegram-sdk';
 import { isDrawLayer, isImageLayer, isTextLayer } from './types';
 import type {
   DrawPoint,
@@ -449,7 +457,11 @@ function readMobileRecoverySnapshot(): MobileRecoverySnapshot | null {
   }
 }
 
-export function App() {
+type AppProps = {
+  routeState?: AppRouteState;
+};
+
+export function App({ routeState = getAppRouteState() }: AppProps) {
   const [appState, setAppState] = useState(createDefaultAppState);
   const [statusMessage, setStatusMessage] = useState<string | null>(appState.errorMessage);
   const [theme, setTheme] = useState<'light' | 'dark'>(getPreferredTheme);
@@ -504,6 +516,8 @@ export function App() {
   const [isPreviewStageHovered, setIsPreviewStageHovered] = useState(false);
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [historyState, setHistoryState] = useState({ canRedo: false, canUndo: false });
+  const [telegramHost, setTelegramHost] = useState(getDefaultTelegramHostState);
+  const [telegramWebApp, setTelegramWebApp] = useState<TelegramWebAppLike | null>(null);
   const [templateLibrary, setTemplateLibrary] = useState<MelfTemplateDocument[]>(readInitialTemplateLibrary);
   const [shippedTemplateLibrary, setShippedTemplateLibrary] = useState<MelfTemplateDocument[]>([]);
   const [templatePromoteStatus, setTemplatePromoteStatus] = useState<
@@ -585,6 +599,38 @@ export function App() {
   const activeToolLabel = resolveActiveToolLabel(appState);
   const activeTargetLabel = resolveActiveTargetLabel(appState);
   const activeGestureLabel = resolveMobileGestureLabel(appState.mobileInteraction.activeGestureOwner);
+
+  useEffect(() => {
+    if (!routeState.isTelegramRoute) {
+      setTelegramHost(getDefaultTelegramHostState());
+      setTelegramWebApp(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void loadTelegramSdk({})
+      .then((webApp) => {
+        if (cancelled) {
+          return;
+        }
+
+        webApp?.ready?.();
+        webApp?.requestFullscreen?.();
+        setTelegramWebApp(webApp);
+        setTelegramHost(createTelegramHostSnapshot(webApp));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTelegramWebApp(null);
+          setTelegramHost(getDefaultTelegramHostState());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeState.isTelegramRoute]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2554,12 +2600,20 @@ export function App() {
       return;
     }
 
+    const canCopyImage = canCopyImageToClipboard({
+      hasClipboardItem: typeof ClipboardItem !== 'undefined',
+      hasClipboardWrite: typeof navigator.clipboard?.write === 'function',
+      isSecureContext: typeof window === 'undefined' ? true : window.isSecureContext,
+    });
+    const exportCapabilities = resolveTelegramExportCapabilities({
+      hostMode: routeState.hostMode,
+      canCopyImage,
+      canDownloadImage: true,
+      telegramWebApp,
+    });
+
     if (
-      !canCopyImageToClipboard({
-        hasClipboardItem: typeof ClipboardItem !== 'undefined',
-        hasClipboardWrite: typeof navigator.clipboard?.write === 'function',
-        isSecureContext: typeof window === 'undefined' ? true : window.isSecureContext,
-      })
+      !canCopyImage
     ) {
       openCopyFallbackModal(
         canvas,
@@ -2567,6 +2621,7 @@ export function App() {
           ? 'secure-context-required'
           : 'clipboard-unsupported',
         restoreFocusTo,
+        exportCapabilities,
       );
       return;
     }
@@ -2592,20 +2647,39 @@ export function App() {
         canvas,
         blob ? 'clipboard-blocked' : 'blob-unavailable',
         restoreFocusTo,
+        exportCapabilities,
       );
     }
   }
 
   function openCopyFallbackModal(
     canvas: HTMLCanvasElement,
-    outcome: Exclude<Parameters<typeof resolveMobileExportMessage>[0], 'copy-success'>,
+    outcome: Exclude<MobileExportOutcome, 'copy-success'>,
     restoreFocusTo: HTMLElement | null,
+    exportCapabilities?: ReturnType<typeof resolveTelegramExportCapabilities>,
   ) {
     try {
       const imageDataUrl = canvas.toDataURL('image/png');
       setCopyFallbackModalState({ imageDataUrl, restoreFocusTo });
     } catch {
       setCopyFallbackModalState(null);
+    }
+
+    if (
+      routeState.hostMode === 'telegram' &&
+      exportCapabilities &&
+      (exportCapabilities.canShareMessage || exportCapabilities.canDownloadFile)
+    ) {
+      setStatusMessage(
+        resolveMobileExportMessage({
+          hostMode: routeState.hostMode,
+          canCopyImage: exportCapabilities.canCopyImage,
+          canDownloadImage: exportCapabilities.canDownloadImage,
+          canShareMessage: exportCapabilities.canShareMessage,
+          canDownloadFile: exportCapabilities.canDownloadFile,
+        }),
+      );
+      return;
     }
 
     setStatusMessage(resolveMobileExportMessage(outcome));
@@ -3203,6 +3277,12 @@ export function App() {
     '--app-height': `${viewportHeight}px`,
     '--inspector-width': `${inspectorWidth}%`,
   } as CSSProperties;
+  const appShellStyle = {
+    '--telegram-safe-top': `${telegramHost.safeAreaInset.top}px`,
+    '--telegram-safe-right': `${telegramHost.safeAreaInset.right}px`,
+    '--telegram-safe-bottom': `${telegramHost.safeAreaInset.bottom}px`,
+    '--telegram-safe-left': `${telegramHost.safeAreaInset.left}px`,
+  } as CSSProperties;
   const preInsertDraft = appState.preInsertModalDraft;
 
   function handleThemeToggle() {
@@ -3445,9 +3525,15 @@ export function App() {
   return (
     <main
       className={`app-shell app-shell-${mobileShellLayout.shellMode}`}
+      aria-label="App shell"
+      data-host-mode={routeState.hostMode}
       data-shell-mode={mobileShellLayout.shellMode}
       data-keyboard-open={isKeyboardOpen}
+      data-telegram-available={telegramHost.isAvailable ? 'true' : 'false'}
+      data-telegram-fullscreen={telegramHost.isFullscreen ? 'true' : 'false'}
+      data-route-path={routeState.pathname}
       data-standalone-mode={isStandaloneLaunch}
+      style={appShellStyle}
     >
       <header className="topbar">
         <div className="topbar-brand">

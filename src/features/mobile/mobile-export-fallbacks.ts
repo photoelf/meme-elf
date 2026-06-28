@@ -11,6 +11,14 @@ export type MobileExportOutcome =
   | 'blob-unavailable'
   | 'clipboard-blocked';
 
+export type MobileExportRouteMessageInput = {
+  hostMode?: 'web' | 'telegram';
+  canCopyImage: boolean;
+  canDownloadImage: boolean;
+  canShareMessage?: boolean;
+  canDownloadFile?: boolean;
+};
+
 export function canCopyImageToClipboard({
   hasClipboardItem,
   hasClipboardWrite,
@@ -19,7 +27,25 @@ export function canCopyImageToClipboard({
   return hasClipboardItem && hasClipboardWrite && isSecureContext;
 }
 
-export function resolveMobileExportMessage(outcome: MobileExportOutcome) {
+export function resolveMobileExportMessage(outcome: MobileExportOutcome): string;
+export function resolveMobileExportMessage(input: MobileExportRouteMessageInput): string;
+export function resolveMobileExportMessage(
+  outcomeOrInput: MobileExportOutcome | MobileExportRouteMessageInput,
+) {
+  if (typeof outcomeOrInput !== 'string') {
+    if (outcomeOrInput.hostMode === 'telegram' && outcomeOrInput.canShareMessage) {
+      return 'Telegram can share the exported meme directly if clipboard copy is unavailable.';
+    }
+
+    if (outcomeOrInput.hostMode === 'telegram' && outcomeOrInput.canDownloadFile) {
+      return 'Telegram can hand the exported meme to the native file-download flow here.';
+    }
+
+    return 'If direct copy is unavailable, use the image fallback and save or share it manually.';
+  }
+
+  const outcome = outcomeOrInput;
+
   switch (outcome) {
     case 'copy-success':
       return 'Image copied to the clipboard.';

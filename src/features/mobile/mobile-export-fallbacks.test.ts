@@ -55,4 +55,32 @@ describe('mobile-export-fallbacks', () => {
       'Clipboard copy was blocked by the browser. Press and hold the image to save or copy it.',
     );
   });
+
+  it('maps Telegram-aware export capabilities to route-specific fallback messaging', () => {
+    expect(
+      resolveMobileExportMessage({
+        hostMode: 'telegram',
+        canCopyImage: false,
+        canDownloadImage: false,
+        canShareMessage: true,
+      }),
+    ).toBe('Telegram can share the exported meme directly if clipboard copy is unavailable.');
+
+    expect(
+      resolveMobileExportMessage({
+        hostMode: 'telegram',
+        canCopyImage: false,
+        canDownloadImage: false,
+        canDownloadFile: true,
+      }),
+    ).toBe('Telegram can hand the exported meme to the native file-download flow here.');
+
+    expect(
+      resolveMobileExportMessage({
+        hostMode: 'web',
+        canCopyImage: false,
+        canDownloadImage: true,
+      }),
+    ).toBe('If direct copy is unavailable, use the image fallback and save or share it manually.');
+  });
 });

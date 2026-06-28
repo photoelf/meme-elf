@@ -75,6 +75,7 @@ Current desktop layout conventions:
 - text buttons inside inspector sections should stay readable unless they are intentionally compact icon actions
 
 Current source documents:
+- [docs/README.md](/D:/PETS/meme-elf/docs/README.md)
 - [design.md](/D:/PETS/meme-elf/design.md)
 - [docs/2026-06-04-roadmap.md](/D:/PETS/meme-elf/docs/2026-06-04-roadmap.md)
 - [docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md](/D:/PETS/meme-elf/docs/superpowers/specs/2026-06-04-meme-generator-alpha-design.md)
@@ -122,6 +123,26 @@ When a new shell update is waiting, the status strip shows a compact `Refresh ap
 Current verification status for the installed iPhone flow:
 - locally covered by automated tests: standalone detection, standalone shell marker wiring, update-available status-strip affordance, `SKIP_WAITING` activation request, and single reload on `controllerchange`
 - still requires real-device iPhone smoke before calling the installed flow fully closed: launch from icon, import from supported local paths, edit text, and export through the preferred and fallback routes
+
+## Telegram Mini App
+
+- Telegram launch route: `/t`
+- Normal web and PWA route: `/`
+- `/t` uses the same SPA and editor core as `/`
+- Telegram SDK behavior loads only on `/t`
+- direct browser opens of `/t` stay supported for smoke testing and route validation outside Telegram
+
+Current runtime contract:
+- Telegram-only host behavior stays capability-gated behind the `/t` route boundary
+- normal web and installed PWA behavior on `/` must stay free of Telegram regressions
+- export fallback messaging on `/t` may differ from normal web fallback messaging when Telegram host capabilities are detected
+
+Telegram release checklist:
+1. Confirm `/t` opens from a direct browser visit.
+2. Confirm `/t` opens inside Telegram with the SDK present.
+3. Confirm fullscreen and safe-area layout remain usable on phone.
+4. Confirm export still reaches at least one successful user path.
+5. Confirm `/` still behaves like the normal web/PWA surface.
 
 Install audit note:
 - Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.

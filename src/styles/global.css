@@ -108,6 +108,20 @@ button {
   padding: 10px 0 12px;
 }
 
+.app-shell[data-host-mode='telegram'] {
+  --telegram-safe-top: 0px;
+  --telegram-safe-right: 0px;
+  --telegram-safe-bottom: 0px;
+  --telegram-safe-left: 0px;
+}
+
+.app-shell[data-host-mode='telegram'][data-telegram-available='true'] {
+  padding-top: max(10px, var(--telegram-safe-top));
+  padding-right: max(0px, var(--telegram-safe-right));
+  padding-bottom: max(12px, var(--telegram-safe-bottom));
+  padding-left: max(0px, var(--telegram-safe-left));
+}
+
 .topbar {
   display: flex;
   align-items: center;

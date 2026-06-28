@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { registerShellServiceWorker } from './features/pwa/pwa-service';
+import { getAppRouteState } from './features/telegram/telegram-route';
 import './styles/global.css';
 
 const rootElement = document.getElementById('root');
@@ -10,9 +11,11 @@ if (!rootElement) {
   throw new Error('Root element was not found.');
 }
 
+const routeState = getAppRouteState();
+
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <App routeState={routeState} />
   </StrictMode>,
 );
 

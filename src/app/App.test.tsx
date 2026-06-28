@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   extractImageUrlFromPasteEvent: vi.fn(),
   loadImageElementFromFile: vi.fn(),
   loadImageElementFromUrl: vi.fn(),
+  loadTelegramSdk: vi.fn(),
   readImageFromClipboard: vi.fn(),
   readImageFromClipboardResult: vi.fn(),
   revokeLoadedImageObjectUrl: vi.fn(),
@@ -58,6 +59,17 @@ vi.mock('../features/image/image-loader', () => ({
   loadImageElementFromUrl: mocks.loadImageElementFromUrl,
   revokeLoadedImageObjectUrl: mocks.revokeLoadedImageObjectUrl,
 }));
+
+vi.mock('../features/telegram/telegram-sdk', async () => {
+  const actual = await vi.importActual<typeof import('../features/telegram/telegram-sdk')>(
+    '../features/telegram/telegram-sdk',
+  );
+
+  return {
+    ...actual,
+    loadTelegramSdk: mocks.loadTelegramSdk,
+  };
+});
 
 function createImageStub(width = 1200, height = 800) {
   return {
@@ -197,6 +209,7 @@ describe('App', () => {
     });
     mocks.extractImageUrlFromPasteEvent.mockReturnValue(null);
     mocks.loadImageElementFromUrl.mockReset();
+    mocks.loadTelegramSdk.mockResolvedValue(null);
   });
 
   it('renders the meme-elf heading, editor toolbar, and inspector fields', () => {
@@ -222,6 +235,37 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /show tool rail/i })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toBeInTheDocument();
+  });
+
+  it('marks /t as the Telegram host surface without removing the shared editor shell', () => {
+    render(
+      <App
+        routeState={{
+          hostMode: 'telegram',
+          isTelegramRoute: true,
+          pathname: '/t',
+          search: '',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-host-mode', 'telegram');
+    expect(screen.getByRole('toolbar', { name: /editor actions/i })).toBeInTheDocument();
+  });
+
+  it('keeps the default route on the normal web host mode', () => {
+    render(
+      <App
+        routeState={{
+          hostMode: 'web',
+          isTelegramRoute: false,
+          pathname: '/',
+          search: '',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-host-mode', 'web');
   });
 
   it('shows passive install help for non-standalone iPhone Safari sessions on the deployed app', () => {
@@ -4034,6 +4078,45 @@ describe('App', () => {
     expect(downloadLink).toBeInTheDocument();
     expect(downloadLink.querySelector('svg')).not.toBeNull();
     expect(within(dialog).getByRole('button', { name: /close save or copy image/i })).toBeInTheDocument();
+  });
+
+  it('shows a Telegram-specific export fallback message when share support exists on the /t route', async () => {
+    Object.assign(navigator, {
+      clipboard: {
+        write: undefined,
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,fallback');
+    mocks.loadTelegramSdk.mockResolvedValue({
+      ready: vi.fn(),
+      requestFullscreen: vi.fn(),
+      shareMessage: vi.fn(),
+    });
+
+    render(
+      <App
+        routeState={{
+          hostMode: 'telegram',
+          isTelegramRoute: true,
+          pathname: '/t',
+          search: '',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/app shell/i)).toHaveAttribute('data-telegram-available', 'true');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /copy image/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/editor status/i)).toHaveTextContent(
+        /telegram can share the exported meme directly if clipboard copy is unavailable\./i,
+      );
+    });
+
+    expect(screen.getByRole('dialog', { name: /save or copy image/i })).toBeInTheDocument();
   });
 
   it('enters draw mode, auto-creates a draw layer on first stroke, and undoes the committed stroke', async () => {
