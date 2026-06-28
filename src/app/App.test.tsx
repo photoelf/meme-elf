@@ -300,6 +300,61 @@ describe('App', () => {
     expect(screen.getByLabelText(/workspace/i)).toBeInTheDocument();
   });
 
+  it('updates Telegram safe-area state after runtime events and disables vertical swipes', async () => {
+    const eventListeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    const webApp = {
+      ready: vi.fn(),
+      requestFullscreen: vi.fn(),
+      expand: vi.fn(),
+      disableVerticalSwipes: vi.fn(),
+      onEvent: vi.fn((eventName: string, listener: (...args: unknown[]) => void) => {
+        const listeners = eventListeners.get(eventName) ?? [];
+        listeners.push(listener);
+        eventListeners.set(eventName, listeners);
+      }),
+      offEvent: vi.fn((eventName: string, listener: (...args: unknown[]) => void) => {
+        const listeners = eventListeners.get(eventName) ?? [];
+        eventListeners.set(
+          eventName,
+          listeners.filter((registeredListener) => registeredListener !== listener),
+        );
+      }),
+      isFullscreen: true,
+      safeAreaInset: { top: 0, right: 0, bottom: 0, left: 0 },
+      contentSafeAreaInset: { top: 0, right: 0, bottom: 0, left: 0 },
+    };
+    mocks.loadTelegramSdk.mockResolvedValue(webApp);
+
+    render(
+      <App
+        routeState={{
+          hostMode: 'telegram',
+          isTelegramRoute: true,
+          pathname: '/t',
+          search: '',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(webApp.disableVerticalSwipes).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      webApp.contentSafeAreaInset = { top: 48, right: 0, bottom: 10, left: 0 };
+      for (const listener of eventListeners.get('contentSafeAreaChanged') ?? []) {
+        listener({ top: 48, right: 0, bottom: 10, left: 0 });
+      }
+    });
+
+    expect(webApp.onEvent).toHaveBeenCalledWith('contentSafeAreaChanged', expect.any(Function));
+    expect(webApp.onEvent).toHaveBeenCalledWith('safeAreaChanged', expect.any(Function));
+    expect(screen.getByLabelText(/app shell/i)).toHaveStyle({
+      '--telegram-content-safe-top': '48px',
+      '--telegram-content-safe-bottom': '10px',
+    });
+  });
+
   it('shows passive install help for non-standalone iPhone Safari sessions on the deployed app', () => {
     renderApp({
       hostname: 'meme-elf.pages.dev',

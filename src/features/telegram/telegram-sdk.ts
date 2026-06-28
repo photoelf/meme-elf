@@ -5,6 +5,10 @@ export type TelegramWebAppLike = {
   ready?: () => void;
   expand?: () => void;
   requestFullscreen?: () => void;
+  disableVerticalSwipes?: () => void;
+  enableVerticalSwipes?: () => void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
   onEvent?: (eventName: string, listener: (...args: unknown[]) => void) => void;
   offEvent?: (eventName: string, listener: (...args: unknown[]) => void) => void;
   BackButton?: {

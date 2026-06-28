@@ -139,6 +139,7 @@ import { PreInsertModal } from '../features/image/pre-insert-modal';
 import {
   createTelegramHostSnapshot,
   getDefaultTelegramHostState,
+  normalizeTelegramInset,
 } from '../features/telegram/telegram-host';
 import { resolveTelegramExportCapabilities } from '../features/telegram/telegram-export';
 import { getAppRouteState, type AppRouteState } from '../features/telegram/telegram-route';
@@ -608,6 +609,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     }
 
     let cancelled = false;
+    let cleanupTelegramBindings = () => {};
 
     void loadTelegramSdk({})
       .then((webApp) => {
@@ -615,11 +617,44 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
           return;
         }
 
+        if (!webApp) {
+          setTelegramWebApp(null);
+          setTelegramHost(getDefaultTelegramHostState());
+          return;
+        }
+
+        const syncTelegramHost = () => {
+          setTelegramHost(createTelegramHostSnapshot(webApp));
+        };
+        const handleSafeAreaChanged = (nextInset: unknown) => {
+          webApp.safeAreaInset = normalizeTelegramInset(nextInset, normalizeTelegramInset(webApp.safeAreaInset));
+          syncTelegramHost();
+        };
+        const handleContentSafeAreaChanged = (nextInset: unknown) => {
+          webApp.contentSafeAreaInset = normalizeTelegramInset(
+            nextInset,
+            normalizeTelegramInset(webApp.contentSafeAreaInset),
+          );
+          syncTelegramHost();
+        };
+        const handleFullscreenChanged = () => {
+          syncTelegramHost();
+        };
+
         webApp?.ready?.();
         webApp?.requestFullscreen?.();
         webApp?.expand?.();
+        webApp?.disableVerticalSwipes?.();
+        webApp?.onEvent?.('safeAreaChanged', handleSafeAreaChanged);
+        webApp?.onEvent?.('contentSafeAreaChanged', handleContentSafeAreaChanged);
+        webApp?.onEvent?.('fullscreenChanged', handleFullscreenChanged);
+        cleanupTelegramBindings = () => {
+          webApp?.offEvent?.('safeAreaChanged', handleSafeAreaChanged);
+          webApp?.offEvent?.('contentSafeAreaChanged', handleContentSafeAreaChanged);
+          webApp?.offEvent?.('fullscreenChanged', handleFullscreenChanged);
+        };
         setTelegramWebApp(webApp);
-        setTelegramHost(createTelegramHostSnapshot(webApp));
+        syncTelegramHost();
       })
       .catch(() => {
         if (!cancelled) {
@@ -630,6 +665,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
 
     return () => {
       cancelled = true;
+      cleanupTelegramBindings();
     };
   }, [routeState.isTelegramRoute]);
 
