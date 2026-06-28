@@ -137,12 +137,24 @@ Current runtime contract:
 - normal web and installed PWA behavior on `/` must stay free of Telegram regressions
 - export fallback messaging on `/t` may differ from normal web fallback messaging when Telegram host capabilities are detected
 
+Telegram registration/config guide:
+1. Deploy the branch preview or production build to an `HTTPS` URL.
+2. In BotFather, create or open the target bot.
+3. Set the Mini App / main web app URL to the deployed `/t` route, not `/`.
+4. Use the same `/t` URL for Telegram smoke tests outside the bot first.
+5. Re-check the bot launch after each preview or production deploy that changes Telegram host behavior.
+
 Telegram release checklist:
 1. Confirm `/t` opens from a direct browser visit.
 2. Confirm `/t` opens inside Telegram with the SDK present.
 3. Confirm fullscreen and safe-area layout remain usable on phone.
 4. Confirm export still reaches at least one successful user path.
 5. Confirm `/` still behaves like the normal web/PWA surface.
+
+Current known limits:
+- Telegram iOS may render its own fullscreen overlay chrome above the webview; the `/t` shell now carries an explicit top guard for that host chrome.
+- Telegram fullscreen behavior is validated against the current shared editor shell, not a Telegram-specific fork.
+- Export in `/t` is still capability-driven: direct clipboard copy may fail, and the user may fall back to Telegram share, file download, or the image fallback modal depending on host support.
 
 Install audit note:
 - Missing assets before `9A-1`: no `manifest.webmanifest`, no Apple touch icon, and no dedicated 192px or 512px PWA icons.
