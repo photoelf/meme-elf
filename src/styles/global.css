@@ -1830,19 +1830,42 @@ button {
   .preview-panel {
     height: auto;
     min-height: 0;
+    --phone-preview-bottom-clearance: calc(
+      88px + 10px + max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px))
+    );
+    --phone-preview-top-chrome: 132px;
+  }
+
+  .preview-stage {
+    max-height: calc(
+      var(--app-height, 100dvh) - var(--phone-preview-top-chrome) -
+        var(--phone-preview-bottom-clearance)
+    );
   }
 
   .preview-frame {
     min-height: 42vh;
+    max-height: calc(
+      var(--app-height, 100dvh) - var(--phone-preview-top-chrome) -
+        var(--phone-preview-bottom-clearance)
+    );
   }
 
   .preview-viewport {
     min-height: 42vh;
+    max-height: calc(
+      var(--app-height, 100dvh) - var(--phone-preview-top-chrome) -
+        var(--phone-preview-bottom-clearance)
+    );
     padding: 0;
   }
 
   .preview-viewport-content {
     min-height: 42vh;
+    max-height: calc(
+      var(--app-height, 100dvh) - var(--phone-preview-top-chrome) -
+        var(--phone-preview-bottom-clearance)
+    );
   }
 
   .preview-panel-header {

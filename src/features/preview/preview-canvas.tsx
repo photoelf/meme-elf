@@ -4,6 +4,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
+  type TouchEvent as ReactTouchEvent,
 } from 'react';
 
 import {
@@ -70,6 +71,8 @@ type PreviewCanvasProps = {
   onMobileInteractionChange?: (interaction: MobileInteractionState) => void;
   onPreviewPanEnd?: () => void;
   onPreviewPanStart?: (input: { clientX: number; clientY: number; pointerId: number }) => void;
+  onPreviewPinchChange?: (input: { pan: Point; zoomFactor: number }) => void;
+  onPreviewToggleFitActual?: () => void;
   onRetouchBrushSample?: (sample: { color: string; opacity: number }) => void;
   onInlineTextEditEnd?: () => void;
   onInlineTextEditStart?: () => void;
@@ -120,6 +123,9 @@ type SceneCropInteractionMode =
   | null;
 type PreviewPanInteraction = {
   pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
 } | null;
 type PendingTouchTextEditInteraction = {
   layerId: LayerId;
@@ -128,6 +134,23 @@ type PendingTouchTextEditInteraction = {
   startClientY: number;
   startPoint: Point;
   startBox: EditorLayer['box'];
+} | null;
+type PreviewPinchInteraction = {
+  anchorCanvasPoint: Point;
+  pointerIds: [number, number];
+  startBaseLeft: number;
+  startBaseTop: number;
+  startDistance: number;
+  startZoomFactor: number;
+} | null;
+type EmptyTouchTapRecord = {
+  clientX: number;
+  clientY: number;
+  timeStamp: number;
+} | null;
+type RecentTouchCompletionRecord = {
+  pointerId: number | null;
+  timeStamp: number;
 } | null;
 
 type Point = { x: number; y: number };
@@ -146,6 +169,8 @@ type NormalizedSceneCropRect = {
 const MIN_BOX_WIDTH = 60;
 const MIN_BOX_HEIGHT = 28;
 const TOUCH_TEXT_EDIT_TAP_SLOP = 10;
+const TOUCH_DOUBLE_TAP_SLOP = 24;
+const TOUCH_DOUBLE_TAP_WINDOW_MS = 320;
 const RESIZE_HANDLES: ResizeHandle[] = [
   { axisX: 'left', axisY: 'top', className: 'transform-handle-corner-top-left' },
   { axisX: null, axisY: 'top', className: 'transform-handle-edge-top' },
@@ -186,6 +211,8 @@ export function PreviewCanvas({
   onMobileInteractionChange,
   onPreviewPanEnd,
   onPreviewPanStart,
+  onPreviewPinchChange,
+  onPreviewToggleFitActual,
   onRetouchBrushSample,
   onInlineTextEditEnd,
   onInlineTextEditStart,
@@ -213,7 +240,11 @@ export function PreviewCanvas({
   const sceneCropInteractionRef = useRef<SceneCropInteractionMode>(null);
   const drawInteractionRef = useRef(false);
   const panInteractionRef = useRef<PreviewPanInteraction>(null);
+  const pinchInteractionRef = useRef<PreviewPinchInteraction>(null);
+  const activePreviewTouchPointsRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
   const pendingTouchTextEditRef = useRef<PendingTouchTextEditInteraction>(null);
+  const lastEmptyTouchTapRef = useRef<EmptyTouchTapRecord>(null);
+  const recentTouchCompletionRef = useRef<RecentTouchCompletionRecord>(null);
   const clearActiveLayerOnTextBlurRef = useRef(false);
   const selectionInteractionRef = useRef(false);
   const altKeyPressedRef = useRef(false);
@@ -292,6 +323,287 @@ export function PreviewCanvas({
     return mobileInteraction.lastPointerType === 'unknown'
       ? 'mouse'
       : mobileInteraction.lastPointerType;
+  }
+
+  function getTouchDistance(first: { clientX: number; clientY: number }, second: { clientX: number; clientY: number }) {
+    return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+  }
+
+  function getTouchCenter(first: { clientX: number; clientY: number }, second: { clientX: number; clientY: number }) {
+    return {
+      clientX: (first.clientX + second.clientX) / 2,
+      clientY: (first.clientY + second.clientY) / 2,
+    };
+  }
+
+  function canStartPreviewPinch() {
+    return !isSceneCropMode && retouchMode === 'idle' && !interactionRef.current;
+  }
+
+  function startPreviewPinch() {
+    if (!canStartPreviewPinch() || !shellRef.current) {
+      return false;
+    }
+
+    const activeTouches = [...activePreviewTouchPointsRef.current.entries()];
+
+    if (activeTouches.length < 2) {
+      return false;
+    }
+
+    const [[firstPointerId, firstTouch], [secondPointerId, secondTouch]] = activeTouches;
+    const distance = getTouchDistance(firstTouch, secondTouch);
+
+    if (!Number.isFinite(distance) || distance <= 0) {
+      return false;
+    }
+
+    const center = getTouchCenter(firstTouch, secondTouch);
+    const anchorCanvasPoint = getCanvasPoint(
+      shellRef.current,
+      width,
+      height,
+      center.clientX,
+      center.clientY,
+    );
+
+    if (!anchorCanvasPoint) {
+      return false;
+    }
+
+    const shellBounds = shellRef.current.getBoundingClientRect();
+    pinchInteractionRef.current = {
+      anchorCanvasPoint,
+      pointerIds: [firstPointerId, secondPointerId],
+      startBaseLeft: shellBounds.left - previewPan.x,
+      startBaseTop: shellBounds.top - previewPan.y,
+      startDistance: distance,
+      startZoomFactor: previewZoomFactor,
+    };
+    pendingTouchTextEditRef.current = null;
+    lastEmptyTouchTapRef.current = null;
+    if (panInteractionRef.current) {
+      panInteractionRef.current = null;
+      onPreviewPanEnd?.();
+    }
+    updateMobileInteraction('pan', {
+      activeTargetId: activeLayerId,
+      pointerType: 'touch',
+    });
+    return true;
+  }
+
+  function updatePreviewPinch() {
+    const pinchInteraction = pinchInteractionRef.current;
+
+    if (!pinchInteraction) {
+      return;
+    }
+
+    const [firstPointerId, secondPointerId] = pinchInteraction.pointerIds;
+    const firstTouch = activePreviewTouchPointsRef.current.get(firstPointerId);
+    const secondTouch = activePreviewTouchPointsRef.current.get(secondPointerId);
+
+    if (!firstTouch || !secondTouch) {
+      return;
+    }
+
+    const distance = getTouchDistance(firstTouch, secondTouch);
+
+    if (!Number.isFinite(distance) || distance <= 0) {
+      return;
+    }
+
+    const center = getTouchCenter(firstTouch, secondTouch);
+    const zoomFactor = pinchInteraction.startZoomFactor * (distance / pinchInteraction.startDistance);
+    const pan = {
+      x: center.clientX - pinchInteraction.startBaseLeft - (pinchInteraction.anchorCanvasPoint.x * zoomFactor),
+      y: center.clientY - pinchInteraction.startBaseTop - (pinchInteraction.anchorCanvasPoint.y * zoomFactor),
+    };
+
+    onPreviewPinchChange?.({
+      pan,
+      zoomFactor,
+    });
+  }
+
+  function clearPreviewTouchPointer(pointerId: number) {
+    activePreviewTouchPointsRef.current.delete(pointerId);
+
+    if (
+      pinchInteractionRef.current &&
+      pinchInteractionRef.current.pointerIds.includes(pointerId)
+    ) {
+      pinchInteractionRef.current = null;
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+        pointerType: 'touch',
+      });
+    }
+  }
+
+  function maybeHandleEmptyTouchDoubleTap(clientX: number, clientY: number, timeStamp: number) {
+    const lastTap = lastEmptyTouchTapRef.current;
+
+    if (
+      lastTap &&
+      (timeStamp - lastTap.timeStamp) <= TOUCH_DOUBLE_TAP_WINDOW_MS &&
+      Math.abs(clientX - lastTap.clientX) <= TOUCH_DOUBLE_TAP_SLOP &&
+      Math.abs(clientY - lastTap.clientY) <= TOUCH_DOUBLE_TAP_SLOP
+    ) {
+      lastEmptyTouchTapRef.current = null;
+      onPreviewToggleFitActual?.();
+      return;
+    }
+
+    lastEmptyTouchTapRef.current = {
+      clientX,
+      clientY,
+      timeStamp,
+    };
+  }
+
+  function handleTrackedTouchGesturePointerMove(event: {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+  }) {
+    let pointerId = event.pointerId;
+
+    if (!activePreviewTouchPointsRef.current.has(pointerId)) {
+      if (pinchInteractionRef.current && activePreviewTouchPointsRef.current.size >= 2) {
+        pointerId = pinchInteractionRef.current.pointerIds[1];
+      } else if (panInteractionRef.current) {
+        pointerId = panInteractionRef.current.pointerId;
+      } else if (activePreviewTouchPointsRef.current.size === 1) {
+        pointerId = [...activePreviewTouchPointsRef.current.keys()][0];
+      }
+    }
+
+    const isTrackedPreviewTouch = activePreviewTouchPointsRef.current.has(pointerId);
+    const isTrackedPanTouch = panInteractionRef.current?.pointerId === pointerId;
+
+    if (isTrackedPreviewTouch) {
+      activePreviewTouchPointsRef.current.set(pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+    }
+
+    const panInteraction = panInteractionRef.current;
+
+    if (panInteraction && panInteraction.pointerId === pointerId) {
+      const movedEnough =
+        Math.abs(event.clientX - panInteraction.startClientX) >= TOUCH_TEXT_EDIT_TAP_SLOP ||
+        Math.abs(event.clientY - panInteraction.startClientY) >= TOUCH_TEXT_EDIT_TAP_SLOP;
+
+      if (movedEnough) {
+        panInteraction.moved = true;
+      }
+    }
+
+    if (!isTrackedPreviewTouch && !isTrackedPanTouch) {
+      return;
+    }
+
+    updatePreviewPinch();
+  }
+
+  function handleTrackedTouchGesturePointerEnd(event: {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    timeStamp: number;
+  }) {
+    let pointerId = event.pointerId;
+    const panInteraction = panInteractionRef.current;
+
+    if (!activePreviewTouchPointsRef.current.has(pointerId)) {
+      if (panInteraction) {
+        pointerId = panInteraction.pointerId;
+      } else if (pinchInteractionRef.current && activePreviewTouchPointsRef.current.size >= 1) {
+        pointerId = pinchInteractionRef.current.pointerIds.find((candidatePointerId) =>
+          activePreviewTouchPointsRef.current.has(candidatePointerId),
+        ) ?? pointerId;
+      } else if (activePreviewTouchPointsRef.current.size === 1) {
+        pointerId = [...activePreviewTouchPointsRef.current.keys()][0];
+      }
+    }
+
+    const isTrackedPreviewTouch = activePreviewTouchPointsRef.current.has(pointerId);
+
+    if (!panInteraction && !isTrackedPreviewTouch) {
+      return;
+    }
+
+    clearPreviewTouchPointer(pointerId);
+    panInteractionRef.current = panInteraction?.pointerId === pointerId ? null : panInteractionRef.current;
+  }
+
+  function syncPreviewTouches(touches: TouchList) {
+    const nextTouches = new Map<number, { clientX: number; clientY: number }>();
+
+    for (const touch of Array.from(touches)) {
+      nextTouches.set(touch.identifier, {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+      });
+    }
+
+    activePreviewTouchPointsRef.current = nextTouches;
+  }
+
+  function handlePreviewTouchStart(event: ReactTouchEvent<HTMLElement>) {
+    syncPreviewTouches(event.touches);
+
+    if (startPreviewPinch()) {
+      event.preventDefault();
+    }
+  }
+
+  function handlePreviewTouchMove(event: ReactTouchEvent<HTMLElement>) {
+    syncPreviewTouches(event.touches);
+
+    if (!pinchInteractionRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    updatePreviewPinch();
+  }
+
+  function handlePreviewTouchEnd(event: ReactTouchEvent<HTMLElement>) {
+    const endingTouch = event.changedTouches[0];
+    const panInteraction = panInteractionRef.current;
+    const wasPinching = Boolean(pinchInteractionRef.current);
+
+    syncPreviewTouches(event.touches);
+    recentTouchCompletionRef.current = {
+      pointerId: endingTouch?.identifier ?? null,
+      timeStamp: event.timeStamp,
+    };
+
+    if (
+      endingTouch &&
+      !wasPinching &&
+      (!panInteraction || !panInteraction.moved) &&
+      event.touches.length === 0
+    ) {
+      maybeHandleEmptyTouchDoubleTap(
+        endingTouch.clientX,
+        endingTouch.clientY,
+        event.timeStamp,
+      );
+      panInteractionRef.current = null;
+    }
+
+    if (pinchInteractionRef.current && event.touches.length < 2) {
+      pinchInteractionRef.current = null;
+      updateMobileInteraction('idle', {
+        activeTargetId: activeLayerId,
+        pointerType: 'touch',
+      });
+    }
   }
 
   function startSceneCrop(clientX: number, clientY: number) {
@@ -670,6 +982,26 @@ export function PreviewCanvas({
   ]);
 
   useEffect(() => {
+    function handleTouchGesturePointerMove(event: PointerEvent) {
+      handleTrackedTouchGesturePointerMove(event);
+    }
+
+    function handleTouchGesturePointerEnd(event: PointerEvent) {
+      handleTrackedTouchGesturePointerEnd(event);
+    }
+
+    window.addEventListener('pointermove', handleTouchGesturePointerMove);
+    window.addEventListener('pointerup', handleTouchGesturePointerEnd);
+    window.addEventListener('pointercancel', handleTouchGesturePointerEnd);
+
+    return () => {
+      window.removeEventListener('pointermove', handleTouchGesturePointerMove);
+      window.removeEventListener('pointerup', handleTouchGesturePointerEnd);
+      window.removeEventListener('pointercancel', handleTouchGesturePointerEnd);
+    };
+  }, [activeLayerId, onPreviewPanEnd, onPreviewPinchChange, onPreviewToggleFitActual, previewPan.x, previewPan.y, previewZoomFactor, retouchMode, isSceneCropMode, width, height]);
+
+  useEffect(() => {
     function handlePendingTouchTextEditMove(event: PointerEvent) {
       const pendingTouchEdit = pendingTouchTextEditRef.current;
 
@@ -892,8 +1224,39 @@ export function PreviewCanvas({
       <div
         ref={viewportRef}
         className="preview-viewport-content"
+        style={{
+          overscrollBehavior: 'contain',
+          touchAction: 'none',
+        }}
+        onTouchStart={handlePreviewTouchStart}
+        onTouchMove={handlePreviewTouchMove}
+        onTouchEnd={handlePreviewTouchEnd}
+        onTouchCancel={handlePreviewTouchEnd}
         onPointerDown={(event) => {
           const pointerType = resolveEventPointerType(event);
+          if (
+            !isSceneCropMode &&
+            pointerType === 'touch' &&
+            event.target === event.currentTarget
+          ) {
+            panInteractionRef.current = {
+              pointerId: event.pointerId,
+              startClientX: event.clientX,
+              startClientY: event.clientY,
+              moved: false,
+            };
+            updateMobileInteraction('pan', {
+              activeTargetId: activeLayerId,
+              pointerType: 'touch',
+            });
+            onPreviewPanStart?.({
+              clientX: event.clientX,
+              clientY: event.clientY,
+              pointerId: event.pointerId,
+            });
+            return;
+          }
+
           if (!isSceneCropMode) {
             return;
           }
@@ -931,8 +1294,22 @@ export function PreviewCanvas({
           }}
           onPointerEnter={() => setIsPreviewSurfaceHovered(true)}
           onPointerLeave={() => setIsPreviewSurfaceHovered(false)}
+          onPointerMove={(event) => handleTrackedTouchGesturePointerMove(event)}
+          onPointerUp={(event) => handleTrackedTouchGesturePointerEnd(event)}
+          onPointerCancel={(event) => handleTrackedTouchGesturePointerEnd(event)}
           onPointerDown={(event) => {
             const pointerType = resolveEventPointerType(event);
+            if (pointerType === 'touch') {
+              activePreviewTouchPointsRef.current.set(event.pointerId, {
+                clientX: event.clientX,
+                clientY: event.clientY,
+              });
+
+              if (startPreviewPinch()) {
+                return;
+              }
+            }
+
             const pointerTarget = event.target instanceof Element ? event.target : null;
             const tappedInsideActiveTextEditingChrome = Boolean(
               pointerTarget?.closest('.transform-box-active') ||
@@ -966,7 +1343,12 @@ export function PreviewCanvas({
             }
 
             if (pointerType === 'touch' && mobileGestureOwner === 'pan') {
-              panInteractionRef.current = { pointerId: event.pointerId };
+              panInteractionRef.current = {
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                moved: false,
+              };
               updateMobileInteraction('pan', {
                 activeTargetId: activeLayerId,
                 pointerType: 'touch',
@@ -1254,6 +1636,17 @@ export function PreviewCanvas({
                     const pointerType = resolveEventPointerType(event);
                     if ((event.button === 1 || event.button === 2) || editingLayerId === layer.id) {
                       return;
+                    }
+
+                    if (pointerType === 'touch') {
+                      activePreviewTouchPointsRef.current.set(event.pointerId, {
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                      });
+
+                      if (startPreviewPinch()) {
+                        return;
+                      }
                     }
 
                     event.preventDefault();

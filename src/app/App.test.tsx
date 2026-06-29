@@ -1077,6 +1077,43 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: /top text/i })).toBeInTheDocument();
   });
 
+  it('scrolls between the topbar and inspector tab row only when the phone tools toggle is used', async () => {
+    window.innerWidth = 680;
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+      writable: true,
+    });
+
+    render(<App />);
+
+    const scrollIntoViewSpy = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /show tools/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /hide tools/i })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+    });
+
+    expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('tab', { name: /draw/i }));
+
+    expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /hide tools/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /hide tools/i })).not.toBeInTheDocument();
+    });
+
+    expect(scrollIntoViewSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps phone top-bar actions compact and moves secondary actions into overflow', async () => {
     window.innerWidth = 680;
 
@@ -2992,6 +3029,330 @@ describe('App', () => {
     fireEvent.mouseUp(window);
 
     expect(previewSurface.style.transform).toBe('translate(40px, 30px)');
+  });
+
+  it('switches touch double-tap on empty canvas between fit and actual size', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewViewport = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+    });
+    fireEvent.touchEnd(previewViewport, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+    });
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 162, clientY: 102, identifier: 2, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 162, clientY: 102, identifier: 2, target: previewViewport },
+      ],
+    });
+    fireEvent.touchEnd(previewViewport, {
+      touches: [],
+      changedTouches: [
+        { clientX: 162, clientY: 102, identifier: 2, target: previewViewport },
+      ],
+    });
+
+    expect(previewSurface.style.width).toBe('800px');
+    expect(previewSurface.style.height).toBe('450px');
+
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 3, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 3, target: previewViewport },
+      ],
+    });
+    fireEvent.touchEnd(previewViewport, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 3, target: previewViewport },
+      ],
+    });
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 162, clientY: 102, identifier: 4, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 162, clientY: 102, identifier: 4, target: previewViewport },
+      ],
+    });
+    fireEvent.touchEnd(previewViewport, {
+      touches: [],
+      changedTouches: [
+        { clientX: 162, clientY: 102, identifier: 4, target: previewViewport },
+      ],
+    });
+
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
+  });
+
+  it('zooms the preview with a two-finger pinch on touch devices', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewViewport = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 120, clientY: 100, identifier: 1, target: previewViewport },
+        { clientX: 200, clientY: 100, identifier: 2, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 120, clientY: 100, identifier: 1, target: previewViewport },
+        { clientX: 200, clientY: 100, identifier: 2, target: previewViewport },
+      ],
+    });
+    fireEvent.touchMove(previewViewport, {
+      touches: [
+        { clientX: 80, clientY: 100, identifier: 1, target: previewViewport },
+        { clientX: 240, clientY: 100, identifier: 2, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 80, clientY: 100, identifier: 1, target: previewViewport },
+        { clientX: 240, clientY: 100, identifier: 2, target: previewViewport },
+      ],
+    });
+
+    expect(previewSurface.style.width).toBe('640px');
+    expect(previewSurface.style.height).toBe('360px');
+  });
+
+  it('does not switch preview zoom on a single touch tap inside the viewport', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewViewport = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.touchStart(previewViewport, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+    });
+    fireEvent.touchEnd(previewViewport, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewViewport },
+      ],
+    });
+
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
+  });
+
+  it('does not switch preview zoom when a single touch tap is followed by synthetic pointer release events', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.touchStart(previewCanvas, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+    });
+    fireEvent.touchEnd(previewCanvas, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+    });
+    fireEvent.pointerUp(previewCanvas, {
+      clientX: 160,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
+  });
+
+  it('does not switch preview zoom when a touch tap on the canvas also emits pointer down and up events', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.pointerDown(previewCanvas, {
+      button: 0,
+      clientX: 160,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.touchStart(previewCanvas, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+    });
+    fireEvent.touchEnd(previewCanvas, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 1, target: previewCanvas },
+      ],
+    });
+    fireEvent.pointerUp(previewCanvas, {
+      clientX: 160,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
+  });
+
+  it('does not switch preview zoom when touch and pointer completion ids differ for the same physical tap', () => {
+    const { container } = render(<App />);
+
+    const previewFrame = container.querySelector('.preview-frame') as HTMLDivElement;
+    vi.spyOn(previewFrame, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 220,
+      left: 0,
+      right: 320,
+      top: 0,
+      width: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const previewSurface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const previewCanvas = container.querySelector('.preview-canvas') as HTMLCanvasElement;
+    fireEvent.click(screen.getByRole('button', { name: /fit to window/i }));
+    expect(previewSurface.style.width).toBe('320px');
+
+    fireEvent.pointerDown(previewCanvas, {
+      button: 0,
+      clientX: 160,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.touchStart(previewCanvas, {
+      touches: [
+        { clientX: 160, clientY: 100, identifier: 7, target: previewCanvas },
+      ],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 7, target: previewCanvas },
+      ],
+    });
+    fireEvent.touchEnd(previewCanvas, {
+      touches: [],
+      changedTouches: [
+        { clientX: 160, clientY: 100, identifier: 7, target: previewCanvas },
+      ],
+    });
+    fireEvent.pointerUp(previewCanvas, {
+      clientX: 160,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(previewSurface.style.width).toBe('320px');
+    expect(previewSurface.style.height).toBe('180px');
   });
 
   it('shows preview overlays when hovering the full preview stage', () => {

@@ -304,6 +304,10 @@ function clampPreviewZoom(nextZoom: number) {
   return Math.min(MAX_PREVIEW_ZOOM_FACTOR, Math.max(MIN_PREVIEW_ZOOM_FACTOR, nextZoom));
 }
 
+function arePreviewZoomFactorsClose(left: number, right: number) {
+  return Math.abs(left - right) <= 0.01;
+}
+
 function resolveViewportHeight() {
   if (typeof window === 'undefined') {
     return 0;
@@ -538,6 +542,9 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     getShellServiceWorkerState,
   );
   const [isRefreshingShellUpdate, setIsRefreshingShellUpdate] = useState(false);
+  const topbarRef = useRef<HTMLElement | null>(null);
+  const inspectorTabListRef = useRef<HTMLDivElement | null>(null);
+  const previousPhoneInspectorOpenRef = useRef(isPhoneInspectorOpen);
   const showLocalOnlyTabs = shouldShowLocalOnlyTabs();
   const pickerTemplateLibrary =
     showLocalOnlyTabs && shippedTemplateLibrary.length === 0
@@ -3537,6 +3544,21 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     setPreviewPan({ x: 0, y: 0 });
   }
 
+  function togglePreviewFitActualSize() {
+    const fitZoomFactor = resolveFitToWindowZoomFactor(
+      appStateRef.current.canvasSize,
+      previewFrameRef.current,
+    );
+
+    setAppState((currentState) => ({
+      ...currentState,
+      previewZoomFactor: arePreviewZoomFactorsClose(currentState.previewZoomFactor, fitZoomFactor)
+        ? DEFAULT_PREVIEW_ZOOM_FACTOR
+        : fitZoomFactor,
+    }));
+    setPreviewPan({ x: 0, y: 0 });
+  }
+
   function handleRefreshAppClick() {
     if (!applyWaitingShellServiceWorkerUpdate()) {
       return;
@@ -3575,6 +3597,28 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     return () => document.removeEventListener('pointerdown', handleDocumentTouchPointerDown, true);
   }, []);
 
+  useEffect(() => {
+    const wasPhoneInspectorOpen = previousPhoneInspectorOpenRef.current;
+    previousPhoneInspectorOpenRef.current = isPhoneInspectorOpen;
+
+    if (mobileShellLayout.shellMode !== 'phone' || wasPhoneInspectorOpen === isPhoneInspectorOpen) {
+      return;
+    }
+
+    const scrollTarget = isPhoneInspectorOpen ? inspectorTabListRef.current : topbarRef.current;
+    const scrollIntoView = scrollTarget?.scrollIntoView;
+
+    if (typeof scrollIntoView !== 'function') {
+      return;
+    }
+
+    scrollIntoView.call(scrollTarget, {
+      behavior: 'smooth',
+      block: 'start',
+      inline: 'nearest',
+    });
+  }, [isPhoneInspectorOpen, mobileShellLayout.shellMode]);
+
   return (
     <main
       className={`app-shell app-shell-${mobileShellLayout.shellMode}`}
@@ -3588,7 +3632,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
       data-standalone-mode={isStandaloneLaunch}
       style={appShellStyle}
     >
-      <header className="topbar">
+      <header ref={topbarRef} className="topbar">
         <div className="topbar-brand">
           <h1>meme-elf</h1>
         </div>
@@ -3867,6 +3911,15 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
                 onPreviewPanEnd={() => {
                   previewPanSessionRef.current = null;
                 }}
+                onPreviewPinchChange={({ pan, zoomFactor }) => {
+                  previewPanSessionRef.current = null;
+                  setPreviewPan(pan);
+                  setAppState((currentState) => ({
+                    ...currentState,
+                    previewZoomFactor: clampPreviewZoom(zoomFactor),
+                  }));
+                }}
+                onPreviewToggleFitActual={togglePreviewFitActualSize}
                 onRetouchBrushSample={handleRetouchBrushSample}
                 onSelectionDraftChange={handleSelectionDraftChange}
                 onSelectionDraftCommit={commitSelectionDraft}
@@ -3919,6 +3972,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
             activeTab={activeInspectorTab}
             activeSceneBoundsMode={appState.activeSceneBoundsMode}
             activeLayerId={appState.activeLayerId}
+            inspectorTabListRef={inspectorTabListRef}
             shellMode={mobileShellLayout.shellMode}
             isImportModalOpen={preInsertDraft !== null}
             layers={appState.layers}

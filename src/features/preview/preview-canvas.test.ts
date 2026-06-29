@@ -567,6 +567,9 @@ describe('preview-canvas helpers', () => {
     );
 
     const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const viewportContent = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    expect(viewportContent.style.touchAction).toBe('none');
+    expect(viewportContent.style.overscrollBehavior).toBe('contain');
     expect(surface.style.touchAction).toBe('none');
     expect(surface.style.overscrollBehavior).toBe('contain');
   });
@@ -845,6 +848,197 @@ describe('preview-canvas helpers', () => {
     expect(onDraftStrokeChange).toHaveBeenCalled();
     expect(onDraftStrokeCommit).toHaveBeenCalledTimes(1);
     expect(onPreviewPanStart).not.toHaveBeenCalled();
+  });
+
+  it('cancels pending touch text editing when a second finger starts a pinch gesture', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onInlineTextEditStart = vi.fn();
+    const onPreviewPinchChange = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'top',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'text',
+            id: 'top',
+            name: 'Top text',
+            opacity: 1,
+            text: 'TOP',
+            fontFamily: 'Impact',
+            fontSize: 90,
+            fillStyle: '#ffffff',
+            strokeStyle: '#000000',
+            outlineWidth: 5,
+            textAlign: 'center',
+            verticalAlign: 'top',
+            effect: 'outline',
+            allCaps: true,
+            bold: false,
+            italic: false,
+            box: { x: 24, y: 0, width: 752, height: 110, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'top',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onInlineTextEditStart,
+        onLayerChange: vi.fn(),
+        onPreviewPinchChange,
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
+    fireEvent.pointerDown(transformBox, {
+      button: 0,
+      clientX: 120,
+      clientY: 60,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.touchStart(transformBox, {
+      touches: [
+        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
+      ],
+      changedTouches: [
+        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
+      ],
+    });
+    fireEvent.touchStart(surface, {
+      touches: [
+        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
+        { clientX: 260, clientY: 220, identifier: 2, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 260, clientY: 220, identifier: 2, target: surface },
+      ],
+    });
+    fireEvent.touchMove(surface, {
+      touches: [
+        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
+        { clientX: 320, clientY: 220, identifier: 2, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 320, clientY: 220, identifier: 2, target: surface },
+      ],
+    });
+    fireEvent.pointerUp(surface, {
+      clientX: 122,
+      clientY: 62,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onPreviewPinchChange).toHaveBeenCalled();
+    expect(onInlineTextEditStart).not.toHaveBeenCalled();
+  });
+
+  it('fires the preview double-tap callback only for empty-canvas touch taps', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onPreviewToggleFitActual = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: null,
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        onPreviewToggleFitActual,
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    fireEvent.touchStart(surface, {
+      touches: [
+        { clientX: 300, clientY: 200, identifier: 1, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 300, clientY: 200, identifier: 1, target: surface },
+      ],
+    });
+    fireEvent.touchEnd(surface, {
+      touches: [],
+      changedTouches: [
+        { clientX: 300, clientY: 200, identifier: 1, target: surface },
+      ],
+    });
+    fireEvent.touchStart(surface, {
+      touches: [
+        { clientX: 302, clientY: 202, identifier: 2, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 302, clientY: 202, identifier: 2, target: surface },
+      ],
+    });
+    fireEvent.touchEnd(surface, {
+      touches: [],
+      changedTouches: [
+        { clientX: 302, clientY: 202, identifier: 2, target: surface },
+      ],
+    });
+
+    expect(onPreviewToggleFitActual).toHaveBeenCalledTimes(1);
   });
 
 });

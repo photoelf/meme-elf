@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode, type RefObject } from 'react';
 
 import { isDrawLayer, isImageLayer, isTextLayer } from '../../app/types';
 import type {
@@ -39,6 +39,7 @@ type ControlPanelProps = {
   activeTab: 'layers' | 'saves' | 'templates' | 'crop' | 'adjustments' | 'draw' | 'effects' | 'watermark' | 'experimental';
   activeSceneBoundsMode: 'idle' | 'crop' | 'expand';
   activeLayerId: LayerId | null;
+  inspectorTabListRef: RefObject<HTMLDivElement | null>;
   shellMode: 'desktop' | 'small-tablet' | 'phone';
   isImportModalOpen: boolean;
   layers: EditorLayer[];
@@ -158,6 +159,7 @@ export function ControlPanel({
   activeTab,
   activeSceneBoundsMode,
   activeLayerId,
+  inspectorTabListRef,
   shellMode,
   isImportModalOpen,
   layers,
@@ -281,7 +283,12 @@ export function ControlPanel({
       }}
     >
       <div className="tool-rail inspector-rail">
-        <div className="tool-rail-tabs" role="tablist" aria-label="Control sections">
+        <div
+          ref={inspectorTabListRef}
+          className="tool-rail-tabs"
+          role="tablist"
+          aria-label="Control sections"
+        >
           <InspectorTabButton icon={<LayersIcon />} isActive={activeTab === 'layers'} label="Layers" onClick={() => {
             clearRetouchMode();
             onActiveTabChange('layers');

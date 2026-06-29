@@ -96,7 +96,7 @@ Current status:
 Current posture:
 
 - the roadmap points here as the next likely continuation area
-- the latest shipped polish removed mobile clipboard-import affordances from the phone shell, kept mobile debug status details localhost-only, restored one-line text rows in the `Layers` inspector, and closed the Telegram bottom-gap regression
+- the latest shipped polish removed mobile clipboard-import affordances from the phone shell, kept mobile debug status details localhost-only, restored one-line text rows in the `Layers` inspector, closed the Telegram bottom-gap regression, and taught the phone `Tools` toggle to scroll to the inspector tabs on open and back to the top bar on close
 - there is not yet a separate fully approved milestone package for the next mobile sprint
 
 ## Where to verify exact state
