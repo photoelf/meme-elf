@@ -4,6 +4,16 @@
 
 Close the last mobile beta interaction gap before wider release by adding direct touch manipulation for layers in the main editor and restoring crop inside the `Prepare image` modal on phones.
 
+## Outcome
+
+This design is now implemented locally.
+
+- active text and image layers support one-finger move plus two-finger scale / rotate upgrade
+- active layer touch sessions keep ownership and no longer trigger preview pinch zoom at the same time
+- `Prepare image` exposes touch crop on phone with one-finger create, move, and resize
+- crop-handle drags suppress modal scroll so vertical handle movement does not break the gesture
+- a top-bar `New canvas` reset action was added during the same beta-closeout pass to provide a clean-session escape hatch and avoid stale recovery resurrection after fresh imports
+
 ## Scope
 
 This design covers three concrete behaviors in the agreed execution order:

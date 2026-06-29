@@ -9,6 +9,7 @@ export type MobileShellLayout = {
 };
 
 export type ToolbarActionId =
+  | 'new-canvas'
   | 'paste'
   | 'upload'
   | 'url'
@@ -58,7 +59,7 @@ export function resolveTopbarActionLayout(
 ): TopbarActionLayout {
   if (shellMode === 'phone') {
     return {
-      overflow: ['open-scene', 'save-scene', 'theme'],
+      overflow: ['new-canvas', 'open-scene', 'save-scene', 'theme'],
       primary: ['upload', 'url'],
       sticky: ['copy', 'download', 'tools'],
     };
@@ -67,14 +68,14 @@ export function resolveTopbarActionLayout(
   if (shellMode === 'small-tablet') {
     return {
       overflow: [],
-      primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
+      primary: ['new-canvas', 'paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
       sticky: [],
     };
   }
 
   return {
     overflow: [],
-    primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
+    primary: ['new-canvas', 'paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
     sticky: [],
   };
 }

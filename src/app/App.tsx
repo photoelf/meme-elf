@@ -1074,12 +1074,46 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     return latestExplicitClipboardRequestTokenRef.current === requestToken;
   }
 
+  function clearMobileRecoverySnapshot() {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(MOBILE_RECOVERY_STORAGE_KEY);
+    }
+
+    setMobileRecoverySnapshot(null);
+  }
+
+  function resetEditorSession(nextStatusMessage: string) {
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    historyTransactionRef.current = null;
+    syncHistoryState();
+    pendingAutoFitPreviewRef.current = true;
+    nextLayerSequenceRef.current = 3;
+    nextImageLayerSequenceRef.current = 1;
+    nextDrawLayerSequenceRef.current = 1;
+    saveSceneFileHandleRef.current = null;
+    clearMobileRecoverySnapshot();
+    setAppState((currentState) => ({
+      ...createDefaultAppState(),
+      preferredAdvancedImportPlacementMode: currentState.preferredAdvancedImportPlacementMode,
+      previewZoomFactor: resolveFitToWindowZoomFactor(
+        DEFAULT_CANVAS_SIZE,
+        previewFrameRef.current,
+      ),
+    }));
+    setActiveInspectorTab('layers');
+    setIsPhoneInspectorOpen(false);
+    setPreviewPan({ x: 0, y: 0 });
+    setStatusMessage(nextStatusMessage);
+  }
+
   function applyLoadedImage(image: HTMLImageElement, nextStatus: string) {
     pendingAutoFitPreviewRef.current = true;
     const loadedImageGuardrails = resolveLoadedImageGuardrails({
       sourceSize: getImageSourceSize(image, appStateRef.current.canvasSize),
       viewportWidth,
     });
+    clearMobileRecoverySnapshot();
 
     applyAppStateChange((currentState) => {
       const canvasSize = loadedImageGuardrails.canvasSize;
@@ -2937,6 +2971,7 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
     nextImageLayerSequenceRef.current = nextState.layers.filter(isImageLayer).length + 1;
     nextDrawLayerSequenceRef.current = nextState.layers.filter(isDrawLayer).length + 1;
     saveSceneFileHandleRef.current = options.fileHandle;
+    clearMobileRecoverySnapshot();
     setAppState({
       ...nextState,
       previewZoomFactor: fitZoomFactor,
@@ -3392,6 +3427,18 @@ export function App({ routeState = getAppRouteState() }: AppProps) {
             onClick={() => {
               dismissActiveTextFocus();
               handlePasteClick();
+            }}
+          />
+        );
+      case 'new-canvas':
+        return (
+          <ToolbarIconButton
+            key={actionId}
+            label="New canvas"
+            icon={<NewCanvasIcon />}
+            onClick={() => {
+              dismissActiveTextFocus();
+              resetEditorSession('Started a new canvas.');
             }}
           />
         );
@@ -4653,6 +4700,22 @@ function CloseIcon() {
   );
 }
 
+function NewCanvasIcon() {
+  return (
+    <IconBase>
+      <path
+        d="M4.8 5.5h7.4l3 3V14.5a1.5 1.5 0 0 1-1.5 1.5H4.8A1.5 1.5 0 0 1 3.3 14.5V7A1.5 1.5 0 0 1 4.8 5.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8 10.5h4M10 8.5v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M12.2 5.5v3h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </IconBase>
+  );
+}
+
 function resolveOverflowActionLabel(
   actionId: ToolbarActionId,
   theme: 'light' | 'dark',
@@ -4667,6 +4730,10 @@ function resolveOverflowActionLabel(
 
   if (actionId === 'save-scene') {
     return 'Save .melf';
+  }
+
+  if (actionId === 'new-canvas') {
+    return 'New canvas';
   }
 
   return actionId;

@@ -97,6 +97,9 @@ Current posture:
 
 - the roadmap points here as the next likely continuation area
 - the latest shipped polish removed mobile clipboard-import affordances from the phone shell, kept mobile debug status details localhost-only, restored one-line text rows in the `Layers` inspector, closed the Telegram bottom-gap regression, and taught the phone `Tools` toggle to scroll to the inspector tabs on open and back to the top bar on close
+- direct mobile layer manipulation is now shipped: one finger moves the active layer, a second finger upgrades that session into layer scale plus rotation, and that active layer transform no longer falls through into preview pinch zoom
+- `Prepare image` crop is now touch-safe on phone with one-finger create, move, and resize interactions plus scroll suppression during handle drags
+- the editor now has a top-bar `New canvas` reset action, and loading a new base image, reopening a scene, or starting a new canvas clears transient mobile recovery snapshots so stale scene state cannot resurrect unexpectedly
 - there is not yet a separate fully approved milestone package for the next mobile sprint
 
 ## Where to verify exact state

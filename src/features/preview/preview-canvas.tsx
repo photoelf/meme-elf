@@ -143,6 +143,21 @@ type PreviewPinchInteraction = {
   startDistance: number;
   startZoomFactor: number;
 } | null;
+type PointerToken = number | 'touch-primary' | 'touch-secondary';
+type TouchLayerTransformSession = {
+  layerId: LayerId;
+  primaryPointerId: PointerToken;
+  secondaryPointerId: PointerToken | null;
+  startBox: EditorLayer['box'];
+  primaryStartCanvasPoint: Point;
+  primaryCurrentClientPoint: { clientX: number; clientY: number };
+  secondaryCurrentClientPoint: { clientX: number; clientY: number } | null;
+  startMidpoint: Point | null;
+  startDistance: number | null;
+  startAngle: number | null;
+  moved: boolean;
+  textEditableOnTap: boolean;
+} | null;
 type EmptyTouchTapRecord = {
   clientX: number;
   clientY: number;
@@ -241,6 +256,7 @@ export function PreviewCanvas({
   const drawInteractionRef = useRef(false);
   const panInteractionRef = useRef<PreviewPanInteraction>(null);
   const pinchInteractionRef = useRef<PreviewPinchInteraction>(null);
+  const touchLayerTransformSessionRef = useRef<TouchLayerTransformSession>(null);
   const activePreviewTouchPointsRef = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
   const pendingTouchTextEditRef = useRef<PendingTouchTextEditInteraction>(null);
   const lastEmptyTouchTapRef = useRef<EmptyTouchTapRecord>(null);
@@ -337,7 +353,12 @@ export function PreviewCanvas({
   }
 
   function canStartPreviewPinch() {
-    return !isSceneCropMode && retouchMode === 'idle' && !interactionRef.current;
+    return (
+      !isSceneCropMode &&
+      retouchMode === 'idle' &&
+      !interactionRef.current &&
+      !touchLayerTransformSessionRef.current
+    );
   }
 
   function startPreviewPinch() {
@@ -391,6 +412,351 @@ export function PreviewCanvas({
       pointerType: 'touch',
     });
     return true;
+  }
+
+  function clearTouchLayerTransformSession({
+    startInlineEdit = false,
+  }: {
+    startInlineEdit?: boolean;
+  } = {}) {
+    const session = touchLayerTransformSessionRef.current;
+
+    if (session) {
+      onDocumentInteractionEnd?.();
+    }
+
+    touchLayerTransformSessionRef.current = null;
+    setIsInteracting(false);
+    updateMobileInteraction('idle', {
+      activeTargetId: activeLayerId,
+      pointerType: 'touch',
+    });
+
+    if (startInlineEdit && session?.textEditableOnTap && !session.moved) {
+      clearActiveLayerOnTextBlurRef.current = false;
+      onActiveLayerChange(session.layerId);
+      onInlineTextEditStart?.();
+      setEditingLayerId(session.layerId);
+      updateMobileInteraction('focus-layer', {
+        activeTargetId: session.layerId,
+        pointerType: 'touch',
+      });
+    }
+  }
+
+  function upgradeTouchLayerTransformSession(pointerId: number | undefined, clientX: number, clientY: number) {
+    const session = touchLayerTransformSessionRef.current;
+
+    if (!session || session.secondaryPointerId !== null) {
+      return false;
+    }
+    const nextPointerId: PointerToken = typeof pointerId === 'number' ? pointerId : 'touch-secondary';
+    const nextSecondaryClientPoint =
+      isFiniteClientPoint(clientX, clientY)
+        ? { clientX, clientY }
+        : session.primaryCurrentClientPoint;
+
+    const primaryCanvasPoint =
+      shellRef.current
+        ? getCanvasPoint(
+            shellRef.current,
+            width,
+            height,
+            session.primaryCurrentClientPoint.clientX,
+            session.primaryCurrentClientPoint.clientY,
+          )
+        : session.primaryStartCanvasPoint;
+    const secondaryCanvasPoint =
+      shellRef.current
+        ? getCanvasPoint(
+            shellRef.current,
+            width,
+            height,
+            nextSecondaryClientPoint.clientX,
+            nextSecondaryClientPoint.clientY,
+          )
+        : {
+            x:
+              session.primaryStartCanvasPoint.x +
+              (nextSecondaryClientPoint.clientX - session.primaryCurrentClientPoint.clientX),
+            y:
+              session.primaryStartCanvasPoint.y +
+              (nextSecondaryClientPoint.clientY - session.primaryCurrentClientPoint.clientY),
+          };
+
+    if (
+      !primaryCanvasPoint ||
+      !secondaryCanvasPoint ||
+      !Number.isFinite(primaryCanvasPoint.x) ||
+      !Number.isFinite(primaryCanvasPoint.y) ||
+      !Number.isFinite(secondaryCanvasPoint.x) ||
+      !Number.isFinite(secondaryCanvasPoint.y)
+    ) {
+      session.secondaryPointerId = nextPointerId;
+      session.secondaryCurrentClientPoint = nextSecondaryClientPoint;
+      session.startMidpoint = getBoxCenter(session.startBox);
+      session.startDistance = Math.max(1, Math.hypot(session.startBox.width, session.startBox.height));
+      session.startAngle = session.startBox.rotation;
+      session.moved = true;
+      pendingTouchTextEditRef.current = null;
+      interactionRef.current = null;
+      setEditingLayerId(null);
+      setIsInteracting(true);
+      updateMobileInteraction('transform', {
+        activeTargetId: session.layerId,
+        pointerType: 'touch',
+      });
+      onDocumentInteractionStart?.();
+      return true;
+    }
+
+    const midpoint = {
+      x: (primaryCanvasPoint.x + secondaryCanvasPoint.x) / 2,
+      y: (primaryCanvasPoint.y + secondaryCanvasPoint.y) / 2,
+    };
+    const distance = Math.hypot(
+      secondaryCanvasPoint.x - primaryCanvasPoint.x,
+      secondaryCanvasPoint.y - primaryCanvasPoint.y,
+    );
+
+    if (!Number.isFinite(distance) || distance <= 0) {
+      session.secondaryPointerId = nextPointerId;
+      session.secondaryCurrentClientPoint = nextSecondaryClientPoint;
+      session.startMidpoint = getBoxCenter(session.startBox);
+      session.startDistance = Math.max(1, Math.hypot(session.startBox.width, session.startBox.height));
+      session.startAngle = session.startBox.rotation;
+      session.moved = true;
+      pendingTouchTextEditRef.current = null;
+      interactionRef.current = null;
+      setEditingLayerId(null);
+      setIsInteracting(true);
+      updateMobileInteraction('transform', {
+        activeTargetId: session.layerId,
+        pointerType: 'touch',
+      });
+      onDocumentInteractionStart?.();
+      return true;
+    }
+
+    session.secondaryPointerId = nextPointerId;
+    session.secondaryCurrentClientPoint = nextSecondaryClientPoint;
+    session.startMidpoint = midpoint;
+    session.startDistance = distance;
+    session.startAngle = Math.atan2(
+      secondaryCanvasPoint.y - primaryCanvasPoint.y,
+      secondaryCanvasPoint.x - primaryCanvasPoint.x,
+    );
+    session.moved = true;
+    pendingTouchTextEditRef.current = null;
+    interactionRef.current = null;
+    setEditingLayerId(null);
+    setIsInteracting(true);
+    updateMobileInteraction('transform', {
+      activeTargetId: session.layerId,
+      pointerType: 'touch',
+    });
+    onDocumentInteractionStart?.();
+    return true;
+  }
+
+  function resolveTouchLayerTransformPointerTarget(
+    session: NonNullable<TouchLayerTransformSession>,
+    event: {
+      pointerId?: number;
+      clientX: number;
+      clientY: number;
+    },
+  ): 'primary' | 'secondary' | null {
+    if (typeof event.pointerId === 'number') {
+      if (event.pointerId === session.primaryPointerId) {
+        return 'primary';
+      }
+
+      if (event.pointerId === session.secondaryPointerId) {
+        return 'secondary';
+      }
+    }
+
+    if (session.secondaryPointerId !== null && session.secondaryCurrentClientPoint) {
+      const distanceToPrimary = Math.hypot(
+        event.clientX - session.primaryCurrentClientPoint.clientX,
+        event.clientY - session.primaryCurrentClientPoint.clientY,
+      );
+      const distanceToSecondary = Math.hypot(
+        event.clientX - session.secondaryCurrentClientPoint.clientX,
+        event.clientY - session.secondaryCurrentClientPoint.clientY,
+      );
+
+      return distanceToPrimary <= distanceToSecondary ? 'primary' : 'secondary';
+    }
+
+    return 'primary';
+  }
+
+  function handleTouchLayerTransformPointerMove(event: {
+    pointerId?: number;
+    clientX: number;
+    clientY: number;
+  }) {
+    const session = touchLayerTransformSessionRef.current;
+
+    if (!session || !shellRef.current) {
+      return;
+    }
+
+    const pointerTarget = resolveTouchLayerTransformPointerTarget(session, event);
+
+    if (pointerTarget === 'primary') {
+      if (typeof event.pointerId === 'number' && typeof session.primaryPointerId !== 'number') {
+        session.primaryPointerId = event.pointerId;
+      }
+      session.primaryCurrentClientPoint = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+    } else if (pointerTarget === 'secondary') {
+      if (typeof event.pointerId === 'number' && typeof session.secondaryPointerId !== 'number') {
+        session.secondaryPointerId = event.pointerId;
+      }
+      session.secondaryCurrentClientPoint = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+    } else {
+      return;
+    }
+
+    const layer = layers.find((candidateLayer) => candidateLayer.id === session.layerId);
+
+    if (!layer) {
+      clearTouchLayerTransformSession();
+      return;
+    }
+
+    const primaryCanvasPoint = getCanvasPoint(
+      shellRef.current,
+      width,
+      height,
+      session.primaryCurrentClientPoint.clientX,
+      session.primaryCurrentClientPoint.clientY,
+    );
+
+    if (!primaryCanvasPoint) {
+      return;
+    }
+
+    if (session.secondaryPointerId === null || !session.secondaryCurrentClientPoint) {
+      const moveDelta = {
+        x: primaryCanvasPoint.x - session.primaryStartCanvasPoint.x,
+        y: primaryCanvasPoint.y - session.primaryStartCanvasPoint.y,
+      };
+
+      if (
+        !session.moved &&
+        (Math.abs(moveDelta.x) >= TOUCH_TEXT_EDIT_TAP_SLOP ||
+          Math.abs(moveDelta.y) >= TOUCH_TEXT_EDIT_TAP_SLOP)
+      ) {
+        session.moved = true;
+      }
+
+      if (!session.moved) {
+        return;
+      }
+
+      onDocumentInteractionStart?.();
+      setIsInteracting(true);
+      updateMobileInteraction('transform', {
+        activeTargetId: session.layerId,
+        pointerType: 'touch',
+      });
+      onLayerChange(session.layerId, {
+        box: {
+          ...session.startBox,
+          x: session.startBox.x + moveDelta.x,
+          y: session.startBox.y + moveDelta.y,
+        },
+      }, 'defer');
+      return;
+    }
+
+    const secondaryCanvasPoint = getCanvasPoint(
+      shellRef.current,
+      width,
+      height,
+      session.secondaryCurrentClientPoint.clientX,
+      session.secondaryCurrentClientPoint.clientY,
+    );
+
+    if (!secondaryCanvasPoint || !session.startMidpoint || !session.startDistance || session.startAngle === null) {
+      return;
+    }
+
+    const midpoint = {
+      x: (primaryCanvasPoint.x + secondaryCanvasPoint.x) / 2,
+      y: (primaryCanvasPoint.y + secondaryCanvasPoint.y) / 2,
+    };
+    const currentDistance = Math.hypot(
+      secondaryCanvasPoint.x - primaryCanvasPoint.x,
+      secondaryCanvasPoint.y - primaryCanvasPoint.y,
+    );
+
+    if (!Number.isFinite(currentDistance) || currentDistance <= 0) {
+      return;
+    }
+
+    const scale = currentDistance / session.startDistance;
+    const minWidth = isImageLayer(layer) ? 1 : MIN_BOX_WIDTH;
+    const minHeight = isImageLayer(layer) ? 1 : MIN_BOX_HEIGHT;
+    const nextWidth = Math.max(minWidth, session.startBox.width * scale);
+    const nextHeight = Math.max(minHeight, session.startBox.height * scale);
+    const startCenter = getBoxCenter(session.startBox);
+    const center = {
+      x: startCenter.x + (midpoint.x - session.startMidpoint.x),
+      y: startCenter.y + (midpoint.y - session.startMidpoint.y),
+    };
+    const angle = Math.atan2(
+      secondaryCanvasPoint.y - primaryCanvasPoint.y,
+      secondaryCanvasPoint.x - primaryCanvasPoint.x,
+    );
+
+    onLayerChange(session.layerId, {
+      box: {
+        ...session.startBox,
+        x: center.x - nextWidth / 2,
+        y: center.y - nextHeight / 2,
+        width: nextWidth,
+        height: nextHeight,
+        rotation: session.startBox.rotation + (angle - session.startAngle),
+      },
+    }, 'defer');
+  }
+
+  function handleTouchLayerTransformPointerEnd(event: { pointerId?: number; clientX?: number; clientY?: number }) {
+    const session = touchLayerTransformSessionRef.current;
+
+    if (!session) {
+      return;
+    }
+
+    const pointerTarget = resolveTouchLayerTransformPointerTarget(session, {
+      pointerId: event.pointerId,
+      clientX: event.clientX ?? session.primaryCurrentClientPoint.clientX,
+      clientY: event.clientY ?? session.primaryCurrentClientPoint.clientY,
+    });
+
+    if (!pointerTarget) {
+      return;
+    }
+
+    const shouldStartInlineEdit =
+      session.secondaryPointerId === null &&
+      pointerTarget === 'primary' &&
+      session.textEditableOnTap &&
+      !session.moved;
+
+    clearTouchLayerTransformSession({
+      startInlineEdit: shouldStartInlineEdit,
+    });
   }
 
   function updatePreviewPinch() {
@@ -490,6 +856,112 @@ export function PreviewCanvas({
       });
     }
 
+    const touchLayerSession = touchLayerTransformSessionRef.current;
+    if (
+      touchLayerSession &&
+      touchLayerSession.secondaryPointerId === null &&
+      activePreviewTouchPointsRef.current.size >= 2
+    ) {
+      const secondaryTouch = [...activePreviewTouchPointsRef.current.entries()].find(
+        ([candidatePointerId]) => candidatePointerId !== touchLayerSession.primaryPointerId,
+      );
+
+      if (secondaryTouch) {
+        const [secondaryPointerId, secondaryPoint] = secondaryTouch;
+        upgradeTouchLayerTransformSession(
+          secondaryPointerId,
+          secondaryPoint.clientX,
+          secondaryPoint.clientY,
+        );
+      }
+    }
+
+    const upgradedTouchLayerSession = touchLayerTransformSessionRef.current;
+    if (
+      upgradedTouchLayerSession &&
+      upgradedTouchLayerSession.secondaryPointerId !== null
+    ) {
+      const layer = layers.find((candidateLayer) => candidateLayer.id === upgradedTouchLayerSession.layerId);
+      const primaryTouch =
+        typeof upgradedTouchLayerSession.primaryPointerId === 'number'
+          ? activePreviewTouchPointsRef.current.get(upgradedTouchLayerSession.primaryPointerId)
+          : upgradedTouchLayerSession.primaryCurrentClientPoint;
+      const secondaryTouch =
+        typeof upgradedTouchLayerSession.secondaryPointerId === 'number'
+          ? activePreviewTouchPointsRef.current.get(upgradedTouchLayerSession.secondaryPointerId)
+          : upgradedTouchLayerSession.secondaryCurrentClientPoint;
+
+      if (
+        layer &&
+        primaryTouch &&
+        secondaryTouch &&
+        shellRef.current &&
+        upgradedTouchLayerSession.startMidpoint &&
+        upgradedTouchLayerSession.startDistance &&
+        upgradedTouchLayerSession.startAngle !== null
+      ) {
+        const primaryCanvasPoint = getCanvasPoint(
+          shellRef.current,
+          width,
+          height,
+          primaryTouch.clientX,
+          primaryTouch.clientY,
+        );
+        const secondaryCanvasPoint = getCanvasPoint(
+          shellRef.current,
+          width,
+          height,
+          secondaryTouch.clientX,
+          secondaryTouch.clientY,
+        );
+
+        if (primaryCanvasPoint && secondaryCanvasPoint) {
+          const midpoint = {
+            x: (primaryCanvasPoint.x + secondaryCanvasPoint.x) / 2,
+            y: (primaryCanvasPoint.y + secondaryCanvasPoint.y) / 2,
+          };
+          const currentDistance = Math.hypot(
+            secondaryCanvasPoint.x - primaryCanvasPoint.x,
+            secondaryCanvasPoint.y - primaryCanvasPoint.y,
+          );
+
+          if (Number.isFinite(currentDistance) && currentDistance > 0) {
+            const scale = currentDistance / upgradedTouchLayerSession.startDistance;
+            const minWidth = isImageLayer(layer) ? 1 : MIN_BOX_WIDTH;
+            const minHeight = isImageLayer(layer) ? 1 : MIN_BOX_HEIGHT;
+            const nextWidth = Math.max(minWidth, upgradedTouchLayerSession.startBox.width * scale);
+            const nextHeight = Math.max(minHeight, upgradedTouchLayerSession.startBox.height * scale);
+            const startCenter = getBoxCenter(upgradedTouchLayerSession.startBox);
+            const center = {
+              x: startCenter.x + (midpoint.x - upgradedTouchLayerSession.startMidpoint.x),
+              y: startCenter.y + (midpoint.y - upgradedTouchLayerSession.startMidpoint.y),
+            };
+            const angle = Math.atan2(
+              secondaryCanvasPoint.y - primaryCanvasPoint.y,
+              secondaryCanvasPoint.x - primaryCanvasPoint.x,
+            );
+
+            upgradedTouchLayerSession.moved = true;
+            onLayerChange(upgradedTouchLayerSession.layerId, {
+              box: {
+                ...upgradedTouchLayerSession.startBox,
+                x: center.x - nextWidth / 2,
+                y: center.y - nextHeight / 2,
+                width: nextWidth,
+                height: nextHeight,
+                rotation: upgradedTouchLayerSession.startBox.rotation + (angle - upgradedTouchLayerSession.startAngle),
+              },
+            }, 'defer');
+          }
+        }
+      }
+    } else if (
+      upgradedTouchLayerSession &&
+      event.pointerId === upgradedTouchLayerSession.primaryPointerId
+    ) {
+      handleTouchLayerTransformPointerMove(event);
+    }
+
     const panInteraction = panInteractionRef.current;
 
     if (panInteraction && panInteraction.pointerId === pointerId) {
@@ -503,6 +975,10 @@ export function PreviewCanvas({
     }
 
     if (!isTrackedPreviewTouch && !isTrackedPanTouch) {
+      return;
+    }
+
+    if (touchLayerTransformSessionRef.current?.secondaryPointerId !== null) {
       return;
     }
 
@@ -540,10 +1016,10 @@ export function PreviewCanvas({
     panInteractionRef.current = panInteraction?.pointerId === pointerId ? null : panInteractionRef.current;
   }
 
-  function syncPreviewTouches(touches: TouchList) {
+  function syncPreviewTouches(touches: Pick<ReactTouchEvent<HTMLElement>['touches'], 'length' | 'item'> | ArrayLike<Touch>) {
     const nextTouches = new Map<number, { clientX: number; clientY: number }>();
 
-    for (const touch of Array.from(touches)) {
+    for (const touch of Array.from(touches as ArrayLike<Touch>)) {
       nextTouches.set(touch.identifier, {
         clientX: touch.clientX,
         clientY: touch.clientY,
@@ -1002,6 +1478,28 @@ export function PreviewCanvas({
   }, [activeLayerId, onPreviewPanEnd, onPreviewPinchChange, onPreviewToggleFitActual, previewPan.x, previewPan.y, previewZoomFactor, retouchMode, isSceneCropMode, width, height]);
 
   useEffect(() => {
+    window.addEventListener('pointermove', handleTouchLayerTransformPointerMove);
+    window.addEventListener('pointerup', handleTouchLayerTransformPointerEnd);
+    window.addEventListener('pointercancel', handleTouchLayerTransformPointerEnd);
+
+    return () => {
+      window.removeEventListener('pointermove', handleTouchLayerTransformPointerMove);
+      window.removeEventListener('pointerup', handleTouchLayerTransformPointerEnd);
+      window.removeEventListener('pointercancel', handleTouchLayerTransformPointerEnd);
+    };
+  }, [
+    activeLayerId,
+    height,
+    layers,
+    onActiveLayerChange,
+    onDocumentInteractionEnd,
+    onDocumentInteractionStart,
+    onInlineTextEditStart,
+    onLayerChange,
+    width,
+  ]);
+
+  useEffect(() => {
     function handlePendingTouchTextEditMove(event: PointerEvent) {
       const pendingTouchEdit = pendingTouchTextEditRef.current;
 
@@ -1294,12 +1792,26 @@ export function PreviewCanvas({
           }}
           onPointerEnter={() => setIsPreviewSurfaceHovered(true)}
           onPointerLeave={() => setIsPreviewSurfaceHovered(false)}
-          onPointerMove={(event) => handleTrackedTouchGesturePointerMove(event)}
-          onPointerUp={(event) => handleTrackedTouchGesturePointerEnd(event)}
-          onPointerCancel={(event) => handleTrackedTouchGesturePointerEnd(event)}
+          onPointerMove={(event) => {
+            handleTouchLayerTransformPointerMove(event);
+            handleTrackedTouchGesturePointerMove(event);
+          }}
+          onPointerUp={(event) => {
+            handleTouchLayerTransformPointerEnd(event);
+            handleTrackedTouchGesturePointerEnd(event);
+          }}
+          onPointerCancel={(event) => {
+            handleTouchLayerTransformPointerEnd(event);
+            handleTrackedTouchGesturePointerEnd(event);
+          }}
           onPointerDown={(event) => {
             const pointerType = resolveEventPointerType(event);
             if (pointerType === 'touch') {
+              if (upgradeTouchLayerTransformSession(event.pointerId, event.clientX, event.clientY)) {
+                event.preventDefault();
+                return;
+              }
+
               activePreviewTouchPointsRef.current.set(event.pointerId, {
                 clientX: event.clientX,
                 clientY: event.clientY,
@@ -1639,6 +2151,17 @@ export function PreviewCanvas({
                     }
 
                     if (pointerType === 'touch') {
+                      if (
+                        layer.id === activeLayerId &&
+                        retouchMode === 'idle' &&
+                        !isSceneCropMode &&
+                        upgradeTouchLayerTransformSession(event.pointerId, event.clientX, event.clientY)
+                      ) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                      }
+
                       activePreviewTouchPointsRef.current.set(event.pointerId, {
                         clientX: event.clientX,
                         clientY: event.clientY,
@@ -1663,18 +2186,35 @@ export function PreviewCanvas({
                       return;
                     }
 
-                    if (
-                      pointerType === 'touch' &&
-                      isTextLayer(layer) &&
-                      layer.id === activeLayerId
-                    ) {
-                      pendingTouchTextEditRef.current = {
+                    if (pointerType === 'touch' && layer.id === activeLayerId) {
+                      const fallbackStartPoint = getBoxCenter(layer.box);
+                      const startPoint =
+                        point && Number.isFinite(point.x) && Number.isFinite(point.y)
+                          ? point
+                          : fallbackStartPoint;
+                      const startClientPoint =
+                        isFiniteClientPoint(event.clientX, event.clientY)
+                          ? { clientX: event.clientX, clientY: event.clientY }
+                          : getClientPointFromCanvasPoint(
+                              shellRef.current,
+                              width,
+                              height,
+                              startPoint,
+                            ) ?? { clientX: 0, clientY: 0 };
+
+                      touchLayerTransformSessionRef.current = {
                         layerId: layer.id,
-                        pointerId: event.pointerId,
-                        startClientX: event.clientX,
-                        startClientY: event.clientY,
-                        startPoint: point,
+                        primaryPointerId: typeof event.pointerId === 'number' ? event.pointerId : 'touch-primary',
+                        secondaryPointerId: null,
                         startBox: { ...layer.box },
+                        primaryStartCanvasPoint: startPoint,
+                        primaryCurrentClientPoint: startClientPoint,
+                        secondaryCurrentClientPoint: null,
+                        startMidpoint: null,
+                        startDistance: null,
+                        startAngle: null,
+                        moved: false,
+                        textEditableOnTap: isTextLayer(layer),
                       };
                       updateMobileInteraction('focus-layer', {
                         activeTargetId: layer.id,
@@ -1970,6 +2510,32 @@ function rotatePoint(point: Point, angle: number) {
   return {
     x: point.x * cos - point.y * sin,
     y: point.x * sin + point.y * cos,
+  };
+}
+
+function isFiniteClientPoint(clientX: number, clientY: number) {
+  return Number.isFinite(clientX) && Number.isFinite(clientY);
+}
+
+function getClientPointFromCanvasPoint(
+  shell: HTMLDivElement | null,
+  width: number,
+  height: number,
+  point: Point,
+) {
+  if (!shell) {
+    return null;
+  }
+
+  const rect = shell.getBoundingClientRect();
+
+  if (rect.width === 0 || rect.height === 0) {
+    return null;
+  }
+
+  return {
+    clientX: rect.left + (point.x / width) * rect.width,
+    clientY: rect.top + (point.y / height) * rect.height,
   };
 }
 

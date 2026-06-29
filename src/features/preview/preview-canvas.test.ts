@@ -9,6 +9,29 @@ import {
   PreviewCanvas,
 } from './preview-canvas';
 
+function dispatchPointerEvent(
+  target: EventTarget,
+  type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+  init: {
+    button?: number;
+    clientX?: number;
+    clientY?: number;
+    pointerId?: number;
+    pointerType?: string;
+  },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+
+  for (const [key, value] of Object.entries(init)) {
+    Object.defineProperty(event, key, {
+      configurable: true,
+      value,
+    });
+  }
+
+  fireEvent(target, event);
+}
+
 describe('preview-canvas helpers', () => {
   it('maps scaled preview pointer coordinates back into canvas space', () => {
     const shell = document.createElement('div');
@@ -850,7 +873,7 @@ describe('preview-canvas helpers', () => {
     expect(onPreviewPanStart).not.toHaveBeenCalled();
   });
 
-  it('cancels pending touch text editing when a second finger starts a pinch gesture', () => {
+  it('does not open inline text editing when a second finger joins the active layer touch gesture', () => {
     const context = {
       clearRect: vi.fn(),
       drawImage: vi.fn(),
@@ -925,48 +948,260 @@ describe('preview-canvas helpers', () => {
     });
 
     const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
-    fireEvent.pointerDown(transformBox, {
+    dispatchPointerEvent(transformBox, 'pointerdown', {
       button: 0,
       clientX: 120,
       clientY: 60,
       pointerId: 1,
       pointerType: 'touch',
     });
-    fireEvent.touchStart(transformBox, {
-      touches: [
-        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
-      ],
-      changedTouches: [
-        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
-      ],
+    dispatchPointerEvent(transformBox, 'pointerdown', {
+      button: 0,
+      clientX: 260,
+      clientY: 220,
+      pointerId: 2,
+      pointerType: 'touch',
     });
-    fireEvent.touchStart(surface, {
-      touches: [
-        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
-        { clientX: 260, clientY: 220, identifier: 2, target: surface },
-      ],
-      changedTouches: [
-        { clientX: 260, clientY: 220, identifier: 2, target: surface },
-      ],
+    dispatchPointerEvent(transformBox, 'pointermove', {
+      clientX: 320,
+      clientY: 220,
+      pointerId: 2,
+      pointerType: 'touch',
     });
-    fireEvent.touchMove(surface, {
-      touches: [
-        { clientX: 120, clientY: 60, identifier: 1, target: transformBox },
-        { clientX: 320, clientY: 220, identifier: 2, target: surface },
-      ],
-      changedTouches: [
-        { clientX: 320, clientY: 220, identifier: 2, target: surface },
-      ],
-    });
-    fireEvent.pointerUp(surface, {
+    dispatchPointerEvent(surface, 'pointerup', {
       clientX: 122,
       clientY: 62,
       pointerId: 1,
       pointerType: 'touch',
     });
 
-    expect(onPreviewPinchChange).toHaveBeenCalled();
+    expect(onPreviewPinchChange).not.toHaveBeenCalled();
     expect(onInlineTextEditStart).not.toHaveBeenCalled();
+  });
+
+  it('upgrades an active layer touch move into two-finger layer transform instead of preview pinch zoom', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onLayerChange = vi.fn();
+    const onPreviewPinchChange = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'top',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'text',
+            id: 'top',
+            name: 'Top text',
+            opacity: 1,
+            text: 'TOP',
+            fontFamily: 'Impact',
+            fontSize: 90,
+            fillStyle: '#ffffff',
+            strokeStyle: '#000000',
+            outlineWidth: 5,
+            textAlign: 'center',
+            verticalAlign: 'top',
+            effect: 'outline',
+            allCaps: true,
+            bold: false,
+            italic: false,
+            box: { x: 200, y: 100, width: 240, height: 90, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'top',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange,
+        onPreviewPinchChange,
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
+    dispatchPointerEvent(transformBox, 'pointerdown', {
+      button: 0,
+      clientX: 220,
+      clientY: 120,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(surface, 'pointermove', {
+      clientX: 230,
+      clientY: 130,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(transformBox, 'pointerdown', {
+      button: 0,
+      clientX: 420,
+      clientY: 240,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(surface, 'pointermove', {
+      clientX: 260,
+      clientY: 90,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(surface, 'pointermove', {
+      clientX: 500,
+      clientY: 280,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(surface, 'pointerup', {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    dispatchPointerEvent(surface, 'pointerup', {
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    expect(onPreviewPinchChange).not.toHaveBeenCalled();
+    expect(onLayerChange).toHaveBeenCalled();
+    expect(onLayerChange).toHaveBeenLastCalledWith(
+      'top',
+      expect.objectContaining({
+        box: expect.objectContaining({
+          rotation: expect.any(Number),
+          width: expect.any(Number),
+          height: expect.any(Number),
+          x: expect.any(Number),
+          y: expect.any(Number),
+        }),
+      }),
+      'defer',
+    );
+    expect(onLayerChange.mock.calls.at(-1)?.[1]?.box.rotation).not.toBe(0);
+    expect(onLayerChange.mock.calls.at(-1)?.[1]?.box.width).not.toBe(240);
+  });
+
+  it('does not start preview pinch touch events while an active layer touch transform session is in progress', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onPreviewPinchChange = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: 'image-1',
+        height: 450,
+        image: null,
+        isStageHovered: false,
+        layers: [
+          {
+            kind: 'image',
+            id: 'image-1',
+            name: 'Image 1',
+            opacity: 1,
+            box: { x: 200, y: 100, width: 240, height: 160, rotation: 0 },
+          },
+        ],
+        mobileInteraction: {
+          activeGestureOwner: 'idle',
+          activeTargetId: 'image-1',
+          lastPointerType: 'touch',
+        },
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        onPreviewPinchChange,
+        retouchMode: 'idle',
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    const viewportContent = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 450,
+      height: 450,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const transformBox = container.querySelector('.transform-box-active') as HTMLDivElement;
+    dispatchPointerEvent(transformBox, 'pointerdown', {
+      button: 0,
+      clientX: 220,
+      clientY: 120,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.touchStart(viewportContent, {
+      touches: [
+        { clientX: 220, clientY: 120, identifier: 1, target: surface },
+        { clientX: 420, clientY: 240, identifier: 2, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 420, clientY: 240, identifier: 2, target: surface },
+      ],
+    });
+    fireEvent.touchMove(viewportContent, {
+      touches: [
+        { clientX: 240, clientY: 110, identifier: 1, target: surface },
+        { clientX: 470, clientY: 270, identifier: 2, target: surface },
+      ],
+      changedTouches: [
+        { clientX: 470, clientY: 270, identifier: 2, target: surface },
+      ],
+    });
+
+    expect(onPreviewPinchChange).not.toHaveBeenCalled();
   });
 
   it('fires the preview double-tap callback only for empty-canvas touch taps', () => {

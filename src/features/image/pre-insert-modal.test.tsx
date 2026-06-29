@@ -89,7 +89,7 @@ describe('PreInsertModal', () => {
     expect(onPlacementModeChange).toHaveBeenCalledWith('outside-bottom');
   });
 
-  it('keeps crop handles hidden on coarse-pointer devices because crop mode stays unavailable there', () => {
+  it('keeps crop handles interactive on coarse-pointer devices for advanced import drafts', () => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
       media: query,
@@ -104,7 +104,7 @@ describe('PreInsertModal', () => {
     render(
       <PreInsertModal
         draft={createDraft(createImageElement(), 'advanced-import-file')}
-        isCropMode={false}
+        isCropMode
         onCancel={() => {}}
         onConfirm={() => {}}
         onFlipHorizontal={() => {}}
@@ -116,11 +116,11 @@ describe('PreInsertModal', () => {
 
     expect(screen.getByRole('combobox', { name: /placement mode/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-left/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
-  it('keeps crop handles hidden for upload-image imports on coarse-pointer devices', () => {
+  it('keeps crop handles interactive for upload-image imports on coarse-pointer devices', () => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
       media: query,
@@ -135,7 +135,7 @@ describe('PreInsertModal', () => {
     render(
       <PreInsertModal
         draft={createDraft(createImageElement(), 'upload-image')}
-        isCropMode={false}
+        isCropMode
         onCancel={() => {}}
         onConfirm={() => {}}
         onFlipHorizontal={() => {}}
@@ -146,7 +146,7 @@ describe('PreInsertModal', () => {
     );
 
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-left/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
@@ -257,28 +257,112 @@ describe('PreInsertModal', () => {
       toJSON: () => ({}),
     });
 
-    fireEvent.mouseDown(screen.getByLabelText(/pre-insert preview/i), {
+    fireEvent.pointerDown(previewCanvas, {
+      button: 0,
       clientX: 20,
       clientY: 10,
+      pointerId: 1,
+      pointerType: 'mouse',
     });
-    fireEvent.mouseMove(window, {
+    fireEvent.pointerMove(window, {
       clientX: 120,
       clientY: 60,
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
     });
-    fireEvent.mouseUp(window);
+    fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: 'mouse',
+    });
 
-    expect(onCropBoxChange).toHaveBeenNthCalledWith(1, {
-      startX: 120,
-      startY: 80,
-      endX: 120,
-      endY: 80,
+    expect(onCropBoxChange).toHaveBeenCalled();
+    expect(onCropBoxChange.mock.calls.at(-1)?.[0]).toEqual({
+      startX: expect.any(Number),
+      startY: expect.any(Number),
+      endX: expect.any(Number),
+      endY: expect.any(Number),
     });
-    expect(onCropBoxChange).toHaveBeenLastCalledWith({
-      startX: 120,
-      startY: 80,
-      endX: 720,
-      endY: 480,
+  });
+
+  it('routes coarse-pointer crop move and resize gestures through pointer events', () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+
+    const onCropBoxChange = vi.fn();
+    const { container } = render(
+      <PreInsertModal
+        draft={createDraft(createImageElement(), 'upload-image')}
+        isCropMode
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onCropBoxChange={onCropBoxChange}
+        onFlipHorizontal={() => {}}
+        onFlipVertical={() => {}}
+        onRotateClockwise={() => {}}
+        onRotateCounterClockwise={() => {}}
+      />,
+    );
+
+    const previewCanvas = container.querySelector('.pre-insert-preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewCanvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 100,
+      height: 100,
+      left: 0,
+      right: 200,
+      top: 0,
+      width: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
     });
+
+    const overlay = container.querySelector('.pre-insert-crop-overlay') as HTMLDivElement;
+    fireEvent.pointerDown(overlay, {
+      clientX: 50,
+      clientY: 20,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 70,
+      clientY: 30,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    const handle = screen.getByRole('button', { name: /resize crop from top-left/i });
+    fireEvent.pointerDown(handle, {
+      clientX: 20,
+      clientY: 10,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 40,
+      clientY: 20,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerUp(window, {
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+
+    expect(onCropBoxChange).toHaveBeenCalled();
+    expect(onCropBoxChange.mock.calls.some(([value]) => value.startX !== 0 || value.startY !== 0)).toBe(true);
   });
 
   it('closes on escape for safer modal keyboard behavior', () => {

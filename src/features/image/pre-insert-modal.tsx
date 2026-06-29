@@ -31,11 +31,12 @@ type PreInsertModalProps = {
 
 type CropHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
 type CropInteraction =
-  | { type: 'new'; startX: number; startY: number }
-  | { type: 'move'; startX: number; startY: number; cropBox: NormalizedCropBox }
+  | { type: 'new'; pointerType: string; startX: number; startY: number }
+  | { type: 'move'; pointerType: string; startX: number; startY: number; cropBox: NormalizedCropBox }
   | {
       type: 'resize';
       handle: CropHandle;
+      pointerType: string;
       startX: number;
       startY: number;
       cropBox: NormalizedCropBox;
@@ -65,8 +66,7 @@ export function PreInsertModal({
   const cropInteractionRef = useRef<CropInteraction | null>(null);
   const isAdvancedImport = isAdvancedImportSourceKind(draft.pendingSource.sourceKind);
   const isUrlImport = isUrlImportSourceKind(draft.pendingSource.sourceKind);
-  const supportsCropMode = !isCoarsePointerEnvironment();
-  const effectiveCropMode = supportsCropMode && isCropMode;
+  const effectiveCropMode = isCropMode;
   const hasLoadedImage = Boolean(draft.pendingSource.image);
   const previewSize = hasLoadedImage
     ? resolvePreparedOutputDimensions({
@@ -171,9 +171,13 @@ export function PreInsertModal({
   ]);
 
   useEffect(() => {
-    function handleMouseMove(event: MouseEvent) {
+    function handlePointerMove(event: PointerEvent) {
       if (!effectiveCropMode || !cropInteractionRef.current) {
         return;
+      }
+
+      if (cropInteractionRef.current.pointerType === 'touch') {
+        event.preventDefault();
       }
 
       const sourcePoint = resolveCropSourcePoint(
@@ -229,16 +233,18 @@ export function PreInsertModal({
       onCropBoxChange?.(toCropDraftBox(nextBox));
     }
 
-    function handleMouseUp() {
+    function handlePointerEnd() {
       cropInteractionRef.current = null;
     }
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerEnd);
+    window.addEventListener('pointercancel', handlePointerEnd);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
     };
   }, [
     draft.flipHorizontal,
@@ -321,9 +327,14 @@ export function PreInsertModal({
             <div
               className={`pre-insert-preview${effectiveCropMode ? ' pre-insert-preview-crop-mode' : ''}`}
               aria-label="Pre-insert preview"
-              onMouseDown={(event) => {
+              style={effectiveCropMode ? { touchAction: 'none', overscrollBehavior: 'contain' } : undefined}
+              onPointerDown={(event) => {
                 if (!effectiveCropMode) {
                   return;
+                }
+
+                if (event.pointerType === 'touch') {
+                  event.preventDefault();
                 }
 
                 const sourcePoint = resolveCropSourcePoint(
@@ -343,6 +354,7 @@ export function PreInsertModal({
                 event.preventDefault();
                 cropInteractionRef.current = {
                   type: 'new',
+                  pointerType: event.pointerType,
                   startX: sourcePoint.x,
                   startY: sourcePoint.y,
                 };
@@ -365,10 +377,18 @@ export function PreInsertModal({
                   {cropOverlayStyle ? (
                     <div
                       className={`pre-insert-crop-overlay${effectiveCropMode ? ' pre-insert-crop-overlay-interactive' : ''}`}
-                      style={cropOverlayStyle}
-                      onMouseDown={(event) => {
+                      style={
+                        effectiveCropMode
+                          ? { ...cropOverlayStyle, touchAction: 'none', overscrollBehavior: 'contain' }
+                          : cropOverlayStyle
+                      }
+                      onPointerDown={(event) => {
                         if (!effectiveCropMode || !draft.cropBox) {
                           return;
+                        }
+
+                        if (event.pointerType === 'touch') {
+                          event.preventDefault();
                         }
 
                         const normalizedCropBox = normalizeCropDraftBox(
@@ -394,6 +414,7 @@ export function PreInsertModal({
                         event.stopPropagation();
                         cropInteractionRef.current = {
                           type: 'move',
+                          pointerType: event.pointerType,
                           startX: sourcePoint.x,
                           startY: sourcePoint.y,
                           cropBox: normalizedCropBox,
@@ -409,9 +430,14 @@ export function PreInsertModal({
                               type="button"
                               className={`pre-insert-crop-handle pre-insert-crop-handle-${handle}`}
                               aria-label={`Resize crop from ${handle}`}
-                              onMouseDown={(event) => {
+                              style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
+                              onPointerDown={(event) => {
                                 if (!draft.cropBox) {
                                   return;
+                                }
+
+                                if (event.pointerType === 'touch') {
+                                  event.preventDefault();
                                 }
 
                                 const normalizedCropBox = normalizeCropDraftBox(
@@ -437,6 +463,7 @@ export function PreInsertModal({
                                 cropInteractionRef.current = {
                                   type: 'resize',
                                   handle,
+                                  pointerType: event.pointerType,
                                   startX: sourcePoint.x,
                                   startY: sourcePoint.y,
                                   cropBox: normalizedCropBox,
@@ -563,23 +590,6 @@ function getFocusableElements(container: HTMLElement) {
   ).filter((element) => {
     return element.tabIndex >= 0 && !element.hasAttribute('aria-hidden');
   });
-}
-
-function isCoarsePointerEnvironment() {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  if (typeof window.matchMedia === 'function') {
-    if (
-      window.matchMedia('(pointer: coarse)').matches ||
-      window.matchMedia('(any-pointer: coarse)').matches
-    ) {
-      return true;
-    }
-  }
-
-  return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
 }
 
 function isAdvancedImportSourceKind(sourceKind: PreInsertModalDraft['pendingSource']['sourceKind']) {

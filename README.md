@@ -17,7 +17,7 @@ Current repo state:
 - clipboard paste, direct image URL import, and file upload
 - top action bar with compact icon-only actions and delayed tooltips
 - right-side inspector with full-width tabs for `Layers`, `Crop`, `Adjustments`, `Draw`, `Effects`, `Watermark`, `Experimental`, and a right-edge `Templates` tab kept outside the main canvas flow during local QC
-- advanced `Upload Image` / `Paste image URL` / `Advanced import` pre-insert modal with crop, rotate, and flip
+- advanced `Upload Image` / `Paste image URL` / `Advanced import` pre-insert modal with crop, rotate, and flip, including touch-safe one-finger crop editing on phone
 - scene crop with draggable crop box, resize handles, and scene-level rotate / flip actions for the image stack
 - canvas expansion with transparent, solid, sampled-edge, and average-border fill
 - expansion presets for equal margin, top caption space, bottom caption space, and square canvas
@@ -25,9 +25,9 @@ Current repo state:
 - scene-wide `Adjustments` for brightness, contrast, saturation, hue, grayscale, sepia, and invert, with `Apply to text` scope toggle
 - reorderable `Effects` stack for blur, sharpen, threshold, pixelate, noise, grain, posterize, and JPEG degrade
 - scene-wide watermark modes for centered, corner, tiled, and diagonal text overlays with dedicated corner selection, tile rotation, and independent color, opacity, and size controls
-- text layer editing, reorder, move, resize, and rotate
+- text layer editing, reorder, one-finger move, two-finger scale / rotate, resize, and rotate-handle support
 - inline canvas text editing with multiline entry and live box-fit recovery after line removal
-- image layer insert, reorder, move, resize, rotate, and remove
+- image layer insert, reorder, one-finger move, two-finger scale / rotate, resize, rotate, and remove
 - draw layers with committed raster strokes in preview, clipboard copy, and PNG export
 - draw and erase modes with draft stroke preview, draw-layer-only erase commits, stroke undo, and pointer-cancel cleanup
 - draw inspector controls for `Draw`, `New draw layer`, conditional `Erase`, and brush color, size, opacity, and soft edge
@@ -39,12 +39,13 @@ Current repo state:
 - meme template picker with square preview tiles in a dedicated inspector `Templates` tab that applies whatever is currently in the shipped catalog, while localhost curation remains a separate draft workflow instead of forcing starter presets into the workspace
 - native `.melf` scene document normalization for local save/reopen work, covering embedded base-image payloads plus editable text, image, and draw layers without serializing transient editor UI state
 - top-bar `Open .melf` and `Save .melf` actions for native local save/reopen, preferring browser file-picker handles for overwrite and falling back to hidden file-input open plus downloadable `.melf` files when needed
+- top-bar `New canvas` action that resets the current scene to a clean default canvas without reviving stale recovery state
 - dedicated inspector `Saves` tab for reopening recent local `.melf` scenes from browser storage, removing stale recent entries, and recovering or dismissing interrupted mobile recovery drafts without putting saved-work UX into the main canvas flow
 - preview zoom with `1:1`, `Fit`, mouse-wheel zoom, and middle-mouse pan for desktop editing
 - responsive mobile shell foundation with phone preview-first stacking, collapsed inspector access, phone top-bar `Upload` / `Paste URL` / theme actions kept inline, fixed bottom mobile primary actions, a single-row phone `preview-toolbar` with the `MEME` title removed from that compact header, touch taps that clear delayed-tooltip focus state on icon buttons, placeholder-and-import preview auto-fit, viewport-height / keyboard-aware layout state, and a `Tools` toggle flow that scrolls to the inspector tab row on open and back to the top bar on close
 - mobile interaction policy helpers that explicitly arbitrate touch pan, draw, crop, selection, and transform ownership
 - explicit preview touch scroll suppression so active canvas gestures stay on the canvas instead of turning into page scroll on phone
-- touch-oriented focus cues with larger preview handles for crop and transform work, localhost-only mobile debug status details, and a coarse-pointer fallback that hides pre-insert `Crop mode` until touch-safe parity is in place
+- touch-oriented focus cues with larger preview handles for crop and transform work, localhost-only mobile debug status details, direct touch crop handles in `Prepare image`, and gesture ownership that keeps active layer transforms from falling through into preview pinch zoom
 - phone retouch session bars that move `Draw`, `Erase`, `Pick color`, `Select`, and selection extraction actions to the bottom edge while keeping brush settings in the `Draw` tab
 - experimental retouch now has an explicit phone fallback posture: clone stamp stays desktop-only on phone instead of exposing a brittle touch flow
 - mobile clipboard import fallback guidance, touch-tap inline text editing on the active text layer, outside-tap dismissal for active text focus and inline editing, canvas-first phone text editing that keeps `Tools` collapsed until explicitly opened, and phone copy fallback that opens a long-press-ready finished-image modal with bottom-edge download and close icon actions when direct clipboard image write is unavailable or blocked
@@ -64,6 +65,7 @@ Known alpha behavior:
 - watermarks render as a separate scene-level overlay in their own `Watermark` tab instead of becoming normal text layers
 - watermark defaults now start enabled with `создано в программе meme-elf` in gray `Arial` at `50%` opacity and `12px`, using the lower-left corner preset
 - if a phone browser interrupts or reloads the session, the app restores the latest mobile draft as a flattened base image rather than reconstructing the full editable layer stack
+- loading a new base image, opening a saved scene, or pressing `New canvas` clears the transient mobile recovery snapshot so stale image/text state cannot reappear in the next session
 - healing, seamless patch, and content-aware repair remain deferred research outcomes rather than shipped editor tools
 
 Current desktop layout conventions:

@@ -2567,6 +2567,51 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: /bottom text/i })).toHaveValue('STILL EDITABLE');
   });
 
+  it('clears stale mobile recovery snapshots when a new base image is confirmed', async () => {
+    window.innerWidth = 680;
+    window.sessionStorage.setItem(
+      MOBILE_RECOVERY_STORAGE_KEY,
+      JSON.stringify({
+        canvasSize: { width: 1200, height: 800 },
+        imageDataUrl: 'data:image/png;base64,stale-recovery',
+        version: 1,
+        width: 1200,
+        height: 800,
+        textLayers: [
+          {
+            allCaps: true,
+            bold: false,
+            box: { x: 24, y: 0, width: 1128, height: 196, rotation: 0 },
+            effect: 'outline',
+            fillStyle: '#ffffff',
+            fontFamily: 'Impact',
+            fontSize: 120,
+            id: 'top',
+            italic: false,
+            kind: 'text',
+            name: 'Top text',
+            opacity: 1,
+            outlineWidth: 6,
+            strokeStyle: '#000000',
+            text: 'STALE',
+            textAlign: 'center',
+            verticalAlign: 'top',
+          },
+        ],
+      }),
+    );
+
+    const file = new File(['fresh-image'], 'fresh-base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 500));
+    mocks.loadImageElementFromUrl.mockResolvedValue(createImageStub(1200, 800));
+
+    render(<App />);
+
+    await uploadBaseImage(file, 900);
+
+    expect(window.sessionStorage.getItem(MOBILE_RECOVERY_STORAGE_KEY)).toBeNull();
+  });
+
   it('restores text-only mobile recovery snapshots when raster recovery could not fit into phone storage', async () => {
     window.innerWidth = 680;
     window.sessionStorage.setItem(
@@ -3910,6 +3955,26 @@ describe('App', () => {
     });
 
     expect(uploadButton).toHaveFocus();
+  });
+
+  it('starts a fresh default canvas from the New action', async () => {
+    const baseFile = new File(['base-image'], 'existing-base.png', { type: 'image/png' });
+    mocks.loadImageElementFromFile.mockResolvedValue(createImageStub(900, 500));
+
+    render(<App />);
+
+    await uploadBaseImage(baseFile, 900);
+    fireEvent.change(screen.getByRole('textbox', { name: /top text/i }), {
+      target: { value: 'OLD TEXT' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /new canvas/i }));
+
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
+    expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('height', '450');
+    expect(screen.getByRole('textbox', { name: /top text/i })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: /bottom text/i })).toHaveValue('');
+    expect(screen.getByText(/started a new canvas\./i)).toBeInTheDocument();
   });
 
   it('keeps an in-flight upload-image request in the base-image flow even if advanced import starts before file decode resolves', async () => {
