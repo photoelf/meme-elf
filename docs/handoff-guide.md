@@ -15,7 +15,7 @@ It explains:
 
 Read in this order:
 
-1. [AGENTS.md](/D:/PETS/meme-elf/AGENTS.md)
+1. [CLAUDE.md](/D:/PETS/meme-elf/CLAUDE.md)
 2. [docs/README.md](/D:/PETS/meme-elf/docs/README.md)
 3. [design.md](/D:/PETS/meme-elf/design.md)
 4. [docs/2026-06-04-roadmap.md](/D:/PETS/meme-elf/docs/2026-06-04-roadmap.md)
