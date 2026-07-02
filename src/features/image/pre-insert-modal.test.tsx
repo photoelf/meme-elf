@@ -4,6 +4,29 @@ import { beforeEach, vi } from 'vitest';
 import type { PreInsertModalDraft } from '../../app/types';
 import { PreInsertModal } from './pre-insert-modal';
 
+function dispatchPointerEvent(
+  target: EventTarget,
+  type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+  init: {
+    button?: number;
+    clientX?: number;
+    clientY?: number;
+    pointerId?: number;
+    pointerType?: string;
+  },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+
+  for (const [key, value] of Object.entries(init)) {
+    Object.defineProperty(event, key, {
+      configurable: true,
+      value,
+    });
+  }
+
+  fireEvent(target, event);
+}
+
 describe('PreInsertModal', () => {
   const canvasContextSpy = {
     clearRect: vi.fn(),
@@ -363,6 +386,183 @@ describe('PreInsertModal', () => {
 
     expect(onCropBoxChange).toHaveBeenCalled();
     expect(onCropBoxChange.mock.calls.some(([value]) => value.startX !== 0 || value.startY !== 0)).toBe(true);
+  });
+
+  it('keeps window crop-drag listeners attached when onCropBoxChange identity changes', () => {
+    const stableHandlers = {
+      onCancel: () => {},
+      onConfirm: () => {},
+      onFlipHorizontal: () => {},
+      onFlipVertical: () => {},
+      onRotateClockwise: () => {},
+      onRotateCounterClockwise: () => {},
+    };
+    const draft = createDraft(createImageElement());
+    const { rerender } = render(
+      <PreInsertModal
+        draft={draft}
+        isCropMode
+        onCropBoxChange={() => {}}
+        {...stableHandlers}
+      />,
+    );
+
+    const addListenerSpy = vi.spyOn(window, 'addEventListener');
+    const removeListenerSpy = vi.spyOn(window, 'removeEventListener');
+
+    rerender(
+      <PreInsertModal
+        draft={draft}
+        isCropMode
+        onCropBoxChange={() => {}}
+        {...stableHandlers}
+      />,
+    );
+
+    const pointerEventTypes = ['pointermove', 'pointerup', 'pointercancel'];
+    const resubscribed = addListenerSpy.mock.calls.filter(([type]) =>
+      pointerEventTypes.includes(type as string),
+    );
+    const unsubscribed = removeListenerSpy.mock.calls.filter(([type]) =>
+      pointerEventTypes.includes(type as string),
+    );
+
+    addListenerSpy.mockRestore();
+    removeListenerSpy.mockRestore();
+
+    expect(unsubscribed).toEqual([]);
+    expect(resubscribed).toEqual([]);
+  });
+
+  it('stops resizing a crop handle after mouse pointerup', () => {
+    const onCropBoxChange = vi.fn();
+    const { container } = render(
+      <PreInsertModal
+        draft={createDraft(createImageElement())}
+        isCropMode
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onCropBoxChange={onCropBoxChange}
+        onFlipHorizontal={() => {}}
+        onFlipVertical={() => {}}
+        onRotateClockwise={() => {}}
+        onRotateCounterClockwise={() => {}}
+      />,
+    );
+
+    const previewCanvas = container.querySelector('.pre-insert-preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewCanvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 100,
+      height: 100,
+      left: 0,
+      right: 200,
+      top: 0,
+      width: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const handle = screen.getByRole('button', { name: /resize crop from bottom-right/i });
+    fireEvent.pointerDown(handle, {
+      button: 0,
+      clientX: 180,
+      clientY: 90,
+      pointerId: 5,
+      pointerType: 'mouse',
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 150,
+      clientY: 70,
+      pointerId: 5,
+      pointerType: 'mouse',
+    });
+
+    expect(onCropBoxChange).toHaveBeenCalled();
+
+    fireEvent.pointerUp(window, {
+      pointerId: 5,
+      pointerType: 'mouse',
+    });
+    onCropBoxChange.mockClear();
+
+    fireEvent.pointerMove(window, {
+      clientX: 60,
+      clientY: 30,
+      pointerId: 5,
+      pointerType: 'mouse',
+    });
+
+    expect(onCropBoxChange).not.toHaveBeenCalled();
+  });
+
+  it('ends a crop drag only for the matching pointerId', () => {
+    const onCropBoxChange = vi.fn();
+    const { container } = render(
+      <PreInsertModal
+        draft={createDraft(createImageElement())}
+        isCropMode
+        onCancel={() => {}}
+        onConfirm={() => {}}
+        onCropBoxChange={onCropBoxChange}
+        onFlipHorizontal={() => {}}
+        onFlipVertical={() => {}}
+        onRotateClockwise={() => {}}
+        onRotateCounterClockwise={() => {}}
+      />,
+    );
+
+    const previewCanvas = container.querySelector('.pre-insert-preview-canvas') as HTMLCanvasElement;
+    vi.spyOn(previewCanvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 100,
+      height: 100,
+      left: 0,
+      right: 200,
+      top: 0,
+      width: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const handle = screen.getByRole('button', { name: /resize crop from bottom-right/i });
+    dispatchPointerEvent(handle, 'pointerdown', {
+      button: 0,
+      clientX: 180,
+      clientY: 90,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    dispatchPointerEvent(window, 'pointerup', {
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    onCropBoxChange.mockClear();
+
+    dispatchPointerEvent(window, 'pointermove', {
+      clientX: 150,
+      clientY: 70,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onCropBoxChange).toHaveBeenCalled();
+
+    dispatchPointerEvent(window, 'pointerup', {
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    onCropBoxChange.mockClear();
+
+    dispatchPointerEvent(window, 'pointermove', {
+      clientX: 60,
+      clientY: 30,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+
+    expect(onCropBoxChange).not.toHaveBeenCalled();
   });
 
   it('closes on escape for safer modal keyboard behavior', () => {

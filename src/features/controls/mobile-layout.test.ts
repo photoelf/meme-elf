@@ -38,7 +38,7 @@ describe('resolveTopbarActionLayout', () => {
   it('keeps all actions inline on desktop', () => {
     expect(resolveTopbarActionLayout('desktop')).toEqual({
       overflow: [],
-      primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
+      primary: ['new-canvas', 'paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
       sticky: [],
     });
   });
@@ -46,15 +46,15 @@ describe('resolveTopbarActionLayout', () => {
   it('moves only secondary actions into overflow on small tablet', () => {
     expect(resolveTopbarActionLayout('small-tablet')).toEqual({
       overflow: [],
-      primary: ['paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
+      primary: ['new-canvas', 'paste', 'upload', 'url', 'open-scene', 'save-scene', 'copy', 'download', 'theme'],
       sticky: [],
     });
   });
 
   it('uses a compact top bar and sticky primary actions on phone', () => {
     expect(resolveTopbarActionLayout('phone')).toEqual({
-      overflow: ['open-scene', 'save-scene', 'theme'],
-      primary: ['paste', 'upload', 'url'],
+      overflow: ['new-canvas', 'open-scene', 'save-scene', 'theme'],
+      primary: ['upload', 'url'],
       sticky: ['copy', 'download', 'tools'],
     });
   });

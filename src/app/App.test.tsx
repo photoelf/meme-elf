@@ -9,6 +9,29 @@ import {
   setShellServiceWorkerStateForTests,
 } from '../features/pwa/pwa-service';
 
+function dispatchPointerEvent(
+  target: EventTarget,
+  type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+  init: {
+    button?: number;
+    clientX?: number;
+    clientY?: number;
+    pointerId?: number;
+    pointerType?: string;
+  },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+
+  for (const [key, value] of Object.entries(init)) {
+    Object.defineProperty(event, key, {
+      configurable: true,
+      value,
+    });
+  }
+
+  fireEvent(target, event);
+}
+
 const mocks = vi.hoisted(() => ({
   extractImageFromPasteEvent: vi.fn(),
   extractImageUrlFromPasteEvent: vi.fn(),
@@ -1428,7 +1451,7 @@ describe('App', () => {
     expect(screen.getByLabelText(/meme preview canvas/i)).toHaveAttribute('width', '800');
   });
 
-  it('hides crop mode in the upload-image modal on coarse-pointer devices', async () => {
+  it('keeps crop handles interactive in the upload-image modal on coarse-pointer devices', async () => {
     window.innerWidth = 680;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === '(pointer: coarse)' || query === '(any-pointer: coarse)',
@@ -1457,7 +1480,7 @@ describe('App', () => {
 
     expect(screen.getByText(/^upload image$/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /crop mode/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /resize crop from top-left/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resize crop from top-left/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /rotate 90 clockwise/i })).toBeInTheDocument();
   });
 
@@ -4149,15 +4172,23 @@ describe('App', () => {
       toJSON: () => ({}),
     });
 
-    fireEvent.mouseDown(screen.getByLabelText(/pre-insert preview/i), {
-      clientX: 30,
-      clientY: 20,
+    dispatchPointerEvent(screen.getByRole('button', { name: /resize crop from bottom-right/i }), 'pointerdown', {
+      button: 0,
+      clientX: 300,
+      clientY: 200,
+      pointerId: 1,
+      pointerType: 'mouse',
     });
-    fireEvent.mouseMove(window, {
-      clientX: 180,
-      clientY: 120,
+    dispatchPointerEvent(window, 'pointermove', {
+      clientX: 150,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'mouse',
     });
-    fireEvent.mouseUp(window);
+    dispatchPointerEvent(window, 'pointerup', {
+      pointerId: 1,
+      pointerType: 'mouse',
+    });
 
     await waitFor(() => {
       expect(screen.getByText('600 x 400')).toBeInTheDocument();

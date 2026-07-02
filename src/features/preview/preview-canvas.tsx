@@ -1160,6 +1160,36 @@ export function PreviewCanvas({
     );
   }
 
+  function startSelectionDraft(clientX: number, clientY: number, pointerType: string) {
+    if (!selectionTargetRect) {
+      return;
+    }
+
+    const point = getCanvasPoint(shellRef.current, width, height, clientX, clientY);
+
+    if (!point) {
+      return;
+    }
+
+    const startX = clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width);
+    const startY = clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height);
+
+    selectionInteractionRef.current = true;
+    setEditingLayerId(null);
+    setIsInteracting(true);
+    updateMobileInteraction('select', {
+      activeTargetId: activeLayerId,
+      pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
+    });
+    onDocumentInteractionStart?.();
+    onSelectionDraftChange?.({
+      startX,
+      startY,
+      endX: startX,
+      endY: startY,
+    });
+  }
+
   useEffect(() => {
     const canvas = resolvedCanvasRef.current;
 
@@ -1755,6 +1785,20 @@ export function PreviewCanvas({
             return;
           }
 
+          if (
+            !isSceneCropMode &&
+            retouchMode === 'select' &&
+            pointerType !== 'touch' &&
+            event.target === event.currentTarget &&
+            event.button !== 1 &&
+            event.button !== 2 &&
+            !selectionInteractionRef.current
+          ) {
+            event.preventDefault();
+            startSelectionDraft(event.clientX, event.clientY, pointerType);
+            return;
+          }
+
           if (!isSceneCropMode) {
             return;
           }
@@ -1900,20 +1944,7 @@ export function PreviewCanvas({
               }
 
               event.preventDefault();
-              selectionInteractionRef.current = true;
-              setEditingLayerId(null);
-              setIsInteracting(true);
-              updateMobileInteraction('select', {
-                activeTargetId: activeLayerId,
-                pointerType: pointerType === 'touch' ? 'touch' : mobileInteraction.lastPointerType,
-              });
-              onDocumentInteractionStart?.();
-              onSelectionDraftChange?.({
-                startX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
-                startY: clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height),
-                endX: clamp(point.x, selectionTargetRect.x, selectionTargetRect.x + selectionTargetRect.width),
-                endY: clamp(point.y, selectionTargetRect.y, selectionTargetRect.y + selectionTargetRect.height),
-              });
+              startSelectionDraft(event.clientX, event.clientY, pointerType);
               return;
             }
 

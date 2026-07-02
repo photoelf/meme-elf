@@ -305,6 +305,216 @@ describe('preview-canvas helpers', () => {
     expect(idleResult.container.querySelector('.selection-overlay')).toBeInTheDocument();
   });
 
+  it('starts a clamped selection marquee from a workspace pointerdown outside the canvas', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onSelectionDraftChange = vi.fn();
+    const onSelectionDraftCommit = vi.fn();
+    const onDocumentInteractionStart = vi.fn();
+    const props = {
+      activeLayerId: null,
+      height: 450,
+      image: null,
+      isStageHovered: true,
+      layers: [],
+      onActiveLayerChange: vi.fn(),
+      onDocumentInteractionStart,
+      onLayerChange: vi.fn(),
+      onSelectionDraftChange,
+      onSelectionDraftCommit,
+      retouchMode: 'select',
+      selectionTargetRect: { x: 0, y: 0, width: 800, height: 450 },
+      width: 800,
+    } as const;
+    const { container, rerender } = render(createElement(PreviewCanvas, props));
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 500,
+      height: 450,
+      left: 100,
+      right: 900,
+      top: 50,
+      width: 800,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    const viewportContent = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    dispatchPointerEvent(viewportContent, 'pointerdown', {
+      button: 0,
+      clientX: 40,
+      clientY: 20,
+      pointerId: 1,
+    });
+
+    expect(onDocumentInteractionStart).toHaveBeenCalledTimes(1);
+    expect(onSelectionDraftChange).toHaveBeenLastCalledWith({
+      startX: 0,
+      startY: 0,
+      endX: 0,
+      endY: 0,
+    });
+
+    rerender(
+      createElement(PreviewCanvas, {
+        ...props,
+        selectionDraft: { startX: 0, startY: 0, endX: 0, endY: 0 },
+      }),
+    );
+
+    dispatchPointerEvent(window, 'pointermove', { clientX: 1000, clientY: 300, pointerId: 1 });
+
+    expect(onSelectionDraftChange).toHaveBeenLastCalledWith({
+      startX: 0,
+      startY: 0,
+      endX: 800,
+      endY: 250,
+    });
+
+    dispatchPointerEvent(window, 'pointerup', { pointerId: 1 });
+
+    expect(onSelectionDraftCommit).toHaveBeenCalledWith({
+      startX: 0,
+      startY: 0,
+      endX: 800,
+      endY: 250,
+    });
+  });
+
+  it('keeps workspace touch pointerdown as preview pan while select mode is active', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onSelectionDraftChange = vi.fn();
+    const onPreviewPanStart = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: true,
+        layers: [],
+        onActiveLayerChange: vi.fn(),
+        onLayerChange: vi.fn(),
+        onPreviewPanStart,
+        onSelectionDraftChange,
+        retouchMode: 'select',
+        selectionTargetRect: { x: 0, y: 0, width: 800, height: 450 },
+        width: 800,
+      }),
+    );
+
+    const viewportContent = container.querySelector('.preview-viewport-content') as HTMLDivElement;
+    dispatchPointerEvent(viewportContent, 'pointerdown', {
+      button: 0,
+      clientX: 40,
+      clientY: 20,
+      pointerId: 7,
+      pointerType: 'touch',
+    });
+
+    expect(onPreviewPanStart).toHaveBeenCalledTimes(1);
+    expect(onSelectionDraftChange).not.toHaveBeenCalled();
+  });
+
+  it('does not start a second marquee when the pointerdown lands on the canvas', () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      getImageData: vi.fn(),
+      measureText: vi.fn(() => ({ width: 10 })),
+      putImageData: vi.fn(),
+      restore: vi.fn(),
+      rotate: vi.fn(),
+      save: vi.fn(),
+      scale: vi.fn(),
+      strokeText: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+
+    const onSelectionDraftChange = vi.fn();
+    const onDocumentInteractionStart = vi.fn();
+    const { container } = render(
+      createElement(PreviewCanvas, {
+        activeLayerId: null,
+        height: 450,
+        image: null,
+        isStageHovered: true,
+        layers: [],
+        onActiveLayerChange: vi.fn(),
+        onDocumentInteractionStart,
+        onLayerChange: vi.fn(),
+        onSelectionDraftChange,
+        retouchMode: 'select',
+        selectionTargetRect: { x: 0, y: 0, width: 800, height: 450 },
+        width: 800,
+      }),
+    );
+
+    const surface = container.querySelector('.preview-surface') as HTMLDivElement;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      bottom: 500,
+      height: 450,
+      left: 100,
+      right: 900,
+      top: 50,
+      width: 800,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    dispatchPointerEvent(surface, 'pointerdown', {
+      button: 0,
+      clientX: 300,
+      clientY: 200,
+      pointerId: 1,
+    });
+
+    expect(onDocumentInteractionStart).toHaveBeenCalledTimes(1);
+    expect(onSelectionDraftChange).toHaveBeenCalledTimes(1);
+    expect(onSelectionDraftChange).toHaveBeenLastCalledWith({
+      startX: 200,
+      startY: 150,
+      endX: 200,
+      endY: 150,
+    });
+  });
+
   it('sets a clone source on alt-click without starting a draft stroke', () => {
     const context = {
       clearRect: vi.fn(),

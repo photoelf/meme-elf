@@ -1,4 +1,9 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   normalizeCropDraftBox,
   resolvePreparedOutputDimensions,
@@ -29,13 +34,30 @@ type PreInsertModalProps = {
   restoreFocusTo?: HTMLElement | null;
 };
 
+type CropDragContext = {
+  effectiveCropMode: boolean;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+  onCropBoxChange: PreInsertModalProps['onCropBoxChange'];
+  rotationQuarterTurns: PreInsertModalDraft['rotationQuarterTurns'];
+  sourceSize: { width: number; height: number };
+};
+
 type CropHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
 type CropInteraction =
-  | { type: 'new'; pointerType: string; startX: number; startY: number }
-  | { type: 'move'; pointerType: string; startX: number; startY: number; cropBox: NormalizedCropBox }
+  | { type: 'new'; pointerId: number; pointerType: string; startX: number; startY: number }
+  | {
+      type: 'move';
+      pointerId: number;
+      pointerType: string;
+      startX: number;
+      startY: number;
+      cropBox: NormalizedCropBox;
+    }
   | {
       type: 'resize';
       handle: CropHandle;
+      pointerId: number;
       pointerType: string;
       startX: number;
       startY: number;
@@ -64,6 +86,7 @@ export function PreInsertModal({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cropInteractionRef = useRef<CropInteraction | null>(null);
+  const latestCropDragContextRef = useRef<CropDragContext | null>(null);
   const isAdvancedImport = isAdvancedImportSourceKind(draft.pendingSource.sourceKind);
   const isUrlImport = isUrlImportSourceKind(draft.pendingSource.sourceKind);
   const effectiveCropMode = isCropMode;
@@ -171,12 +194,30 @@ export function PreInsertModal({
   ]);
 
   useEffect(() => {
+    latestCropDragContextRef.current = {
+      effectiveCropMode,
+      flipHorizontal: draft.flipHorizontal,
+      flipVertical: draft.flipVertical,
+      onCropBoxChange,
+      rotationQuarterTurns: draft.rotationQuarterTurns,
+      sourceSize: draft.pendingSource.sourceSize,
+    };
+  });
+
+  // The window listeners must stay attached for the whole modal lifetime:
+  // removing them mid-`pointerup` dispatch (effect cleanup during a React
+  // flush triggered by another window listener) makes the browser skip the
+  // end-of-drag handler, leaving the crop box stuck to the cursor.
+  useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
-      if (!effectiveCropMode || !cropInteractionRef.current) {
+      const interaction = cropInteractionRef.current;
+      const context = latestCropDragContextRef.current;
+
+      if (!context || !context.effectiveCropMode || !interaction || interaction.pointerId !== event.pointerId) {
         return;
       }
 
-      if (cropInteractionRef.current.pointerType === 'touch') {
+      if (interaction.pointerType === 'touch') {
         event.preventDefault();
       }
 
@@ -184,20 +225,18 @@ export function PreInsertModal({
         previewCanvasRef.current,
         event.clientX,
         event.clientY,
-        draft.pendingSource.sourceSize,
-        draft.rotationQuarterTurns,
-        draft.flipHorizontal,
-        draft.flipVertical,
+        context.sourceSize,
+        context.rotationQuarterTurns,
+        context.flipHorizontal,
+        context.flipVertical,
       );
 
       if (!sourcePoint) {
         return;
       }
 
-      const interaction = cropInteractionRef.current;
-
       if (interaction.type === 'new') {
-        onCropBoxChange?.({
+        context.onCropBoxChange?.({
           startX: interaction.startX,
           startY: interaction.startY,
           endX: sourcePoint.x,
@@ -213,10 +252,10 @@ export function PreInsertModal({
             x: interaction.cropBox.x + (sourcePoint.x - interaction.startX),
             y: interaction.cropBox.y + (sourcePoint.y - interaction.startY),
           },
-          draft.pendingSource.sourceSize,
+          context.sourceSize,
         );
 
-        onCropBoxChange?.(toCropDraftBox(nextBox));
+        context.onCropBoxChange?.(toCropDraftBox(nextBox));
         return;
       }
 
@@ -227,14 +266,16 @@ export function PreInsertModal({
           x: sourcePoint.x,
           y: sourcePoint.y,
         },
-        draft.pendingSource.sourceSize,
+        context.sourceSize,
       );
 
-      onCropBoxChange?.(toCropDraftBox(nextBox));
+      context.onCropBoxChange?.(toCropDraftBox(nextBox));
     }
 
-    function handlePointerEnd() {
-      cropInteractionRef.current = null;
+    function handlePointerEnd(event: PointerEvent) {
+      if (cropInteractionRef.current?.pointerId === event.pointerId) {
+        cropInteractionRef.current = null;
+      }
     }
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -246,14 +287,7 @@ export function PreInsertModal({
       window.removeEventListener('pointerup', handlePointerEnd);
       window.removeEventListener('pointercancel', handlePointerEnd);
     };
-  }, [
-    draft.flipHorizontal,
-    draft.flipVertical,
-    draft.pendingSource.sourceSize,
-    draft.rotationQuarterTurns,
-    effectiveCropMode,
-    onCropBoxChange,
-  ]);
+  }, []);
 
   function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key !== 'Tab' || event.defaultPrevented) {
@@ -329,7 +363,7 @@ export function PreInsertModal({
               aria-label="Pre-insert preview"
               style={effectiveCropMode ? { touchAction: 'none', overscrollBehavior: 'contain' } : undefined}
               onPointerDown={(event) => {
-                if (!effectiveCropMode) {
+                if (!effectiveCropMode || cropInteractionRef.current) {
                   return;
                 }
 
@@ -352,8 +386,10 @@ export function PreInsertModal({
                 }
 
                 event.preventDefault();
+                capturePointer(event);
                 cropInteractionRef.current = {
                   type: 'new',
+                  pointerId: event.pointerId,
                   pointerType: event.pointerType,
                   startX: sourcePoint.x,
                   startY: sourcePoint.y,
@@ -383,7 +419,7 @@ export function PreInsertModal({
                           : cropOverlayStyle
                       }
                       onPointerDown={(event) => {
-                        if (!effectiveCropMode || !draft.cropBox) {
+                        if (!effectiveCropMode || !draft.cropBox || cropInteractionRef.current) {
                           return;
                         }
 
@@ -412,8 +448,10 @@ export function PreInsertModal({
 
                         event.preventDefault();
                         event.stopPropagation();
+                        capturePointer(event);
                         cropInteractionRef.current = {
                           type: 'move',
+                          pointerId: event.pointerId,
                           pointerType: event.pointerType,
                           startX: sourcePoint.x,
                           startY: sourcePoint.y,
@@ -432,7 +470,7 @@ export function PreInsertModal({
                               aria-label={`Resize crop from ${handle}`}
                               style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
                               onPointerDown={(event) => {
-                                if (!draft.cropBox) {
+                                if (!draft.cropBox || cropInteractionRef.current) {
                                   return;
                                 }
 
@@ -460,9 +498,11 @@ export function PreInsertModal({
 
                                 event.preventDefault();
                                 event.stopPropagation();
+                                capturePointer(event);
                                 cropInteractionRef.current = {
                                   type: 'resize',
                                   handle,
+                                  pointerId: event.pointerId,
                                   pointerType: event.pointerType,
                                   startX: sourcePoint.x,
                                   startY: sourcePoint.y,
@@ -580,6 +620,20 @@ export function PreInsertModal({
       </section>
     </div>
   );
+}
+
+function capturePointer(event: ReactPointerEvent<HTMLElement>) {
+  const target = event.currentTarget;
+
+  if (typeof target.setPointerCapture !== 'function') {
+    return;
+  }
+
+  try {
+    target.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is best-effort: the pointer may already be inactive.
+  }
 }
 
 function getFocusableElements(container: HTMLElement) {
